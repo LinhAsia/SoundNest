@@ -131,6 +131,11 @@ impl YoutubeAudioDownloader {
             .unwrap_or_else(|| self.download_dir.clone());
         that_detached(folder).context("unable to open folder")
     }
+
+    pub fn ensure_ffmpeg_available(&self) -> Result<PathBuf> {
+        ensure_ffmpeg_installed(&self.state, &self.bin_dir)?;
+        Ok(self.bin_dir.join("ffmpeg.exe"))
+    }
 }
 
 fn run_download_job(

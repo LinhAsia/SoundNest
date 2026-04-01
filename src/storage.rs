@@ -26,6 +26,22 @@ pub struct SoundEffect {
     pub waveform: Vec<f32>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct VideoAsset {
+    pub id: Uuid,
+    pub name: String,
+    pub asset_file: String,
+    pub duration_secs: f32,
+    #[serde(default)]
+    pub waveform: Vec<f32>,
+}
+
+impl VideoAsset {
+    pub fn asset_path(&self, storage_dir: &Path) -> PathBuf {
+        storage_dir.join("videos").join(&self.asset_file)
+    }
+}
+
 impl SoundEffect {
     pub fn asset_path(&self, storage_dir: &Path) -> PathBuf {
         storage_dir.join("sounds").join(&self.asset_file)
@@ -58,18 +74,31 @@ struct LibraryFile {
 }
 
 #[derive(Debug, Serialize, Deserialize, Default)]
+struct VideoLibraryFile {
+    videos: Vec<VideoAsset>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Default)]
 struct PreferencesFile {
     import_dir: Option<PathBuf>,
     pitch_update_hz: Option<f32>,
     overlay_animation: Option<bool>,
     pitch_show_sharps: Option<bool>,
+    library_grid_scale: Option<f32>,
+    dark_theme: Option<bool>,
+    record_hotkey: Option<String>,
+    startup_sound_name: Option<String>,
+    exit_sound_name: Option<String>,
 }
 
 pub struct Storage {
     root_dir: PathBuf,
     sounds_dir: PathBuf,
+    videos_dir: PathBuf,
+    settings_sounds_dir: PathBuf,
     exports_dir: PathBuf,
     library_path: PathBuf,
+    video_library_path: PathBuf,
     preferences_path: PathBuf,
 }
 
@@ -79,17 +108,26 @@ impl Storage {
             .context("unable to resolve app data directory")?;
         let root_dir = dirs.data_local_dir().to_path_buf();
         let sounds_dir = root_dir.join("sounds");
+        let videos_dir = root_dir.join("videos");
+        let settings_sounds_dir = root_dir.join("settings-sounds");
         let exports_dir = root_dir.join("exports");
         fs::create_dir_all(&sounds_dir).context("unable to create sounds directory")?;
+        fs::create_dir_all(&videos_dir).context("unable to create videos directory")?;
+        fs::create_dir_all(&settings_sounds_dir)
+            .context("unable to create settings sounds directory")?;
         fs::create_dir_all(&exports_dir).context("unable to create exports directory")?;
         let library_path = root_dir.join("library.json");
+        let video_library_path = root_dir.join("video_library.json");
         let preferences_path = root_dir.join("preferences.json");
 
         Ok(Self {
             root_dir,
             sounds_dir,
+            videos_dir,
+            settings_sounds_dir,
             exports_dir,
             library_path,
+            video_library_path,
             preferences_path,
         })
     }
@@ -124,6 +162,46 @@ impl Storage {
         };
         let json = serde_json::to_string_pretty(&payload).context("unable to serialize library")?;
         fs::write(&self.library_path, json).context("unable to write library file")?;
+        Ok(())
+    }
+
+    pub fn load_video_library(&self) -> Result<Vec<VideoAsset>> {
+        if !self.video_library_path.exists() {
+            return Ok(Vec::new());
+        }
+
+        let raw =
+            fs::read_to_string(&self.video_library_path).context("unable to read video library")?;
+        let mut library: VideoLibraryFile =
+            serde_json::from_str(&raw).context("invalid video library format")?;
+        library
+            .videos
+            .retain(|video| video.asset_path(&self.root_dir).exists());
+        let mut changed = false;
+        for video in &mut library.videos {
+            if video.waveform.is_empty()
+                && let Ok(analysis) = analyze_audio_file(&video.asset_path(&self.root_dir), 96)
+            {
+                video.waveform = analysis.waveform;
+                changed = true;
+            }
+        }
+        if changed {
+            let json = serde_json::to_string_pretty(&library)
+                .context("unable to serialize video library")?;
+            fs::write(&self.video_library_path, json)
+                .context("unable to write video library file")?;
+        }
+        Ok(library.videos)
+    }
+
+    pub fn save_video_library(&self, videos: &[VideoAsset]) -> Result<()> {
+        let payload = VideoLibraryFile {
+            videos: videos.to_vec(),
+        };
+        let json =
+            serde_json::to_string_pretty(&payload).context("unable to serialize video library")?;
+        fs::write(&self.video_library_path, json).context("unable to write video library file")?;
         Ok(())
     }
 
@@ -170,6 +248,95 @@ impl Storage {
     pub fn save_pitch_show_sharps(&self, enabled: bool) -> Result<()> {
         let mut preferences = self.load_preferences()?;
         preferences.pitch_show_sharps = Some(enabled);
+        self.save_preferences(&preferences)
+    }
+
+    pub fn load_library_grid_scale(&self) -> Result<Option<f32>> {
+        let preferences = self.load_preferences()?;
+        Ok(preferences
+            .library_grid_scale
+            .map(|value| value.clamp(0.72, 1.1)))
+    }
+
+    pub fn save_library_grid_scale(&self, scale: f32) -> Result<()> {
+        let mut preferences = self.load_preferences()?;
+        preferences.library_grid_scale = Some(scale.clamp(0.72, 1.1));
+        self.save_preferences(&preferences)
+    }
+
+    pub fn load_dark_theme(&self) -> Result<Option<bool>> {
+        let preferences = self.load_preferences()?;
+        Ok(preferences.dark_theme)
+    }
+
+    pub fn save_dark_theme(&self, enabled: bool) -> Result<()> {
+        let mut preferences = self.load_preferences()?;
+        preferences.dark_theme = Some(enabled);
+        self.save_preferences(&preferences)
+    }
+
+    pub fn load_record_hotkey(&self) -> Result<Option<String>> {
+        let preferences = self.load_preferences()?;
+        Ok(preferences.record_hotkey)
+    }
+
+    pub fn save_record_hotkey(&self, hotkey: Option<&str>) -> Result<()> {
+        let mut preferences = self.load_preferences()?;
+        preferences.record_hotkey = hotkey.map(str::to_owned);
+        self.save_preferences(&preferences)
+    }
+
+    pub fn load_startup_sound_name(&self) -> Result<Option<String>> {
+        let preferences = self.load_preferences()?;
+        Ok(preferences
+            .startup_sound_name
+            .filter(|_| self.startup_sound_path().exists()))
+    }
+
+    pub fn load_exit_sound_name(&self) -> Result<Option<String>> {
+        let preferences = self.load_preferences()?;
+        Ok(preferences
+            .exit_sound_name
+            .filter(|_| self.exit_sound_path().exists()))
+    }
+
+    pub fn startup_sound_path(&self) -> PathBuf {
+        self.settings_sounds_dir.join("startup.wav")
+    }
+
+    pub fn exit_sound_path(&self) -> PathBuf {
+        self.settings_sounds_dir.join("exit.wav")
+    }
+
+    pub fn save_startup_sound(&self, sound: &SoundEffect) -> Result<()> {
+        self.save_special_sound(sound, &self.startup_sound_path(), |preferences, name| {
+            preferences.startup_sound_name = Some(name);
+        })
+    }
+
+    pub fn save_exit_sound(&self, sound: &SoundEffect) -> Result<()> {
+        self.save_special_sound(sound, &self.exit_sound_path(), |preferences, name| {
+            preferences.exit_sound_name = Some(name);
+        })
+    }
+
+    pub fn clear_startup_sound(&self) -> Result<()> {
+        let path = self.startup_sound_path();
+        if path.exists() {
+            fs::remove_file(path).context("unable to remove startup sound")?;
+        }
+        let mut preferences = self.load_preferences()?;
+        preferences.startup_sound_name = None;
+        self.save_preferences(&preferences)
+    }
+
+    pub fn clear_exit_sound(&self) -> Result<()> {
+        let path = self.exit_sound_path();
+        if path.exists() {
+            fs::remove_file(path).context("unable to remove exit sound")?;
+        }
+        let mut preferences = self.load_preferences()?;
+        preferences.exit_sound_name = None;
         self.save_preferences(&preferences)
     }
 
@@ -258,15 +425,138 @@ impl Storage {
         Ok(())
     }
 
+    pub fn remove_video(&self, video: &VideoAsset) -> Result<()> {
+        let path = video.asset_path(&self.root_dir);
+        if path.exists() {
+            fs::remove_file(path).context("unable to delete video asset")?;
+        }
+        Ok(())
+    }
+
     pub fn export_processed_sound(&self, sound: &SoundEffect) -> Result<PathBuf> {
+        self.export_processed_sound_from_path(&sound.asset_path(&self.root_dir), sound)
+    }
+
+    pub fn export_processed_sound_from_path(
+        &self,
+        source_path: &Path,
+        sound: &SoundEffect,
+    ) -> Result<PathBuf> {
         let export_name = format!(
             "{}-{}.wav",
             sanitize_stem(&sound.name),
             &sound.id.to_string()[..8]
         );
         let export_path = self.exports_dir.join(export_name);
-        write_processed_wav(&sound.asset_path(&self.root_dir), &export_path, sound)?;
+        write_processed_wav(source_path, &export_path, sound)?;
         Ok(export_path)
+    }
+
+    pub fn analyze_sound_as_effect(&self, path: &Path, name: &str) -> Result<SoundEffect> {
+        let analysis = analyze_audio_file(path, WAVEFORM_BUCKETS)?;
+        let asset_file = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("recording.wav")
+            .to_owned();
+
+        Ok(SoundEffect {
+            id: Uuid::new_v4(),
+            name: name.to_owned(),
+            asset_file,
+            duration_secs: analysis.duration_secs,
+            volume: 1.0,
+            speed: 1.0,
+            trim_start_secs: 0.0,
+            trim_end_secs: analysis.duration_secs,
+            waveform: analysis.waveform,
+        })
+    }
+
+    pub fn import_video(
+        &self,
+        source_path: &Path,
+        name: &str,
+        duration_secs: f32,
+    ) -> Result<VideoAsset> {
+        if !source_path.exists() {
+            bail!("video file not found");
+        }
+
+        let extension = source_path
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or("mp4");
+        let id = Uuid::new_v4();
+        let asset_file = format!("{id}.{extension}");
+        let target_path = self.videos_dir.join(&asset_file);
+
+        fs::copy(source_path, &target_path).context("unable to copy exported video")?;
+        let waveform = analyze_audio_file(source_path, 96)
+            .map(|analysis| analysis.waveform)
+            .unwrap_or_else(|_| vec![0.08; 96]);
+
+        Ok(VideoAsset {
+            id,
+            name: name.to_owned(),
+            asset_file,
+            duration_secs: duration_secs.max(0.05),
+            waveform,
+        })
+    }
+
+    fn save_special_sound<F>(&self, sound: &SoundEffect, target_path: &Path, apply_name: F) -> Result<()>
+    where
+        F: FnOnce(&mut PreferencesFile, String),
+    {
+        write_processed_wav(&sound.asset_path(&self.root_dir), target_path, sound)?;
+        let mut preferences = self.load_preferences()?;
+        apply_name(&mut preferences, sound.name.clone());
+        self.save_preferences(&preferences)
+    }
+
+    pub fn replace_sound_with_processed(&self, sound: &mut SoundEffect) -> Result<()> {
+        let source_path = sound.asset_path(&self.root_dir);
+        if !source_path.exists() {
+            bail!("sound source file is missing");
+        }
+
+        let target_file = format!("{}.wav", sound.id);
+        let target_path = self.sounds_dir.join(&target_file);
+        let temp_path = self
+            .sounds_dir
+            .join(format!("{}.trimmed.tmp.wav", sound.id));
+
+        if temp_path.exists() {
+            let _ = fs::remove_file(&temp_path);
+        }
+
+        write_processed_wav(&source_path, &temp_path, sound)?;
+
+        if target_path != source_path && target_path.exists() {
+            fs::remove_file(&target_path).context("unable to replace existing trimmed sound")?;
+        }
+
+        fs::rename(&temp_path, &target_path).context("unable to finalize trimmed sound")?;
+
+        if source_path != target_path && source_path.exists() {
+            fs::remove_file(&source_path).context("unable to remove previous sound source")?;
+        }
+
+        let analysis = analyze_audio_file(&target_path, WAVEFORM_BUCKETS)?;
+        sound.asset_file = target_file;
+        sound.duration_secs = analysis.duration_secs;
+        sound.waveform = analysis.waveform;
+        sound.volume = 1.0;
+        sound.speed = 1.0;
+        sound.trim_start_secs = 0.0;
+        sound.trim_end_secs = sound.duration_secs;
+        sound.clamp_trim();
+        Ok(())
+    }
+
+    pub fn analyze_waveform_preview(&self, path: &Path, buckets: usize) -> Result<Vec<f32>> {
+        Ok(analyze_audio_file(path, buckets.max(64))?.waveform)
     }
 }
 
@@ -283,35 +573,23 @@ struct DecodedAudio {
 
 fn analyze_audio_file(path: &Path, buckets: usize) -> Result<AudioAnalysis> {
     let decoder = open_decoder(path)?;
-    let total_duration = decoder.total_duration();
     let sample_rate = decoder.sample_rate();
     let channels = decoder.channels();
     let bucket_count = buckets.max(64);
-    let estimated_total_samples = total_duration.map(|duration| {
-        (duration.as_secs_f64() * sample_rate as f64 * channels as f64).round() as usize
-    });
-    let samples_per_bucket = estimated_total_samples
-        .map(|total| (total / bucket_count).max(1))
-        .unwrap_or(2048);
-
-    let mut peaks = vec![0.0f32; bucket_count];
-    let mut sample_index = 0usize;
-    for sample in decoder.convert_samples::<f32>() {
-        let bucket = (sample_index / samples_per_bucket).min(bucket_count - 1);
-        peaks[bucket] = peaks[bucket].max(sample.abs());
-        sample_index += 1;
-    }
-
-    let duration_secs = if let Some(duration) = total_duration {
-        duration.as_secs_f32()
-    } else {
-        let channels = channels.max(1) as f32;
-        sample_index as f32 / channels / sample_rate.max(1) as f32
-    };
-
-    if sample_index == 0 {
+    let samples = decoder.convert_samples::<f32>().collect::<Vec<_>>();
+    if samples.is_empty() {
         bail!("audio file is empty");
     }
+
+    let samples_per_bucket = (samples.len() / bucket_count).max(1);
+    let mut peaks = vec![0.0f32; bucket_count];
+    for (sample_index, sample) in samples.iter().enumerate() {
+        let bucket = (sample_index / samples_per_bucket).min(bucket_count - 1);
+        peaks[bucket] = peaks[bucket].max(sample.abs());
+    }
+
+    let decoded_duration_secs =
+        samples.len() as f32 / channels.max(1) as f32 / sample_rate.max(1) as f32;
 
     let peak_max = peaks.iter().copied().fold(0.0f32, f32::max);
     if peak_max > 0.0 {
@@ -321,7 +599,7 @@ fn analyze_audio_file(path: &Path, buckets: usize) -> Result<AudioAnalysis> {
     }
 
     Ok(AudioAnalysis {
-        duration_secs,
+        duration_secs: decoded_duration_secs,
         waveform: peaks,
     })
 }
@@ -349,14 +627,22 @@ fn write_processed_wav(source_path: &Path, target_path: &Path, sound: &SoundEffe
     let sample_rate = decoded.sample_rate.max(1);
     let total_frames = decoded.samples.len() / channels as usize;
 
-    let start_frame = ((sound.trim_start_secs.clamp(0.0, sound.safe_duration())
-        * sample_rate as f32)
-        .floor() as usize)
-        .min(total_frames);
-    let end_frame = ((sound.trim_end_secs.clamp(0.0, sound.safe_duration()) * sample_rate as f32)
-        .ceil() as usize)
-        .min(total_frames)
-        .max(start_frame);
+    let actual_duration = total_frames as f32 / sample_rate as f32;
+    let trim_start = sound.trim_start_secs.clamp(0.0, actual_duration);
+    let trim_end = if sound.trim_end_secs >= sound.safe_duration() - 0.02 {
+        actual_duration
+    } else {
+        sound.trim_end_secs.clamp(0.0, actual_duration)
+    };
+
+    let start_frame = ((trim_start * sample_rate as f32).floor() as usize).min(total_frames);
+    let end_frame = if trim_end >= actual_duration - 0.02 {
+        total_frames
+    } else {
+        ((trim_end * sample_rate as f32).ceil() as usize)
+            .min(total_frames)
+            .max(start_frame)
+    };
 
     let spec = WavSpec {
         channels,

@@ -1,8 +1,10 @@
-use anyhow::Result;
 #[cfg(not(windows))]
 use anyhow::bail;
+use anyhow::{Context, Result};
+use hound::{SampleFormat, WavReader};
 #[cfg(windows)]
 use std::collections::VecDeque;
+use std::path::Path;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
@@ -19,6 +21,13 @@ pub struct PitchSnapshot {
     pub level: f32,
     pub waveform: Vec<f32>,
     pub error: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct OfflinePitchFrame {
+    pub note: String,
+    pub level: f32,
+    pub waveform: Vec<f32>,
 }
 
 impl Default for PitchSnapshot {
@@ -247,7 +256,7 @@ fn run_loop(
             if last_publish.elapsed() >= publish_interval {
                 let analysis_window = pitch_samples.iter().copied().collect::<Vec<_>>();
                 if let Some((frequency, confidence)) = detect_pitch(&analysis_window, 44_100) {
-                    let candidate_note = pitch_to_spn(frequency);
+                    let candidate_note = pitch_to_spn(frequency, false);
                     let sustained_note =
                         candidate_note == last_note && confidence >= PITCH_SUSTAIN_CONFIDENCE;
                     if confidence >= PITCH_ACCEPT_CONFIDENCE || sustained_note {
@@ -425,7 +434,7 @@ fn detect_pitch(samples: &[f32], sample_rate: u32) -> Option<(f32, f32)> {
     Some((frequency, confidence))
 }
 
-fn pitch_to_spn(frequency: f32) -> String {
+fn pitch_to_spn(frequency: f32, show_sharps_only: bool) -> String {
     const NOTE_NAMES: [(&str, Option<&str>); 12] = [
         ("C", None),
         ("C#", Some("Db")),
@@ -445,8 +454,104 @@ fn pitch_to_spn(frequency: f32) -> String {
     let note_index = midi.rem_euclid(12) as usize;
     let octave = midi.div_euclid(12) - 1;
     let (sharp, flat) = NOTE_NAMES[note_index];
-    match flat {
-        Some(flat_name) => format!("{sharp}/{flat_name}{octave}"),
-        None => format!("{sharp}{octave}"),
+    if show_sharps_only {
+        format!("{sharp}{octave}")
+    } else {
+        match flat {
+            Some(flat_name) => format!("{sharp}/{flat_name}{octave}"),
+            None => format!("{sharp}{octave}"),
+        }
     }
+}
+
+pub fn analyze_pitch_file(
+    path: &Path,
+    fps: u32,
+    show_sharps_only: bool,
+) -> Result<(f32, Vec<OfflinePitchFrame>)> {
+    let mut reader =
+        WavReader::open(path).with_context(|| format!("unable to open {}", path.display()))?;
+    let spec = reader.spec();
+    let channels = spec.channels.max(1) as usize;
+    let sample_rate = spec.sample_rate.max(1);
+    let samples = match spec.sample_format {
+        SampleFormat::Float => reader
+            .samples::<f32>()
+            .map(|sample| sample.unwrap_or(0.0).clamp(-1.0, 1.0))
+            .collect::<Vec<_>>(),
+        SampleFormat::Int => {
+            let scale = ((1i64 << (spec.bits_per_sample.saturating_sub(1) as u32)) - 1) as f32;
+            reader
+                .samples::<i32>()
+                .map(|sample| (sample.unwrap_or(0) as f32 / scale.max(1.0)).clamp(-1.0, 1.0))
+                .collect::<Vec<_>>()
+        }
+    };
+    if samples.is_empty() {
+        return Ok((0.0, Vec::new()));
+    }
+
+    let mut mono = Vec::with_capacity(samples.len() / channels.max(1));
+    for frame in samples.chunks(channels) {
+        let mixed = frame.iter().copied().sum::<f32>() / frame.len().max(1) as f32;
+        mono.push(mixed);
+    }
+
+    let duration_secs = mono.len() as f32 / sample_rate as f32;
+    let fps = fps.clamp(8, 30);
+    let frame_count = (duration_secs * fps as f32).ceil().max(1.0) as usize;
+    let samples_per_frame = ((sample_rate as f32 / fps as f32).round() as usize).max(1);
+    let mut frames = Vec::with_capacity(frame_count);
+    let mut level_history = VecDeque::from(vec![0.04; PITCH_WAVE_BARS]);
+    let mut last_note = "--".to_owned();
+    let mut hold_frames = 0usize;
+    let hold_limit = ((fps as f32 * PITCH_HOLD_TIME.as_secs_f32()).round() as usize).max(1);
+
+    for frame_index in 0..frame_count {
+        let frame_start = frame_index * samples_per_frame;
+        let frame_end = (frame_start + samples_per_frame).min(mono.len());
+        let chunk = &mono[frame_start.min(mono.len())..frame_end];
+        let level = level_to_visual(rms_level(chunk));
+        level_history.push_back(level.clamp(0.04, 1.0));
+        while level_history.len() > PITCH_WAVE_BARS {
+            let _ = level_history.pop_front();
+        }
+
+        let analysis_end = frame_end.min(mono.len());
+        let analysis_start = analysis_end.saturating_sub(PITCH_ANALYSIS_SAMPLES.min(analysis_end));
+        let analysis_window = &mono[analysis_start..analysis_end];
+
+        let note = if let Some((frequency, confidence)) = detect_pitch(analysis_window, sample_rate)
+        {
+            let candidate_note = pitch_to_spn(frequency, show_sharps_only);
+            let sustained = candidate_note == last_note && confidence >= PITCH_SUSTAIN_CONFIDENCE;
+            if confidence >= PITCH_ACCEPT_CONFIDENCE || sustained {
+                hold_frames = 0;
+                last_note = candidate_note;
+                last_note.clone()
+            } else if level > 0.08 && last_note != "--" && hold_frames < hold_limit {
+                hold_frames += 1;
+                last_note.clone()
+            } else {
+                hold_frames = 0;
+                last_note = "--".to_owned();
+                last_note.clone()
+            }
+        } else if level > 0.08 && last_note != "--" && hold_frames < hold_limit {
+            hold_frames += 1;
+            last_note.clone()
+        } else {
+            hold_frames = 0;
+            last_note = "--".to_owned();
+            last_note.clone()
+        };
+
+        frames.push(OfflinePitchFrame {
+            note,
+            level,
+            waveform: level_history.iter().copied().collect(),
+        });
+    }
+
+    Ok((duration_secs, frames))
 }

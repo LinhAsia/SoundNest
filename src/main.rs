@@ -3,19 +3,36 @@
 mod app;
 mod audio;
 mod downloader;
+mod hotkey;
+mod myinstants;
 mod pitch;
 mod platform;
+mod record_video;
+mod recorder;
 mod storage;
 
 use app::SoundFxApp;
 use eframe::egui::{
     self, Color32, FontData, FontDefinitions, FontFamily, FontId, Style, TextStyle, Visuals,
 };
+use std::env;
+use std::path::Path;
 use std::sync::Arc;
 
 const MATERIAL_ICONS_FONT: &str = "material_icons";
 
 fn main() -> eframe::Result<()> {
+    let mut args = env::args_os();
+    let _ = args.next();
+    if let Some(flag) = args.next()
+        && flag == "--play-file-detached"
+    {
+        if let Some(path) = args.next() {
+            let _ = audio::play_file_blocking(Path::new(&path));
+        }
+        return Ok(());
+    }
+
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Sound FX")

@@ -1,16 +1,29 @@
 #[cfg(windows)]
 mod windows_platform {
+    use anyhow::{Context, Result, bail};
     use eframe::Frame;
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use std::os::windows::ffi::OsStrExt;
+    use std::path::Path;
     use windows::Win32::{
-        Foundation::HWND,
+        Foundation::{
+            DRAGDROP_S_CANCEL, DRAGDROP_S_DROP, DRAGDROP_S_USEDEFAULTCURSORS, HWND, S_OK,
+        },
         Graphics::Dwm::{
             DWMNCRENDERINGPOLICY, DWMNCRP_DISABLED, DWMNCRP_ENABLED, DWMWA_NCRENDERING_POLICY,
             DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DEFAULT, DWMWCP_ROUND,
             DwmExtendFrameIntoClientArea, DwmSetWindowAttribute,
         },
+        System::{
+            Ole::{DROPEFFECT_COPY, IDropSource, IDropSource_Impl, OleInitialize, OleUninitialize},
+            SystemServices::{MK_LBUTTON, MODIFIERKEYS_FLAGS},
+        },
         UI::{
             Controls::MARGINS,
+            Shell::{
+                CIDLData_CreateFromIDArray, ILClone, ILCreateFromPathW, ILFindLastID, ILFree,
+                ILRemoveLastID, SHDoDragDrop,
+            },
             WindowsAndMessaging::{
                 FindWindowW, GWL_EXSTYLE, GWL_STYLE, GetWindowLongW, HWND_TOPMOST,
                 SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE,
@@ -19,7 +32,34 @@ mod windows_platform {
             },
         },
     };
-    use windows::core::PCWSTR;
+    use windows::core::{PCWSTR, implement};
+
+    #[implement(IDropSource)]
+    struct FileDropSource;
+
+    #[allow(non_snake_case)]
+    impl IDropSource_Impl for FileDropSource_Impl {
+        fn QueryContinueDrag(
+            &self,
+            fescapepressed: windows_core::BOOL,
+            grfkeystate: MODIFIERKEYS_FLAGS,
+        ) -> windows_core::HRESULT {
+            if fescapepressed.as_bool() {
+                DRAGDROP_S_CANCEL
+            } else if (grfkeystate & MK_LBUTTON).0 == 0 {
+                DRAGDROP_S_DROP
+            } else {
+                S_OK
+            }
+        }
+
+        fn GiveFeedback(
+            &self,
+            _dweffect: windows::Win32::System::Ole::DROPEFFECT,
+        ) -> windows_core::HRESULT {
+            DRAGDROP_S_USEDEFAULTCURSORS
+        }
+    }
 
     pub fn set_native_window_shadow(frame: &Frame, enabled: bool) {
         let Ok(window_handle) = frame.window_handle() else {
@@ -135,6 +175,65 @@ mod windows_platform {
 
         true
     }
+
+    pub fn drag_file_out(path: &Path) -> Result<()> {
+        if !path.exists() {
+            bail!("exported sound file is missing");
+        }
+
+        let mut wide_path = path.as_os_str().encode_wide().collect::<Vec<_>>();
+        wide_path.push(0);
+
+        struct OleGuard;
+        impl Drop for OleGuard {
+            fn drop(&mut self) {
+                unsafe {
+                    OleUninitialize();
+                }
+            }
+        }
+
+        struct PidlGuard(*const windows::Win32::UI::Shell::Common::ITEMIDLIST);
+        impl Drop for PidlGuard {
+            fn drop(&mut self) {
+                if !self.0.is_null() {
+                    unsafe {
+                        ILFree(Some(self.0));
+                    }
+                }
+            }
+        }
+
+        unsafe {
+            OleInitialize(None).context("unable to initialize OLE drag session")?;
+            let _ole_guard = OleGuard;
+
+            let full_pidl = ILCreateFromPathW(PCWSTR(wide_path.as_ptr()));
+            if full_pidl.is_null() {
+                bail!("unable to create shell drag path");
+            }
+            let _full_pidl_guard = PidlGuard(full_pidl);
+
+            let parent_pidl = ILClone(full_pidl);
+            let child_pidl = ILClone(ILFindLastID(full_pidl));
+            if parent_pidl.is_null() || child_pidl.is_null() {
+                bail!("unable to create shell drag data");
+            }
+            let _parent_pidl_guard = PidlGuard(parent_pidl);
+            let _child_pidl_guard = PidlGuard(child_pidl);
+
+            let _ = ILRemoveLastID(Some(parent_pidl));
+            let child_items = [child_pidl as *const _];
+            let data_object =
+                CIDLData_CreateFromIDArray(parent_pidl as *const _, Some(&child_items))
+                    .context("unable to build drag payload")?;
+            let drop_source: IDropSource = FileDropSource.into();
+            let _ = SHDoDragDrop(None, &data_object, &drop_source, DROPEFFECT_COPY)
+                .context("unable to start drag and drop")?;
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(windows)]
@@ -150,4 +249,9 @@ pub fn set_overlay_window_native_visuals(
     _popup_only: bool,
 ) -> bool {
     false
+}
+
+#[cfg(not(windows))]
+pub fn drag_file_out(_path: &std::path::Path) -> anyhow::Result<()> {
+    anyhow::bail!("Drag out is only available on Windows")
 }

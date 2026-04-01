@@ -3,8 +3,8 @@ use anyhow::{Context, Result, bail};
 use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source, buffer::SamplesBuffer};
 use std::fs::File;
 use std::io::BufReader;
-use std::path::Path;
-use std::time::Instant;
+use std::path::{Path, PathBuf};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use uuid::Uuid;
 
 pub struct AudioEngine {
@@ -12,8 +12,10 @@ pub struct AudioEngine {
     handle: OutputStreamHandle,
     sink: Option<Sink>,
     current_id: Option<Uuid>,
-    started_at: Option<Instant>,
-    current_duration_secs: f32,
+    current_file_path: Option<PathBuf>,
+    current_total_duration_secs: f32,
+    current_start_offset_secs: f32,
+    current_speed: f32,
 }
 
 impl AudioEngine {
@@ -26,18 +28,39 @@ impl AudioEngine {
             handle,
             sink: None,
             current_id: None,
-            started_at: None,
-            current_duration_secs: 0.0,
+            current_file_path: None,
+            current_total_duration_secs: 0.0,
+            current_start_offset_secs: 0.0,
+            current_speed: 1.0,
         })
     }
 
     pub fn play(&mut self, sound: &SoundEffect, asset_path: &Path) -> Result<()> {
+        self.play_from(sound, asset_path, sound.trim_start_secs)
+    }
+
+    pub fn play_from(
+        &mut self,
+        sound: &SoundEffect,
+        asset_path: &Path,
+        start_position_secs: f32,
+    ) -> Result<()> {
         self.stop();
 
         let (channels, sample_rate, trimmed_samples) = load_trimmed_samples(sound, asset_path)?;
         let speed = sound.speed.clamp(0.25, 2.0);
+        let total_duration_secs =
+            trimmed_samples.len() as f32 / channels.max(1) as f32 / sample_rate.max(1) as f32;
+        let total_frames = trimmed_samples.len() / channels as usize;
+        let start_offset_secs =
+            (start_position_secs - sound.trim_start_secs).clamp(0.0, total_duration_secs.max(0.0));
+        let start_frame = ((start_offset_secs * sample_rate as f32).floor() as usize)
+            .min(total_frames.saturating_sub(1));
+        let start_offset_secs = start_frame as f32 / sample_rate as f32;
+        let start_sample = start_frame * channels as usize;
+        let remaining_samples = trimmed_samples[start_sample..].to_vec();
 
-        let preview = SamplesBuffer::new(channels, sample_rate, trimmed_samples)
+        let preview = SamplesBuffer::new(channels, sample_rate, remaining_samples)
             .speed(speed)
             .amplify(sound.volume.max(0.0));
 
@@ -46,8 +69,34 @@ impl AudioEngine {
         sink.play();
 
         self.current_id = Some(sound.id);
-        self.started_at = Some(Instant::now());
-        self.current_duration_secs = sound.trimmed_length() / speed;
+        self.current_file_path = None;
+        self.current_total_duration_secs = total_duration_secs;
+        self.current_start_offset_secs = start_offset_secs;
+        self.current_speed = speed;
+        self.sink = Some(sink);
+        Ok(())
+    }
+
+    pub fn play_file(&mut self, asset_path: &Path) -> Result<()> {
+        self.stop();
+
+        let (channels, sample_rate, samples) = decode_audio_file(asset_path)?;
+        if samples.is_empty() {
+            bail!("audio file is empty");
+        }
+
+        let duration_secs =
+            samples.len() as f32 / channels.max(1) as f32 / sample_rate.max(1) as f32;
+        let preview = SamplesBuffer::new(channels, sample_rate, samples);
+        let sink = Sink::try_new(&self.handle).context("unable to create audio sink")?;
+        sink.append(preview);
+        sink.play();
+
+        self.current_id = None;
+        self.current_file_path = Some(asset_path.to_path_buf());
+        self.current_total_duration_secs = duration_secs;
+        self.current_start_offset_secs = 0.0;
+        self.current_speed = 1.0;
         self.sink = Some(sink);
         Ok(())
     }
@@ -57,8 +106,10 @@ impl AudioEngine {
             sink.stop();
         }
         self.current_id = None;
-        self.started_at = None;
-        self.current_duration_secs = 0.0;
+        self.current_file_path = None;
+        self.current_total_duration_secs = 0.0;
+        self.current_start_offset_secs = 0.0;
+        self.current_speed = 1.0;
     }
 
     pub fn tick(&mut self) {
@@ -72,14 +123,31 @@ impl AudioEngine {
         self.current_id == Some(sound_id)
     }
 
+    pub fn is_playing_file(&self, path: &Path) -> bool {
+        self.current_file_path.as_deref() == Some(path) && self.sink.is_some()
+    }
+
     pub fn playback_progress(&self, sound_id: Uuid) -> Option<f32> {
         if self.current_id != Some(sound_id) {
             return None;
         }
 
-        let started_at = self.started_at?;
-        let duration = self.current_duration_secs.max(0.05);
-        Some((started_at.elapsed().as_secs_f32() / duration).clamp(0.0, 1.0))
+        let sink = self.sink.as_ref()?;
+        let total_duration = self.current_total_duration_secs.max(0.05);
+        let elapsed = sink.get_pos().as_secs_f32() * self.current_speed.max(0.25);
+        let played = (self.current_start_offset_secs + elapsed).clamp(0.0, total_duration);
+        Some((played / total_duration).clamp(0.0, 1.0))
+    }
+
+    pub fn playback_progress_for_file(&self, path: &Path) -> Option<f32> {
+        if self.current_file_path.as_deref() != Some(path) {
+            return None;
+        }
+
+        let sink = self.sink.as_ref()?;
+        let total_duration = self.current_total_duration_secs.max(0.05);
+        let elapsed = sink.get_pos().as_secs_f32();
+        Some((elapsed / total_duration).clamp(0.0, 1.0))
     }
 
     pub fn has_active_playback(&self) -> bool {
@@ -87,27 +155,39 @@ impl AudioEngine {
     }
 }
 
+pub fn play_file_blocking(asset_path: &Path) -> Result<()> {
+    let (_stream, handle) =
+        OutputStream::try_default().context("unable to open default audio output")?;
+    let (channels, sample_rate, samples) = decode_audio_file(asset_path)?;
+    let sink = Sink::try_new(&handle).context("unable to create audio sink")?;
+    sink.append(SamplesBuffer::new(channels, sample_rate, samples));
+    sink.sleep_until_end();
+    Ok(())
+}
+
 fn load_trimmed_samples(sound: &SoundEffect, asset_path: &Path) -> Result<(u16, u32, Vec<f32>)> {
-    let file = File::open(asset_path)
-        .with_context(|| format!("unable to open {}", asset_path.display()))?;
-    let decoder = Decoder::new(BufReader::new(file)).context("unsupported audio file")?;
-    let channels = decoder.channels().max(1);
-    let sample_rate = decoder.sample_rate().max(1);
-    let samples = decoder.convert_samples::<f32>().collect::<Vec<_>>();
+    let (channels, sample_rate, samples) = decode_audio_file(asset_path)?;
 
     if samples.is_empty() {
         bail!("audio file is empty");
     }
 
     let total_frames = samples.len() / channels as usize;
-    let safe_duration = sound.safe_duration();
-    let start_frame = ((sound.trim_start_secs.clamp(0.0, safe_duration) * sample_rate as f32)
-        .floor() as usize)
-        .min(total_frames);
-    let end_frame = ((sound.trim_end_secs.clamp(0.0, safe_duration) * sample_rate as f32).ceil()
-        as usize)
-        .min(total_frames)
-        .max(start_frame + 1);
+    let actual_duration = total_frames as f32 / sample_rate as f32;
+    let trim_start = sound.trim_start_secs.clamp(0.0, actual_duration);
+    let trim_end = if sound.trim_end_secs >= sound.safe_duration() - 0.02 {
+        actual_duration
+    } else {
+        sound.trim_end_secs.clamp(0.0, actual_duration)
+    };
+    let start_frame = ((trim_start * sample_rate as f32).floor() as usize).min(total_frames);
+    let end_frame = if trim_end >= actual_duration - 0.02 {
+        total_frames
+    } else {
+        ((trim_end * sample_rate as f32).ceil() as usize)
+            .min(total_frames)
+            .max(start_frame + 1)
+    };
     let start_sample = start_frame * channels as usize;
     let end_sample = (end_frame * channels as usize).min(samples.len());
 
@@ -116,4 +196,19 @@ fn load_trimmed_samples(sound: &SoundEffect, asset_path: &Path) -> Result<(u16, 
         sample_rate,
         samples[start_sample..end_sample].to_vec(),
     ))
+}
+
+fn decode_audio_file(asset_path: &Path) -> Result<(u16, u32, Vec<f32>)> {
+    let path = asset_path.to_path_buf();
+    catch_unwind(AssertUnwindSafe(|| -> Result<(u16, u32, Vec<f32>)> {
+        let file =
+            File::open(&path).with_context(|| format!("unable to open {}", path.display()))?;
+        let decoder =
+            Decoder::new(BufReader::new(file)).context("unsupported audio file")?;
+        let channels = decoder.channels().max(1);
+        let sample_rate = decoder.sample_rate().max(1);
+        let samples = decoder.convert_samples::<f32>().collect::<Vec<_>>();
+        Ok((channels, sample_rate, samples))
+    }))
+    .map_err(|_| anyhow::anyhow!("audio decoder crashed while reading {}", path.display()))?
 }
