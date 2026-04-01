@@ -364,7 +364,7 @@ impl SoundFxApp {
             pitch_overlay_native_visuals_applied: false,
             startup: StartupSplashState {
                 phase: TransitionPhase::Intro,
-                started_at: Some(0.0),
+                started_at: None,
                 live_started_at: None,
                 duration_sec: startup_transition_duration_sec,
                 close_sent: false,
@@ -471,30 +471,23 @@ impl SoundFxApp {
             return;
         }
 
-        self.show_download_panel = false;
         if let Some(audio) = self.audio.as_mut() {
             audio.stop();
         }
         if self.recorder.snapshot().running {
-            self.stop_recording();
+            self.stop_recording_for_close(ctx);
         }
-        self.close_recording_review(true);
-        self.video_viewer = None;
-        if let Ok(Some(path)) = self.storage.resolved_exit_sound_path() {
-            let _ = self.play_file_detached_if_exists(&path);
+        let exit_sound_path = self.storage.resolved_exit_sound_path().ok().flatten();
+        if let Some(path) = exit_sound_path.as_ref() {
+            let _ = self.play_file_detached_if_exists(path);
         }
-        self.pitch_monitor.stop();
-        self.pitch_overlay_native_visuals_applied = false;
-        ctx.send_viewport_cmd_to(Self::pitch_overlay_viewport_id(), ViewportCommand::Close);
         if self.pending_save {
             let _ = self.storage.save_library(&self.sounds);
             self.pending_save = false;
         }
 
-        let exit_transition_sound = Self::load_transition_sound_visual(
-            &self.storage,
-            self.storage.resolved_exit_sound_path().ok().flatten(),
-        );
+        let exit_transition_sound =
+            Self::load_transition_sound_visual(&self.storage, exit_sound_path.clone());
         self.startup.phase = TransitionPhase::Outro;
         self.startup.started_at = None;
         self.startup.live_started_at = None;
@@ -506,6 +499,28 @@ impl SoundFxApp {
         self.startup.sound_waveform = exit_transition_sound.0;
         self.startup.sound_duration_sec = exit_transition_sound.1;
         ctx.request_repaint();
+    }
+
+    fn stop_recording_for_close(&mut self, ctx: &Context) {
+        self.recorder.stop();
+        self.record_overlay_open = false;
+        self.record_overlay_native_visuals_applied = false;
+        ctx.send_viewport_cmd_to(Self::record_overlay_viewport_id(), ViewportCommand::Close);
+        if let Some(path) = self.recorder.take_completed_path() {
+            let _ = fs::remove_file(path);
+        }
+    }
+
+    fn finalize_close_cleanup(&mut self, ctx: &Context) {
+        self.show_download_panel = false;
+        self.close_recording_review(true);
+        self.video_viewer = None;
+        self.pitch_monitor.stop();
+        self.pitch_overlay_native_visuals_applied = false;
+        ctx.send_viewport_cmd_to(Self::pitch_overlay_viewport_id(), ViewportCommand::Close);
+        self.record_overlay_open = false;
+        self.record_overlay_native_visuals_applied = false;
+        ctx.send_viewport_cmd_to(Self::record_overlay_viewport_id(), ViewportCommand::Close);
     }
 
     fn play_file_if_exists(&mut self, path: &Path) -> Result<()> {
@@ -559,14 +574,16 @@ impl SoundFxApp {
         false
     }
 
-    fn play_startup_sound_if_needed(&mut self) {
+    fn play_startup_sound_if_needed(&mut self, ctx: &Context) {
         if self.startup_sound_played || self.startup.phase != TransitionPhase::Intro {
             return;
         }
-        self.startup_sound_played = true;
+
         if let Ok(Some(path)) = self.storage.resolved_startup_sound_path() {
             let _ = self.play_file_if_exists(&path);
         }
+        self.startup_sound_played = true;
+        self.startup.started_at = Some(ctx.input(|input| input.time));
     }
 
     fn handle_space_preview(&mut self, ctx: &Context) {
@@ -7245,10 +7262,11 @@ impl SoundFxApp {
                     return None;
                 }
                 TransitionPhase::Outro => {
-                    if let Some(audio) = self.audio.as_mut() {
-                        audio.stop();
-                    }
                     if !self.startup.close_sent {
+                        self.finalize_close_cleanup(ctx);
+                        if let Some(audio) = self.audio.as_mut() {
+                            audio.stop();
+                        }
                         self.startup.close_sent = true;
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     }
@@ -7279,10 +7297,13 @@ impl SoundFxApp {
     }
 
     fn render_transition_layer(&self, ctx: &Context, progress: f32, phase: TransitionPhase) {
-        CentralPanel::default()
-            .frame(Frame::new().fill(Color32::TRANSPARENT).inner_margin(0.0))
+        let screen_rect = ctx.screen_rect();
+        egui::Area::new(egui::Id::new("transition-layer"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(screen_rect.min)
+            .interactable(true)
             .show(ctx, |ui| {
-                let rect = ui.max_rect();
+                let (rect, _) = ui.allocate_exact_size(screen_rect.size(), Sense::click_and_drag());
                 let _ = ui.interact(
                     rect,
                     ui.id().with("transition-layer"),
@@ -7343,7 +7364,7 @@ impl SoundFxApp {
                     TransitionPhase::Intro => {
                         1.0 - Self::ease_in_out_cubic(((progress - 0.18) / 0.18).clamp(0.0, 1.0))
                     }
-                    TransitionPhase::Outro => 1.0,
+                    TransitionPhase::Outro => 0.0,
                     TransitionPhase::Live => 1.0,
                 };
                 let ui_match: f32 = match phase {
@@ -8527,6 +8548,8 @@ impl eframe::App for SoundFxApp {
             self.pending_sound_drag = None;
         }
 
+        self.play_startup_sound_if_needed(ctx);
+
         let transition = self.transition_progress(ctx);
         let download_snapshot = self.downloader.snapshot();
         let wants_shadow = false;
@@ -8541,7 +8564,6 @@ impl eframe::App for SoundFxApp {
         }
 
         self.enforce_square_window_if_needed(ctx);
-        self.play_startup_sound_if_needed();
         self.handle_space_preview(ctx);
         self.handle_record_hotkey(ctx);
 
