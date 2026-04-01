@@ -35,6 +35,8 @@ use uuid::Uuid;
 const AUDIO_FILTERS: &[&str] = &["wav", "mp3", "ogg", "flac", "m4a", "aac"];
 const APP_FRAME_RADIUS: f32 = 30.0;
 const APP_OUTER_MARGIN: f32 = 0.0;
+const LIVE_UI_FADE_SEC: f32 = 0.32;
+const TRANSITION_TARGET_EXPONENT: f32 = 18.0;
 const MATERIAL_ICONS_FONT: &str = "material_icons";
 const PITCH_OVERLAY_ID: &str = "pitch-monitor-overlay";
 const PITCH_OVERLAY_TITLE: &str = "Sound FX Pitch Overlay";
@@ -221,6 +223,7 @@ enum TransitionPhase {
 struct StartupSplashState {
     phase: TransitionPhase,
     started_at: Option<f64>,
+    live_started_at: Option<f64>,
     duration_sec: f32,
     close_sent: bool,
     sound_waveform: Vec<f32>,
@@ -362,6 +365,7 @@ impl SoundFxApp {
             startup: StartupSplashState {
                 phase: TransitionPhase::Intro,
                 started_at: None,
+                live_started_at: None,
                 duration_sec: startup_transition_duration_sec,
                 close_sent: false,
                 sound_waveform: startup_transition_sound.0,
@@ -493,6 +497,7 @@ impl SoundFxApp {
         );
         self.startup.phase = TransitionPhase::Outro;
         self.startup.started_at = None;
+        self.startup.live_started_at = None;
         self.startup.duration_sec = Self::custom_transition_duration_secs(
             &self.storage,
             &self.storage.exit_sound_path(),
@@ -2415,6 +2420,8 @@ impl SoundFxApp {
             }
 
             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                ui.add_space(8.0);
+
                 if Self::icon_titlebar(ui, [38.0, 30.0], 0xe5cd, false, false).clicked() {
                     self.request_close(ctx);
                 }
@@ -7233,6 +7240,7 @@ impl SoundFxApp {
                 TransitionPhase::Intro => {
                     self.startup.phase = TransitionPhase::Live;
                     self.startup.started_at = None;
+                    self.startup.live_started_at = Some(now);
                     self.startup.duration_sec = 0.0;
                     return None;
                 }
@@ -7255,6 +7263,21 @@ impl SoundFxApp {
         Some((phase, progress))
     }
 
+    fn live_ui_reveal_progress(&mut self, ctx: &Context) -> f32 {
+        let Some(started_at) = self.startup.live_started_at else {
+            return 1.0;
+        };
+
+        let now = ctx.input(|input| input.time);
+        let progress = ((now - started_at) / LIVE_UI_FADE_SEC as f64).clamp(0.0, 1.0) as f32;
+        if progress >= 1.0 {
+            self.startup.live_started_at = None;
+            return 1.0;
+        }
+
+        Self::ease_in_out_cubic(progress)
+    }
+
     fn render_transition_layer(&self, ctx: &Context, progress: f32, phase: TransitionPhase) {
         CentralPanel::default()
             .frame(Frame::new().fill(Color32::TRANSPARENT).inner_margin(0.0))
@@ -7273,8 +7296,19 @@ impl SoundFxApp {
                 let wave_bars =
                     Self::transition_wave_bars(&self.startup.sound_waveform, audio_progress, 11);
                 let center = rect.center();
+                let intro_monochrome = self.dark_theme && phase == TransitionPhase::Intro;
                 let (rose_ice, berry, magenta, plum, deep_plum, star_rgb, star_alpha_scale) =
-                    if self.dark_theme {
+                    if intro_monochrome {
+                        (
+                            Color32::from_rgb(26, 22, 31),
+                            Color32::from_rgb(42, 37, 48),
+                            Color32::from_rgb(56, 51, 64),
+                            Color32::from_rgb(23, 19, 28),
+                            Color32::from_rgb(7, 4, 10),
+                            (255, 255, 255),
+                            0.16,
+                        )
+                    } else if self.dark_theme {
                         (
                             Color32::from_rgb(15, 7, 13),
                             Color32::from_rgb(190, 63, 129),
@@ -7300,24 +7334,20 @@ impl SoundFxApp {
                     TransitionPhase::Outro => 1.0 - Self::ease_in_out_cubic(progress),
                     TransitionPhase::Live => 1.0,
                 };
-                let intro_reveal =
-                    Self::ease_in_out_cubic(((progress - 0.90) / 0.10).clamp(0.0, 1.0));
                 let layer_alpha = match phase {
-                    TransitionPhase::Intro => 1.0 - intro_reveal,
+                    TransitionPhase::Intro => 1.0,
                     TransitionPhase::Outro => 1.0,
                     TransitionPhase::Live => 1.0,
                 };
                 let ornament_alpha = match phase {
                     TransitionPhase::Intro => {
-                        1.0 - Self::ease_in_out_cubic(((progress - 0.68) / 0.14).clamp(0.0, 1.0))
+                        1.0 - Self::ease_in_out_cubic(((progress - 0.18) / 0.18).clamp(0.0, 1.0))
                     }
                     TransitionPhase::Outro => 1.0,
                     TransitionPhase::Live => 1.0,
                 };
-                let ui_match = match phase {
-                    TransitionPhase::Intro => {
-                        Self::ease_in_out_cubic(((progress - 0.72) / 0.16).clamp(0.0, 1.0))
-                    }
+                let ui_match: f32 = match phase {
+                    TransitionPhase::Intro => 0.0,
                     TransitionPhase::Outro => 0.0,
                     TransitionPhase::Live => 1.0,
                 };
@@ -7327,9 +7357,38 @@ impl SoundFxApp {
                     TransitionPhase::Outro => Self::ease_in_out_cubic(progress),
                     TransitionPhase::Live => 0.0,
                 };
+                let intro_black_fade = if intro_monochrome {
+                    Self::ease_in_out_cubic(((progress - 0.58) / 0.28).clamp(0.0, 1.0))
+                } else {
+                    0.0
+                };
+                let target_rect = Self::transition_target_rect(rect);
+                let base = rect.width().min(rect.height()).clamp(260.0, 440.0);
+                let half_w = egui::lerp((base * 0.17)..=(target_rect.width() * 0.5), t);
+                let half_h = egui::lerp((base * 0.13)..=(target_rect.height() * 0.5), t);
+                let exponent = egui::lerp(2.2..=6.4, t);
+                let wobble = (1.0 - t).powf(1.4) * 0.24;
+                let square_seed = ((t - 0.08) / 0.66).clamp(0.0, 1.0);
+                let square_morph = square_seed * square_seed * (3.0 - 2.0 * square_seed);
+                let ornament_alpha = if phase == TransitionPhase::Intro && progress >= 0.50 {
+                    0.0
+                } else {
+                    ornament_alpha * (1.0 - square_morph).powf(1.7)
+                };
                 let card_fill = Self::with_alpha(
                     Self::lerp_color(
-                        if self.dark_theme {
+                        if intro_monochrome {
+                            Self::lerp_color(
+                                Color32::from_rgba_premultiplied(
+                                    16,
+                                    13,
+                                    20,
+                                    (236.0 + (1.0 - intro_black_fade) * 12.0) as u8,
+                                ),
+                                Self::page_fill(),
+                                intro_black_fade,
+                            )
+                        } else if self.dark_theme {
                             Color32::from_rgba_premultiplied(12, 9, 15, (232.0 + t * 18.0) as u8)
                         } else {
                             Color32::from_rgba_premultiplied(
@@ -7340,13 +7399,24 @@ impl SoundFxApp {
                             )
                         },
                         Self::page_fill(),
-                        ui_match,
+                        ui_match.max(1.0 - ornament_alpha),
                     ),
                     layer_alpha,
                 );
                 let card_stroke = Self::with_alpha(
                     Self::lerp_color(
-                        if self.dark_theme {
+                        if intro_monochrome {
+                            Self::lerp_color(
+                                Color32::from_rgba_premultiplied(
+                                    98,
+                                    92,
+                                    108,
+                                    (92.0 + (1.0 - intro_black_fade) * 28.0) as u8,
+                                ),
+                                Self::border_color(),
+                                intro_black_fade,
+                            )
+                        } else if self.dark_theme {
                             Color32::from_rgba_premultiplied(232, 162, 202, (84.0 + t * 56.0) as u8)
                         } else {
                             Color32::from_rgba_premultiplied(
@@ -7357,13 +7427,15 @@ impl SoundFxApp {
                             )
                         },
                         Self::border_color(),
-                        ui_match,
+                        ui_match.max(1.0 - ornament_alpha),
                     ),
                     layer_alpha,
                 );
                 let glaze_fill = Self::with_alpha(
                     Self::lerp_color(
-                        if self.dark_theme {
+                        if intro_monochrome {
+                            Color32::TRANSPARENT
+                        } else if self.dark_theme {
                             Color32::from_rgba_premultiplied(
                                 255,
                                 214,
@@ -7378,8 +7450,8 @@ impl SoundFxApp {
                                 (40.0 + (1.0 - aura) * 28.0) as u8,
                             )
                         },
-                        Self::surface_fill(),
-                        ui_match * 0.72,
+                        Self::page_fill(),
+                        ui_match.max(1.0 - ornament_alpha),
                     ),
                     layer_alpha * ornament_alpha,
                 );
@@ -7409,29 +7481,27 @@ impl SoundFxApp {
                     },
                     layer_alpha * ornament_alpha,
                 );
-                let note_base = if self.dark_theme {
+                let note_base = if intro_monochrome {
+                    Color32::from_rgb(246, 243, 248)
+                } else if self.dark_theme {
                     Color32::from_rgb(246, 124, 181)
                 } else {
                     Color32::from_rgb(214, 51, 132)
                 };
-                let note_alt = if self.dark_theme {
+                let note_alt = if intro_monochrome {
+                    Color32::from_rgb(223, 216, 228)
+                } else if self.dark_theme {
                     Color32::from_rgb(255, 188, 219)
                 } else {
                     Color32::from_rgb(236, 116, 179)
                 };
-                let note_glow_rgb = if self.dark_theme {
+                let note_glow_rgb = if intro_monochrome {
+                    (255, 255, 255)
+                } else if self.dark_theme {
                     (227, 82, 149)
                 } else {
                     (16, 10, 14)
                 };
-                let target_rect = Self::transition_target_rect(rect);
-                let base = rect.width().min(rect.height()).clamp(260.0, 440.0);
-                let half_w = egui::lerp((base * 0.17)..=(target_rect.width() * 0.5), t);
-                let half_h = egui::lerp((base * 0.13)..=(target_rect.height() * 0.5), t);
-                let exponent = egui::lerp(2.2..=6.4, t);
-                let wobble = (1.0 - t).powf(1.4) * 0.24;
-                let square_seed = ((t - 0.08) / 0.66).clamp(0.0, 1.0);
-                let square_morph = square_seed * square_seed * (3.0 - 2.0 * square_seed);
 
                 if self.dark_theme {
                     painter.circle_filled(
@@ -7446,13 +7516,22 @@ impl SoundFxApp {
                         Pos2::new(center.x, center.y + base * 0.02),
                         base * 0.42,
                         Self::with_alpha(
-                            Color32::from_rgba_premultiplied(
-                                120,
-                                25,
-                                72,
-                                (16.0 + aura * 34.0) as u8,
-                            ),
-                            layer_alpha,
+                            if intro_monochrome {
+                                Color32::from_rgba_premultiplied(
+                                    52,
+                                    47,
+                                    61,
+                                    (14.0 + aura * 18.0) as u8,
+                                )
+                            } else {
+                                Color32::from_rgba_premultiplied(
+                                    120,
+                                    25,
+                                    72,
+                                    (16.0 + aura * 34.0) as u8,
+                                )
+                            },
+                            layer_alpha * ornament_alpha,
                         ),
                     );
                 }
@@ -7474,7 +7553,7 @@ impl SoundFxApp {
                                 star_rgb.2,
                                 (26.0 * star_alpha_scale * twinkle * (0.35 + aura * 0.65)) as u8,
                             ),
-                            layer_alpha,
+                            layer_alpha * ornament_alpha,
                         ),
                     );
                 }
@@ -7589,7 +7668,7 @@ impl SoundFxApp {
                                 berry.b(),
                                 (alpha * (0.2 + aura * 0.8)) as u8,
                             ),
-                            layer_alpha,
+                            layer_alpha * ornament_alpha,
                         ),
                     );
                 }
@@ -7721,7 +7800,7 @@ impl SoundFxApp {
                             rose_ice.b(),
                             (34.0 + t * 38.0) as u8,
                         ),
-                        layer_alpha,
+                        layer_alpha * ornament_alpha,
                     ),
                 );
 
@@ -7907,7 +7986,7 @@ impl SoundFxApp {
             return blob;
         }
 
-        let target_exponent = egui::lerp(exponent.max(2.0)..=14.0, morph);
+        let target_exponent = egui::lerp(exponent.max(2.0)..=TRANSITION_TARGET_EXPONENT, morph);
         let target_shape = Self::squircle_points(
             target_rect.center(),
             target_rect.width() * 0.5,
@@ -8347,15 +8426,7 @@ impl eframe::App for SoundFxApp {
 
         self.flush_pending_save(ctx);
 
-        let intro_transition = match transition {
-            Some((TransitionPhase::Intro, progress)) => Some(progress),
-            _ => None,
-        };
-        let intro_ui_reveal_threshold = 0.86;
-
-        if let Some(progress) = intro_transition
-            && progress < intro_ui_reveal_threshold
-        {
+        if let Some((TransitionPhase::Intro, progress)) = transition {
             self.render_transition_layer(ctx, progress, TransitionPhase::Intro);
             return;
         }
@@ -8365,23 +8436,32 @@ impl eframe::App for SoundFxApp {
             return;
         }
 
+        let live_ui_reveal = self.live_ui_reveal_progress(ctx);
+        let live_ui_overlay_alpha = 1.0 - live_ui_reveal;
+        if live_ui_overlay_alpha > 0.0 {
+            ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
+        }
+
         let root_fill = Color32::TRANSPARENT;
 
         CentralPanel::default()
             .frame(Frame::new().fill(root_fill).inner_margin(0.0))
             .show(ctx, |ui| {
-                Frame::new()
+                let frame_response = Frame::new()
                     .fill(Self::page_fill())
                     .stroke(Stroke::new(1.0, Self::border_color()))
                     .shadow(Shadow {
                         offset: [0, 14],
                         blur: 30,
                         spread: 0,
-                        color: if self.dark_theme {
-                            Color32::from_rgba_premultiplied(0, 0, 0, 72)
-                        } else {
-                            Color32::from_rgba_premultiplied(78, 40, 63, 20)
-                        },
+                        color: Self::with_alpha(
+                            if self.dark_theme {
+                                Color32::from_rgba_premultiplied(0, 0, 0, 72)
+                            } else {
+                                Color32::from_rgba_premultiplied(78, 40, 63, 20)
+                            },
+                            live_ui_reveal,
+                        ),
                     })
                     .corner_radius(CornerRadius::same(APP_FRAME_RADIUS as u8))
                     .outer_margin(Margin::same(APP_OUTER_MARGIN as i8))
@@ -8411,6 +8491,29 @@ impl eframe::App for SoundFxApp {
                             });
                         }
                     });
+
+                if live_ui_overlay_alpha > 0.0 {
+                    ui.painter().rect(
+                        frame_response.response.rect,
+                        CornerRadius::same(APP_FRAME_RADIUS as u8),
+                        Color32::from_rgba_premultiplied(
+                            0,
+                            0,
+                            0,
+                            (255.0 * live_ui_overlay_alpha).round().clamp(0.0, 255.0) as u8,
+                        ),
+                        Stroke::new(
+                            1.0,
+                            Color32::from_rgba_premultiplied(
+                                30,
+                                25,
+                                36,
+                                (124.0 * live_ui_overlay_alpha).round().clamp(0.0, 255.0) as u8,
+                            ),
+                        ),
+                        StrokeKind::Outside,
+                    );
+                }
             });
 
         self.render_modal_backdrop(ctx);
@@ -8427,9 +8530,6 @@ impl eframe::App for SoundFxApp {
         self.render_record_overlay_viewport(ctx);
         self.render_titlebar_drag_zone(ctx);
         self.render_custom_window_resize_handles(ctx);
-        if let Some(progress) = intro_transition {
-            self.render_transition_layer(ctx, progress, TransitionPhase::Intro);
-        }
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
