@@ -36,7 +36,7 @@ const AUDIO_FILTERS: &[&str] = &["wav", "mp3", "ogg", "flac", "m4a", "aac"];
 const APP_FRAME_RADIUS: f32 = 30.0;
 const APP_OUTER_MARGIN: f32 = 0.0;
 const LIVE_UI_FADE_SEC: f32 = 0.32;
-const TRANSITION_TARGET_EXPONENT: f32 = 18.0;
+const TRANSITION_POINT_COUNT: usize = 240;
 const MATERIAL_ICONS_FONT: &str = "material_icons";
 const PITCH_OVERLAY_ID: &str = "pitch-monitor-overlay";
 const PITCH_OVERLAY_TITLE: &str = "Sound FX Pitch Overlay";
@@ -364,7 +364,7 @@ impl SoundFxApp {
             pitch_overlay_native_visuals_applied: false,
             startup: StartupSplashState {
                 phase: TransitionPhase::Intro,
-                started_at: None,
+                started_at: Some(0.0),
                 live_started_at: None,
                 duration_sec: startup_transition_duration_sec,
                 close_sent: false,
@@ -7712,6 +7712,25 @@ impl SoundFxApp {
                     card_fill,
                     Stroke::new((1.2 - square_morph * 0.55).max(0.35), card_stroke),
                 ));
+                let rounded_card_lock_seed = ((square_morph - 0.9) / 0.1).clamp(0.0, 1.0);
+                let rounded_card_lock = rounded_card_lock_seed
+                    * rounded_card_lock_seed
+                    * (3.0 - 2.0 * rounded_card_lock_seed);
+                if rounded_card_lock > 0.0 {
+                    painter.rect(
+                        target_rect,
+                        CornerRadius::same(APP_FRAME_RADIUS as u8),
+                        Self::with_alpha(card_fill, rounded_card_lock),
+                        Stroke::new(
+                            egui::lerp(
+                                (1.2 - square_morph * 0.55).max(0.35)..=1.0,
+                                rounded_card_lock,
+                            ),
+                            Self::with_alpha(card_stroke, rounded_card_lock),
+                        ),
+                        StrokeKind::Outside,
+                    );
+                }
                 let glaze_center = Pos2::new(
                     center.x,
                     egui::lerp(
@@ -7740,6 +7759,22 @@ impl SoundFxApp {
                     glaze_fill,
                     Stroke::NONE,
                 ));
+                if rounded_card_lock > 0.0 {
+                    let top_glaze_rect = Rect::from_min_max(
+                        Pos2::new(target_rect.left() + 18.0, target_rect.top() + 14.0),
+                        Pos2::new(
+                            target_rect.right() - 18.0,
+                            target_rect.top() + target_rect.height() * 0.34,
+                        ),
+                    );
+                    painter.rect(
+                        top_glaze_rect,
+                        CornerRadius::same(((APP_FRAME_RADIUS * 0.85).round() as u8).max(8)),
+                        Self::with_alpha(glaze_fill, rounded_card_lock * 0.92),
+                        Stroke::NONE,
+                        StrokeKind::Outside,
+                    );
+                }
 
                 let inner_rect = Rect::from_center_size(
                     center,
@@ -7955,9 +7990,9 @@ impl SoundFxApp {
         wobble: f32,
         time: f32,
     ) -> Vec<Pos2> {
-        let mut points = Vec::with_capacity(72);
-        for step in 0..72 {
-            let angle = step as f32 / 72.0 * std::f32::consts::TAU;
+        let mut points = Vec::with_capacity(TRANSITION_POINT_COUNT);
+        for step in 0..TRANSITION_POINT_COUNT {
+            let angle = step as f32 / TRANSITION_POINT_COUNT as f32 * std::f32::consts::TAU;
             let cos = angle.cos();
             let sin = angle.sin();
             let power = 2.0 / exponent.max(2.0);
@@ -7968,6 +8003,143 @@ impl SoundFxApp {
                 + wobble * 0.45 * (angle * 5.0 - time * 0.9).cos();
             points.push(Pos2::new(center.x + x * drift, center.y + y * drift));
         }
+        points
+    }
+
+    fn rounded_rect_points(rect: Rect, radius: f32) -> Vec<Pos2> {
+        let half_w = rect.width().max(1.0) * 0.5;
+        let half_h = rect.height().max(1.0) * 0.5;
+        let radius = radius.min(half_w).min(half_h).max(0.0);
+        let inner_half_w = (half_w - radius).max(0.0);
+        let inner_half_h = (half_h - radius).max(0.0);
+        let right = rect.right();
+        let left = rect.left();
+        let top = rect.top();
+        let bottom = rect.bottom();
+        let center_y = rect.center().y;
+
+        if radius <= 0.0 {
+            let segments = [
+                ((right, center_y), (right, bottom)),
+                ((right, bottom), (left, bottom)),
+                ((left, bottom), (left, top)),
+                ((left, top), (right, top)),
+                ((right, top), (right, center_y)),
+            ];
+            let total = (bottom - center_y)
+                + rect.width()
+                + rect.height()
+                + rect.width()
+                + (center_y - top);
+            let mut points = Vec::with_capacity(TRANSITION_POINT_COUNT);
+            for step in 0..TRANSITION_POINT_COUNT {
+                let mut distance = step as f32 / TRANSITION_POINT_COUNT as f32 * total;
+                for &((x1, y1), (x2, y2)) in &segments {
+                    let length = (x2 - x1).abs() + (y2 - y1).abs();
+                    if distance <= length || length <= f32::EPSILON {
+                        let t = if length <= f32::EPSILON {
+                            0.0
+                        } else {
+                            distance / length
+                        };
+                        points.push(Pos2::new(egui::lerp(x1..=x2, t), egui::lerp(y1..=y2, t)));
+                        break;
+                    }
+                    distance -= length;
+                }
+            }
+            return points;
+        }
+
+        let right_half = inner_half_h;
+        let vertical = inner_half_h * 2.0;
+        let horizontal = inner_half_w * 2.0;
+        let arc = std::f32::consts::FRAC_PI_2 * radius;
+        let total = right_half * 2.0 + vertical + horizontal * 2.0 + arc * 4.0;
+        let mut points = Vec::with_capacity(TRANSITION_POINT_COUNT);
+
+        for step in 0..TRANSITION_POINT_COUNT {
+            let mut distance = step as f32 / TRANSITION_POINT_COUNT as f32 * total;
+
+            if distance <= right_half {
+                points.push(Pos2::new(right, center_y + distance));
+                continue;
+            }
+            distance -= right_half;
+
+            if distance <= arc {
+                let angle = egui::lerp(
+                    0.0..=std::f32::consts::FRAC_PI_2,
+                    distance / arc.max(f32::EPSILON),
+                );
+                points.push(Pos2::new(
+                    right - radius + angle.cos() * radius,
+                    bottom - radius + angle.sin() * radius,
+                ));
+                continue;
+            }
+            distance -= arc;
+
+            if distance <= horizontal {
+                points.push(Pos2::new(right - radius - distance, bottom));
+                continue;
+            }
+            distance -= horizontal;
+
+            if distance <= arc {
+                let angle = egui::lerp(
+                    std::f32::consts::FRAC_PI_2..=std::f32::consts::PI,
+                    distance / arc.max(f32::EPSILON),
+                );
+                points.push(Pos2::new(
+                    left + radius + angle.cos() * radius,
+                    bottom - radius + angle.sin() * radius,
+                ));
+                continue;
+            }
+            distance -= arc;
+
+            if distance <= vertical {
+                points.push(Pos2::new(left, bottom - radius - distance));
+                continue;
+            }
+            distance -= vertical;
+
+            if distance <= arc {
+                let angle = egui::lerp(
+                    std::f32::consts::PI..=std::f32::consts::PI * 1.5,
+                    distance / arc.max(f32::EPSILON),
+                );
+                points.push(Pos2::new(
+                    left + radius + angle.cos() * radius,
+                    top + radius + angle.sin() * radius,
+                ));
+                continue;
+            }
+            distance -= arc;
+
+            if distance <= horizontal {
+                points.push(Pos2::new(left + radius + distance, top));
+                continue;
+            }
+            distance -= horizontal;
+
+            if distance <= arc {
+                let angle = egui::lerp(
+                    std::f32::consts::PI * 1.5..=std::f32::consts::TAU,
+                    distance / arc.max(f32::EPSILON),
+                );
+                points.push(Pos2::new(
+                    right - radius + angle.cos() * radius,
+                    top + radius + angle.sin() * radius,
+                ));
+                continue;
+            }
+            distance -= arc;
+
+            points.push(Pos2::new(right, top + radius + distance));
+        }
+
         points
     }
 
@@ -7986,15 +8158,26 @@ impl SoundFxApp {
             return blob;
         }
 
-        let target_exponent = egui::lerp(exponent.max(2.0)..=TRANSITION_TARGET_EXPONENT, morph);
-        let target_shape = Self::squircle_points(
+        let settled_blob = Self::squircle_points(
             target_rect.center(),
             target_rect.width() * 0.5,
             target_rect.height() * 0.5,
-            target_exponent,
-            0.0,
-            0.0,
+            egui::lerp(exponent.max(2.0)..=8.8, morph),
+            wobble * (1.0 - morph * 0.82).max(0.0),
+            time,
         );
+        let rounded_card = Self::rounded_rect_points(target_rect, APP_FRAME_RADIUS);
+        let corner_lock = morph.clamp(0.0, 1.0).powf(2.4);
+        let target_shape = settled_blob
+            .into_iter()
+            .zip(rounded_card)
+            .map(|(blob_point, rounded_point)| {
+                Pos2::new(
+                    egui::lerp(blob_point.x..=rounded_point.x, corner_lock),
+                    egui::lerp(blob_point.y..=rounded_point.y, corner_lock),
+                )
+            })
+            .collect::<Vec<_>>();
         let eased_morph = morph * morph * (3.0 - 2.0 * morph);
 
         blob.into_iter()

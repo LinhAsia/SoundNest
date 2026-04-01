@@ -24,6 +24,7 @@ use std::sync::Arc;
 use windows::Win32::{
     Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, HANDLE},
     System::Threading::CreateMutexW,
+    UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN},
 };
 #[cfg(windows)]
 use windows::core::PCWSTR;
@@ -71,7 +72,8 @@ fn main() -> eframe::Result<()> {
             .with_min_inner_size([720.0, 720.0])
             .with_resizable(true)
             .with_decorations(false)
-            .with_transparent(true),
+            .with_transparent(true)
+            .with_position(initial_window_position([900.0, 900.0])),
         ..Default::default()
     };
 
@@ -114,6 +116,7 @@ fn run_already_running_notice() -> eframe::Result<()> {
             .with_resizable(false)
             .with_decorations(false)
             .with_transparent(true)
+            .with_position(initial_window_position([420.0, 320.0]))
             .with_always_on_top(),
         ..Default::default()
     };
@@ -371,6 +374,23 @@ fn configure_fonts(ctx: &egui::Context) {
         .or_default()
         .push(MATERIAL_ICONS_FONT.to_owned());
     ctx.set_fonts(fonts);
+}
+
+#[cfg(windows)]
+fn initial_window_position([width, height]: [f32; 2]) -> Pos2 {
+    unsafe {
+        let screen_w = GetSystemMetrics(SM_CXSCREEN).max(0) as f32;
+        let screen_h = GetSystemMetrics(SM_CYSCREEN).max(0) as f32;
+        Pos2::new(
+            ((screen_w - width) * 0.5).max(0.0),
+            ((screen_h - height) * 0.5).max(0.0),
+        )
+    }
+}
+
+#[cfg(not(windows))]
+fn initial_window_position([_width, _height]: [f32; 2]) -> Pos2 {
+    Pos2::ZERO
 }
 
 fn configure_theme(ctx: &egui::Context) {
