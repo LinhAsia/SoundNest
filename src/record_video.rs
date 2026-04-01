@@ -20,6 +20,7 @@ pub fn export_record_pitch_video<F>(
     audio_path: &Path,
     frames: &[OfflinePitchFrame],
     duration_secs: f32,
+    animated: bool,
     mut progress: F,
 ) -> Result<PathBuf>
 where
@@ -48,7 +49,7 @@ where
     progress(0.45, "Rendering frames");
     for (index, frame) in frames.iter().enumerate() {
         let path = temp_dir.join(format!("frame_{index:05}.ppm"));
-        write_ppm_frame(&path, frame)?;
+        write_ppm_frame(&path, frame, animated)?;
         if index % 4 == 0 || index + 1 == frames.len() {
             let frame_progress = (index + 1) as f32 / frames.len().max(1) as f32;
             progress(0.45 + frame_progress * 0.35, "Rendering frames");
@@ -56,7 +57,7 @@ where
     }
 
     let ass_path = temp_dir.join("notes.ass");
-    fs::write(&ass_path, build_ass_script(frames, duration_secs))
+    fs::write(&ass_path, build_ass_script(frames, duration_secs, animated))
         .with_context(|| format!("unable to write {}", ass_path.display()))?;
 
     let mut cmd = Command::new(ffmpeg_path);
@@ -96,76 +97,15 @@ where
     Ok(output_path)
 }
 
-fn write_ppm_frame(path: &Path, frame: &OfflinePitchFrame) -> Result<()> {
+fn write_ppm_frame(path: &Path, frame: &OfflinePitchFrame, animated: bool) -> Result<()> {
     let mut buffer = vec![0u8; VIDEO_WIDTH * VIDEO_HEIGHT * 3];
-    fill(&mut buffer, [9, 7, 12]);
+    fill(&mut buffer, [8, 6, 12]);
 
-    draw_capsule(
-        &mut buffer,
-        VIDEO_WIDTH,
-        VIDEO_HEIGHT,
-        110.0,
-        164.0,
-        850.0,
-        218.0,
-        48.0,
-        [48, 17, 39],
-    );
-    draw_capsule(
-        &mut buffer,
-        VIDEO_WIDTH,
-        VIDEO_HEIGHT,
-        126.0,
-        180.0,
-        818.0,
-        186.0,
-        44.0,
-        [22, 18, 28],
-    );
-
-    let pulse = frame.level.clamp(0.04, 1.0);
-    draw_circle(
-        &mut buffer,
-        VIDEO_WIDTH,
-        VIDEO_HEIGHT,
-        172.0,
-        238.0,
-        18.0 + pulse * 11.0,
-        [227, 82, 149],
-    );
-    draw_circle(
-        &mut buffer,
-        VIDEO_WIDTH,
-        VIDEO_HEIGHT,
-        172.0,
-        238.0,
-        9.0,
-        [255, 213, 233],
-    );
-
-    draw_waveform(
-        &mut buffer,
-        VIDEO_WIDTH,
-        VIDEO_HEIGHT,
-        420.0,
-        238.0,
-        360.0,
-        56.0,
-        &frame.waveform,
-    );
-
-    let level_width = 120.0 * pulse;
-    draw_capsule(
-        &mut buffer,
-        VIDEO_WIDTH,
-        VIDEO_HEIGHT,
-        130.0,
-        320.0,
-        level_width.max(28.0),
-        12.0,
-        6.0,
-        [236, 116, 179],
-    );
+    if animated {
+        render_animated_frame(&mut buffer, frame);
+    } else {
+        render_static_frame(&mut buffer, frame);
+    }
 
     let mut bytes = Vec::with_capacity(24 + buffer.len());
     bytes.extend_from_slice(format!("P6\n{} {}\n255\n", VIDEO_WIDTH, VIDEO_HEIGHT).as_bytes());
@@ -173,9 +113,272 @@ fn write_ppm_frame(path: &Path, frame: &OfflinePitchFrame) -> Result<()> {
     fs::write(path, bytes).with_context(|| format!("unable to write {}", path.display()))
 }
 
-fn build_ass_script(frames: &[OfflinePitchFrame], duration_secs: f32) -> String {
-    let mut script = String::from(
-        "[Script Info]\nScriptType: v4.00+\nPlayResX: 960\nPlayResY: 540\nWrapStyle: 2\nScaledBorderAndShadow: yes\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Note,Segoe UI,62,&H00FCE2F1,&H00FCE2F1,&H00511431,&H00000000,1,0,0,0,100,100,0,0,1,1.8,0,5,0,0,140,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n",
+fn render_static_frame(buffer: &mut [u8], frame: &OfflinePitchFrame) {
+    let pulse = frame.level.clamp(0.04, 1.0);
+    let pitch_shift = (frame.pitch_ratio - 0.5) * 2.0;
+
+    draw_circle(
+        buffer,
+        VIDEO_WIDTH,
+        VIDEO_HEIGHT,
+        260.0 + pitch_shift * 18.0,
+        162.0 - pitch_shift * 20.0,
+        120.0 + pulse * 26.0,
+        [28, 14, 32],
+    );
+    draw_circle(
+        buffer,
+        VIDEO_WIDTH,
+        VIDEO_HEIGHT,
+        712.0 - pitch_shift * 22.0,
+        376.0 + pitch_shift * 18.0,
+        138.0 + pulse * 24.0,
+        [18, 10, 24],
+    );
+
+    draw_capsule(
+        buffer,
+        VIDEO_WIDTH,
+        VIDEO_HEIGHT,
+        56.0,
+        56.0,
+        848.0,
+        428.0,
+        56.0,
+        [39, 20, 40],
+    );
+    draw_capsule(
+        buffer,
+        VIDEO_WIDTH,
+        VIDEO_HEIGHT,
+        76.0,
+        76.0,
+        808.0,
+        388.0,
+        50.0,
+        [19, 15, 26],
+    );
+    draw_capsule(
+        buffer,
+        VIDEO_WIDTH,
+        VIDEO_HEIGHT,
+        104.0,
+        106.0,
+        752.0,
+        76.0,
+        36.0,
+        [30, 23, 36],
+    );
+    draw_capsule(
+        buffer,
+        VIDEO_WIDTH,
+        VIDEO_HEIGHT,
+        104.0,
+        206.0,
+        752.0,
+        142.0,
+        34.0,
+        [24, 19, 30],
+    );
+    draw_capsule(
+        buffer,
+        VIDEO_WIDTH,
+        VIDEO_HEIGHT,
+        104.0,
+        376.0,
+        752.0,
+        22.0,
+        11.0,
+        [40, 30, 46],
+    );
+
+    draw_circle(
+        buffer,
+        VIDEO_WIDTH,
+        VIDEO_HEIGHT,
+        144.0,
+        144.0,
+        20.0 + pulse * 10.0,
+        [235, 96, 171],
+    );
+    draw_circle(
+        buffer,
+        VIDEO_WIDTH,
+        VIDEO_HEIGHT,
+        144.0,
+        144.0,
+        8.5 + pulse * 3.5,
+        [255, 227, 240],
+    );
+
+    draw_waveform(
+        buffer,
+        VIDEO_WIDTH,
+        VIDEO_HEIGHT,
+        480.0,
+        277.0,
+        648.0,
+        84.0,
+        &frame.waveform,
+    );
+
+    let level_width = 752.0 * pulse.max(0.08);
+    draw_capsule(
+        buffer,
+        VIDEO_WIDTH,
+        VIDEO_HEIGHT,
+        104.0,
+        376.0,
+        level_width,
+        22.0,
+        11.0,
+        [236, 116, 179],
+    );
+}
+
+fn render_animated_frame(buffer: &mut [u8], frame: &OfflinePitchFrame) {
+    let pulse = frame.level.clamp(0.04, 1.0);
+    let pitch_shift = (frame.pitch_ratio - 0.5) * 2.0;
+    let center_x = 480.0 + pitch_shift * 18.0;
+    let center_y = 270.0 - pitch_shift * 24.0;
+    let base_w = 148.0 + pulse * 26.0 + pitch_shift.abs() * 10.0;
+    let base_h = 132.0 + pulse * 22.0;
+    let phase = frame.pitch_ratio * std::f32::consts::TAU * 1.15 + pulse * 1.8;
+
+    draw_circle(
+        buffer,
+        VIDEO_WIDTH,
+        VIDEO_HEIGHT,
+        center_x - 116.0,
+        center_y - 82.0,
+        base_w * 0.92,
+        [22, 10, 30],
+    );
+    draw_circle(
+        buffer,
+        VIDEO_WIDTH,
+        VIDEO_HEIGHT,
+        center_x + 108.0,
+        center_y + 94.0,
+        base_h * 0.98,
+        [16, 10, 24],
+    );
+    draw_circle(
+        buffer,
+        VIDEO_WIDTH,
+        VIDEO_HEIGHT,
+        center_x,
+        center_y,
+        (base_w + base_h) * 0.62,
+        [33, 14, 36],
+    );
+
+    draw_organic_blob(
+        buffer,
+        center_x,
+        center_y + 10.0,
+        base_w * 1.16,
+        base_h * 1.14,
+        2.95,
+        0.056 + pulse * 0.03,
+        phase + 0.35,
+        [18, 12, 24],
+    );
+    draw_organic_blob(
+        buffer,
+        center_x,
+        center_y,
+        base_w,
+        base_h,
+        3.15,
+        0.068 + pulse * 0.04,
+        phase,
+        [78, 28, 68],
+    );
+    draw_organic_blob(
+        buffer,
+        center_x,
+        center_y - 4.0,
+        base_w * 0.72,
+        base_h * 0.7,
+        3.35,
+        0.034 + pulse * 0.022,
+        phase - 0.42,
+        [255, 213, 232],
+    );
+
+    draw_waveform(
+        buffer,
+        VIDEO_WIDTH,
+        VIDEO_HEIGHT,
+        center_x,
+        center_y + base_h * 0.58,
+        260.0 + pulse * 54.0,
+        34.0 + pulse * 12.0,
+        &frame.waveform,
+    );
+
+    for index in 0..6 {
+        let angle = index as f32 / 6.0 * std::f32::consts::TAU + phase * 0.18;
+        let orbit = base_w * (0.96 + (index % 3) as f32 * 0.1);
+        let x = center_x + angle.cos() * orbit;
+        let y = center_y + angle.sin() * orbit * 0.68;
+        draw_circle(
+            buffer,
+            VIDEO_WIDTH,
+            VIDEO_HEIGHT,
+            x,
+            y,
+            4.6 + (index % 3) as f32 * 1.8 + pulse * 1.7,
+            [244, 124, 186],
+        );
+    }
+}
+
+fn draw_organic_blob(
+    buffer: &mut [u8],
+    center_x: f32,
+    center_y: f32,
+    half_w: f32,
+    half_h: f32,
+    exponent: f32,
+    wobble: f32,
+    phase: f32,
+    color: [u8; 3],
+) {
+    let left = (center_x - half_w * 1.18).max(0.0) as usize;
+    let top = (center_y - half_h * 1.18).max(0.0) as usize;
+    let right = (center_x + half_w * 1.18).min(VIDEO_WIDTH as f32 - 1.0) as usize;
+    let bottom = (center_y + half_h * 1.18).min(VIDEO_HEIGHT as f32 - 1.0) as usize;
+    let power = exponent.max(2.0);
+
+    for py in top..=bottom {
+        for px in left..=right {
+            let fx = px as f32 + 0.5 - center_x;
+            let fy = py as f32 + 0.5 - center_y;
+            let norm_x = fx / half_w.max(1.0);
+            let norm_y = fy / half_h.max(1.0);
+            let angle = norm_y.atan2(norm_x);
+            let radial = 1.0
+                + wobble * (angle * 2.0 + phase).sin()
+                + wobble * 0.55 * (angle * 3.0 - phase * 0.8).cos()
+                + wobble * 0.32 * (angle * 5.0 + phase * 1.3).sin();
+            let shape = (norm_x / radial).abs().powf(power) + (norm_y / radial).abs().powf(power);
+            if shape <= 1.0 {
+                set_pixel(buffer, VIDEO_WIDTH, px, py, color);
+            }
+        }
+    }
+}
+
+fn build_ass_script(frames: &[OfflinePitchFrame], duration_secs: f32, animated: bool) -> String {
+    let note_style = if animated {
+        "Style: Note,Segoe UI,58,&H00FCE2F1,&H00FCE2F1,&H00511431,&H00000000,1,0,0,0,100,100,0,0,1,1.8,0,5,0,0,140,1"
+    } else {
+        "Style: Note,Segoe UI,54,&H00FCE2F1,&H00FCE2F1,&H00511431,&H00000000,1,0,0,0,100,100,0,0,1,1.6,0,8,0,0,112,1"
+    };
+    let mut script = format!(
+        "[Script Info]\nScriptType: v4.00+\nPlayResX: 960\nPlayResY: 540\nWrapStyle: 2\nScaledBorderAndShadow: yes\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n{note_style}\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
     );
 
     let mut start = 0usize;

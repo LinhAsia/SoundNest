@@ -27,6 +27,7 @@ pub struct MyinstantsSnapshot {
     pub completed_add_to_library: bool,
 }
 
+#[derive(Clone)]
 pub struct MyinstantsClient {
     download_dir: PathBuf,
     preview_dir: PathBuf,
@@ -300,11 +301,50 @@ fn sanitize_file_name(input: &str) -> String {
 }
 
 fn decode_html(input: &str) -> String {
-    input
-        .replace("&amp;", "&")
-        .replace("&quot;", "\"")
-        .replace("&#39;", "'")
-        .replace("&apos;", "'")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
+    decode_numeric_entities(
+        &input
+            .replace("&amp;", "&")
+            .replace("&quot;", "\"")
+            .replace("&#39;", "'")
+            .replace("&apos;", "'")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">"),
+    )
+}
+
+fn decode_numeric_entities(input: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+    let chars = input.chars().collect::<Vec<_>>();
+    let mut index = 0;
+    while index < chars.len() {
+        if chars[index] == '&' && index + 3 < chars.len() && chars[index + 1] == '#' {
+            let mut cursor = index + 2;
+            let is_hex = if cursor < chars.len() && (chars[cursor] == 'x' || chars[cursor] == 'X') {
+                cursor += 1;
+                true
+            } else {
+                false
+            };
+            let digits_start = cursor;
+            while cursor < chars.len() && chars[cursor] != ';' {
+                cursor += 1;
+            }
+            if cursor < chars.len() && cursor > digits_start {
+                let digits = chars[digits_start..cursor].iter().collect::<String>();
+                let parsed = if is_hex {
+                    u32::from_str_radix(&digits, 16).ok()
+                } else {
+                    digits.parse::<u32>().ok()
+                };
+                if let Some(value) = parsed.and_then(char::from_u32) {
+                    output.push(value);
+                    index = cursor + 1;
+                    continue;
+                }
+            }
+        }
+        output.push(chars[index]);
+        index += 1;
+    }
+    output
 }

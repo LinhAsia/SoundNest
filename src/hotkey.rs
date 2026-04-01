@@ -16,13 +16,13 @@ mod windows_impl {
         System::Threading::GetCurrentThreadId,
         UI::{
             Input::KeyboardAndMouse::{
-                GetAsyncKeyState, VK_0, VK_1, VK_2, VK_3, VK_4, VK_5, VK_6, VK_7, VK_8, VK_9,
-                VK_A, VK_B, VK_BACK, VK_C, VK_CONTROL, VK_D, VK_DELETE, VK_DOWN, VK_E, VK_END,
-                VK_ESCAPE, VK_F, VK_F1, VK_F10, VK_F11, VK_F12, VK_F2, VK_F3, VK_F4, VK_F5,
-                VK_F6, VK_F7, VK_F8, VK_F9, VK_G, VK_H, VK_HOME, VK_I, VK_INSERT, VK_J, VK_K,
-                VK_L, VK_LEFT, VK_LWIN, VK_M, VK_MENU, VK_N, VK_NEXT, VK_O, VK_P, VK_PRIOR,
-                VK_Q, VK_R, VK_RETURN, VK_RIGHT, VK_RWIN, VK_S, VK_SHIFT, VK_SPACE, VK_T, VK_TAB,
-                VK_U, VK_UP, VK_V, VK_W, VK_X, VK_Y, VK_Z,
+                GetAsyncKeyState, VK_0, VK_1, VK_2, VK_3, VK_4, VK_5, VK_6, VK_7, VK_8, VK_9, VK_A,
+                VK_B, VK_BACK, VK_C, VK_CONTROL, VK_D, VK_DELETE, VK_DOWN, VK_E, VK_END, VK_ESCAPE,
+                VK_F, VK_F1, VK_F2, VK_F3, VK_F4, VK_F5, VK_F6, VK_F7, VK_F8, VK_F9, VK_F10,
+                VK_F11, VK_F12, VK_G, VK_H, VK_HOME, VK_I, VK_INSERT, VK_J, VK_K, VK_L, VK_LEFT,
+                VK_LWIN, VK_M, VK_MENU, VK_N, VK_NEXT, VK_O, VK_P, VK_PRIOR, VK_Q, VK_R, VK_RETURN,
+                VK_RIGHT, VK_RWIN, VK_S, VK_SHIFT, VK_SPACE, VK_T, VK_TAB, VK_U, VK_UP, VK_V, VK_W,
+                VK_X, VK_Y, VK_Z,
             },
             WindowsAndMessaging::{
                 CallNextHookEx, DispatchMessageW, GetMessageW, HC_ACTION, KBDLLHOOKSTRUCT, MSG,
@@ -119,9 +119,10 @@ mod windows_impl {
             self.state
                 .suppress_next_release
                 .store(false, Ordering::Relaxed);
-            self.state
-                .target_vk
-                .store(key.map(virtual_key_code).transpose()?.unwrap_or(0), Ordering::Relaxed);
+            self.state.target_vk.store(
+                key.map(virtual_key_code).transpose()?.unwrap_or(0),
+                Ordering::Relaxed,
+            );
             Ok(())
         }
 
@@ -169,11 +170,7 @@ mod windows_impl {
         }
     }
 
-    unsafe extern "system" fn keyboard_proc(
-        code: i32,
-        wparam: WPARAM,
-        lparam: LPARAM,
-    ) -> LRESULT {
+    unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
         if code == HC_ACTION as i32 && lparam.0 != 0 {
             let state = HOTKEY_STATE.get().cloned();
             if let Some(state) = state {
@@ -191,10 +188,7 @@ mod windows_impl {
                             }
                             WM_KEYUP | WM_SYSKEYUP => {
                                 if state.pressed.swap(false, Ordering::Relaxed) {
-                                    if state
-                                        .suppress_next_release
-                                        .swap(false, Ordering::Relaxed)
-                                    {
+                                    if state.suppress_next_release.swap(false, Ordering::Relaxed) {
                                         return LRESULT(1);
                                     }
                                     state.trigger_count.fetch_add(1, Ordering::Relaxed);

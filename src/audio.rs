@@ -83,26 +83,38 @@ impl AudioEngine {
     }
 
     pub fn play_file(&mut self, asset_path: &Path) -> Result<()> {
+        self.play_file_from(asset_path, 0.0)
+    }
+
+    pub fn play_file_from(&mut self, asset_path: &Path, start_position_secs: f32) -> Result<()> {
         self.stop();
 
-        let (channels, sample_rate, mut samples) = decode_audio_file(asset_path)?;
+        let (channels, sample_rate, samples) = decode_audio_file(asset_path)?;
         if samples.is_empty() {
             bail!("audio file is empty");
         }
-        soften_sample_edges(&mut samples, channels, sample_rate, POP_FADE_MS);
 
-        let duration_secs =
+        let total_duration_secs =
             samples.len() as f32 / channels.max(1) as f32 / sample_rate.max(1) as f32;
-        let preview = SamplesBuffer::new(channels, sample_rate, samples);
+        let total_frames = samples.len() / channels as usize;
+        let start_offset_secs = start_position_secs.clamp(0.0, total_duration_secs.max(0.0));
+        let start_frame = ((start_offset_secs * sample_rate as f32).floor() as usize)
+            .min(total_frames.saturating_sub(1));
+        let start_offset_secs = start_frame as f32 / sample_rate as f32;
+        let start_sample = start_frame * channels as usize;
+        let mut remaining_samples = samples[start_sample..].to_vec();
+        soften_sample_edges(&mut remaining_samples, channels, sample_rate, POP_FADE_MS);
+
+        let preview = SamplesBuffer::new(channels, sample_rate, remaining_samples);
         let sink = Sink::try_new(&self.handle).context("unable to create audio sink")?;
         sink.append(preview);
         sink.play();
 
         self.current_id = None;
         self.current_file_path = Some(asset_path.to_path_buf());
-        self.current_total_duration_secs = duration_secs;
+        self.current_total_duration_secs = total_duration_secs;
         self.current_trim_start_secs = 0.0;
-        self.current_start_offset_secs = 0.0;
+        self.current_start_offset_secs = start_offset_secs;
         self.current_speed = 1.0;
         self.sink = Some(sink);
         Ok(())

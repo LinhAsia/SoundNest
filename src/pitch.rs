@@ -26,6 +26,7 @@ pub struct PitchSnapshot {
 #[derive(Clone, Debug)]
 pub struct OfflinePitchFrame {
     pub note: String,
+    pub pitch_ratio: f32,
     pub level: f32,
     pub waveform: Vec<f32>,
 }
@@ -458,10 +459,15 @@ fn pitch_to_spn(frequency: f32, show_sharps_only: bool) -> String {
         format!("{sharp}{octave}")
     } else {
         match flat {
-            Some(flat_name) => format!("{sharp}/{flat_name}{octave}"),
+            Some(flat_name) => format!("{flat_name}{octave}"),
             None => format!("{sharp}{octave}"),
         }
     }
+}
+
+fn pitch_to_ratio(frequency: f32) -> f32 {
+    let midi = 69.0 + 12.0 * (frequency / 440.0).log2();
+    ((midi - 36.0) / 48.0).clamp(0.0, 1.0)
 }
 
 pub fn analyze_pitch_file(
@@ -504,6 +510,7 @@ pub fn analyze_pitch_file(
     let mut frames = Vec::with_capacity(frame_count);
     let mut level_history = VecDeque::from(vec![0.04; PITCH_WAVE_BARS]);
     let mut last_note = "--".to_owned();
+    let mut last_pitch_ratio = 0.5f32;
     let mut hold_frames = 0usize;
     let hold_limit = ((fps as f32 * PITCH_HOLD_TIME.as_secs_f32()).round() as usize).max(1);
 
@@ -521,33 +528,41 @@ pub fn analyze_pitch_file(
         let analysis_start = analysis_end.saturating_sub(PITCH_ANALYSIS_SAMPLES.min(analysis_end));
         let analysis_window = &mono[analysis_start..analysis_end];
 
-        let note = if let Some((frequency, confidence)) = detect_pitch(analysis_window, sample_rate)
+        let (note, pitch_ratio) = if let Some((frequency, confidence)) =
+            detect_pitch(analysis_window, sample_rate)
         {
             let candidate_note = pitch_to_spn(frequency, show_sharps_only);
+            let candidate_ratio = pitch_to_ratio(frequency);
             let sustained = candidate_note == last_note && confidence >= PITCH_SUSTAIN_CONFIDENCE;
             if confidence >= PITCH_ACCEPT_CONFIDENCE || sustained {
                 hold_frames = 0;
                 last_note = candidate_note;
-                last_note.clone()
+                last_pitch_ratio = last_pitch_ratio * 0.78 + candidate_ratio * 0.22;
+                (last_note.clone(), last_pitch_ratio)
             } else if level > 0.08 && last_note != "--" && hold_frames < hold_limit {
                 hold_frames += 1;
-                last_note.clone()
+                last_pitch_ratio = last_pitch_ratio * 0.92 + candidate_ratio * 0.08;
+                (last_note.clone(), last_pitch_ratio)
             } else {
                 hold_frames = 0;
                 last_note = "--".to_owned();
-                last_note.clone()
+                last_pitch_ratio = last_pitch_ratio * 0.86 + 0.5 * 0.14;
+                (last_note.clone(), last_pitch_ratio)
             }
         } else if level > 0.08 && last_note != "--" && hold_frames < hold_limit {
             hold_frames += 1;
-            last_note.clone()
+            last_pitch_ratio = last_pitch_ratio * 0.95 + 0.5 * 0.05;
+            (last_note.clone(), last_pitch_ratio)
         } else {
             hold_frames = 0;
             last_note = "--".to_owned();
-            last_note.clone()
+            last_pitch_ratio = last_pitch_ratio * 0.84 + 0.5 * 0.16;
+            (last_note.clone(), last_pitch_ratio)
         };
 
         frames.push(OfflinePitchFrame {
             note,
+            pitch_ratio,
             level,
             waveform: level_history.iter().copied().collect(),
         });
