@@ -11,6 +11,18 @@ use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 const WAVEFORM_BUCKETS: usize = 320;
+const DEFAULT_STARTUP_SOUND_NAME: &str = "spectrum start";
+const DEFAULT_EXIT_SOUND_NAME: &str = "spectrum end";
+#[cfg(windows)]
+const WINDOWS_STORAGE_ROOT: &str = r"D:\Data\soundfx manager";
+const DEFAULT_STARTUP_SOUND_BYTES: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/assets/default-startup.wav"
+));
+const DEFAULT_EXIT_SOUND_BYTES: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/assets/default-exit.wav"
+));
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SoundEffect {
@@ -33,6 +45,8 @@ pub struct VideoAsset {
     pub name: String,
     pub asset_file: String,
     pub duration_secs: f32,
+    #[serde(default = "default_video_fps")]
+    pub fps: u32,
     #[serde(default)]
     pub waveform: Vec<f32>,
 }
@@ -40,6 +54,10 @@ pub struct VideoAsset {
 impl VideoAsset {
     pub fn asset_path(&self, storage_dir: &Path) -> PathBuf {
         storage_dir.join("videos").join(&self.asset_file)
+    }
+
+    pub fn normalized_fps(&self) -> u32 {
+        normalize_video_fps(self.fps)
     }
 }
 
@@ -90,6 +108,8 @@ struct PreferencesFile {
     record_hotkey: Option<String>,
     startup_sound_name: Option<String>,
     exit_sound_name: Option<String>,
+    startup_sound_cleared: Option<bool>,
+    exit_sound_cleared: Option<bool>,
 }
 
 pub struct Storage {
@@ -97,6 +117,7 @@ pub struct Storage {
     sounds_dir: PathBuf,
     videos_dir: PathBuf,
     settings_sounds_dir: PathBuf,
+    bundled_sounds_dir: PathBuf,
     exports_dir: PathBuf,
     library_path: PathBuf,
     video_library_path: PathBuf,
@@ -105,17 +126,19 @@ pub struct Storage {
 
 impl Storage {
     pub fn new() -> Result<Self> {
-        let dirs = ProjectDirs::from("dev", "codex", "soundfx_manager")
-            .context("unable to resolve app data directory")?;
-        let root_dir = dirs.data_local_dir().to_path_buf();
+        let root_dir = preferred_storage_root()?;
+        migrate_storage_root_if_needed(&root_dir)?;
         let sounds_dir = root_dir.join("sounds");
         let videos_dir = root_dir.join("videos");
         let settings_sounds_dir = root_dir.join("settings-sounds");
+        let bundled_sounds_dir = root_dir.join("bundled-sounds");
         let exports_dir = root_dir.join("exports");
         fs::create_dir_all(&sounds_dir).context("unable to create sounds directory")?;
         fs::create_dir_all(&videos_dir).context("unable to create videos directory")?;
         fs::create_dir_all(&settings_sounds_dir)
             .context("unable to create settings sounds directory")?;
+        fs::create_dir_all(&bundled_sounds_dir)
+            .context("unable to create bundled sounds directory")?;
         fs::create_dir_all(&exports_dir).context("unable to create exports directory")?;
         let library_path = root_dir.join("library.json");
         let video_library_path = root_dir.join("video_library.json");
@@ -126,6 +149,7 @@ impl Storage {
             sounds_dir,
             videos_dir,
             settings_sounds_dir,
+            bundled_sounds_dir,
             exports_dir,
             library_path,
             video_library_path,
@@ -180,6 +204,11 @@ impl Storage {
             .retain(|video| video.asset_path(&self.root_dir).exists());
         let mut changed = false;
         for video in &mut library.videos {
+            let normalized_fps = video.normalized_fps();
+            if video.fps != normalized_fps {
+                video.fps = normalized_fps;
+                changed = true;
+            }
             if video.waveform.is_empty()
                 && let Ok(analysis) = analyze_audio_file(&video.asset_path(&self.root_dir), 96)
             {
@@ -289,16 +318,30 @@ impl Storage {
 
     pub fn load_startup_sound_name(&self) -> Result<Option<String>> {
         let preferences = self.load_preferences()?;
-        Ok(preferences
+        if let Some(name) = preferences
             .startup_sound_name
-            .filter(|_| self.startup_sound_path().exists()))
+            .filter(|_| self.startup_sound_path().exists())
+        {
+            return Ok(Some(name));
+        }
+        if preferences.startup_sound_cleared.unwrap_or(false) {
+            return Ok(None);
+        }
+        Ok(Some(DEFAULT_STARTUP_SOUND_NAME.to_owned()))
     }
 
     pub fn load_exit_sound_name(&self) -> Result<Option<String>> {
         let preferences = self.load_preferences()?;
-        Ok(preferences
+        if let Some(name) = preferences
             .exit_sound_name
-            .filter(|_| self.exit_sound_path().exists()))
+            .filter(|_| self.exit_sound_path().exists())
+        {
+            return Ok(Some(name));
+        }
+        if preferences.exit_sound_cleared.unwrap_or(false) {
+            return Ok(None);
+        }
+        Ok(Some(DEFAULT_EXIT_SOUND_NAME.to_owned()))
     }
 
     pub fn startup_sound_path(&self) -> PathBuf {
@@ -309,15 +352,45 @@ impl Storage {
         self.settings_sounds_dir.join("exit.wav")
     }
 
+    pub fn resolved_startup_sound_path(&self) -> Result<Option<PathBuf>> {
+        let preferences = self.load_preferences()?;
+        if preferences.startup_sound_cleared.unwrap_or(false) {
+            return Ok(None);
+        }
+        let custom_path = self.startup_sound_path();
+        if custom_path.exists() {
+            return Ok(Some(custom_path));
+        }
+        let bundled_path = self.bundled_sounds_dir.join("default-startup.wav");
+        self.ensure_bundled_sound(&bundled_path, DEFAULT_STARTUP_SOUND_BYTES)?;
+        Ok(Some(bundled_path))
+    }
+
+    pub fn resolved_exit_sound_path(&self) -> Result<Option<PathBuf>> {
+        let preferences = self.load_preferences()?;
+        if preferences.exit_sound_cleared.unwrap_or(false) {
+            return Ok(None);
+        }
+        let custom_path = self.exit_sound_path();
+        if custom_path.exists() {
+            return Ok(Some(custom_path));
+        }
+        let bundled_path = self.bundled_sounds_dir.join("default-exit.wav");
+        self.ensure_bundled_sound(&bundled_path, DEFAULT_EXIT_SOUND_BYTES)?;
+        Ok(Some(bundled_path))
+    }
+
     pub fn save_startup_sound(&self, sound: &SoundEffect) -> Result<()> {
         self.save_special_sound(sound, &self.startup_sound_path(), |preferences, name| {
             preferences.startup_sound_name = Some(name);
+            preferences.startup_sound_cleared = Some(false);
         })
     }
 
     pub fn save_exit_sound(&self, sound: &SoundEffect) -> Result<()> {
         self.save_special_sound(sound, &self.exit_sound_path(), |preferences, name| {
             preferences.exit_sound_name = Some(name);
+            preferences.exit_sound_cleared = Some(false);
         })
     }
 
@@ -328,6 +401,7 @@ impl Storage {
         }
         let mut preferences = self.load_preferences()?;
         preferences.startup_sound_name = None;
+        preferences.startup_sound_cleared = Some(true);
         self.save_preferences(&preferences)
     }
 
@@ -338,6 +412,7 @@ impl Storage {
         }
         let mut preferences = self.load_preferences()?;
         preferences.exit_sound_name = None;
+        preferences.exit_sound_cleared = Some(true);
         self.save_preferences(&preferences)
     }
 
@@ -355,6 +430,14 @@ impl Storage {
         let json =
             serde_json::to_string_pretty(preferences).context("unable to serialize preferences")?;
         fs::write(&self.preferences_path, json).context("unable to write preferences file")?;
+        Ok(())
+    }
+
+    fn ensure_bundled_sound(&self, path: &Path, bytes: &[u8]) -> Result<()> {
+        if path.exists() {
+            return Ok(());
+        }
+        fs::write(path, bytes).with_context(|| format!("unable to write {}", path.display()))?;
         Ok(())
     }
 
@@ -479,6 +562,7 @@ impl Storage {
         source_path: &Path,
         name: &str,
         duration_secs: f32,
+        fps: u32,
     ) -> Result<VideoAsset> {
         if !source_path.exists() {
             bail!("video file not found");
@@ -502,6 +586,7 @@ impl Storage {
             name: name.to_owned(),
             asset_file,
             duration_secs: duration_secs.max(0.05),
+            fps: normalize_video_fps(fps),
             waveform,
         })
     }
@@ -564,6 +649,176 @@ impl Storage {
     pub fn analyze_waveform_preview(&self, path: &Path, buckets: usize) -> Result<Vec<f32>> {
         Ok(analyze_audio_file(path, buckets.max(64))?.waveform)
     }
+
+    pub fn analyze_audio_preview(&self, path: &Path, buckets: usize) -> Result<(Vec<f32>, f32)> {
+        let analysis = analyze_audio_file(path, buckets.max(64))?;
+        Ok((analysis.waveform, analysis.duration_secs.max(0.05)))
+    }
+
+    pub fn audio_duration_secs(&self, path: &Path) -> Result<f32> {
+        Ok(analyze_audio_file(path, 64)?.duration_secs.max(0.05))
+    }
+}
+
+fn preferred_storage_root() -> Result<PathBuf> {
+    #[cfg(windows)]
+    {
+        return Ok(PathBuf::from(WINDOWS_STORAGE_ROOT));
+    }
+
+    #[cfg(not(windows))]
+    {
+        legacy_storage_root()?.context("unable to resolve app data directory")
+    }
+}
+
+fn legacy_storage_root() -> Result<Option<PathBuf>> {
+    Ok(ProjectDirs::from("dev", "codex", "soundfx_manager")
+        .map(|dirs| dirs.data_local_dir().to_path_buf()))
+}
+
+fn migrate_storage_root_if_needed(target_root: &Path) -> Result<()> {
+    let Some(legacy_root) = legacy_storage_root()? else {
+        return Ok(());
+    };
+
+    if legacy_root == target_root || !legacy_root.exists() {
+        return Ok(());
+    }
+
+    fs::create_dir_all(target_root)
+        .with_context(|| format!("unable to create {}", target_root.display()))?;
+    merge_directory_contents(&legacy_root, target_root)?;
+    remove_dir_if_empty(&legacy_root)?;
+    Ok(())
+}
+
+fn merge_directory_contents(source_dir: &Path, target_dir: &Path) -> Result<()> {
+    if !source_dir.exists() {
+        return Ok(());
+    }
+
+    fs::create_dir_all(target_dir)
+        .with_context(|| format!("unable to create {}", target_dir.display()))?;
+
+    for entry in fs::read_dir(source_dir)
+        .with_context(|| format!("unable to read {}", source_dir.display()))?
+    {
+        let entry = entry.with_context(|| format!("unable to read {}", source_dir.display()))?;
+        let source_path = entry.path();
+        let target_path = target_dir.join(entry.file_name());
+        merge_path(&source_path, &target_path)?;
+    }
+
+    Ok(())
+}
+
+fn merge_path(source_path: &Path, target_path: &Path) -> Result<()> {
+    if !target_path.exists() {
+        move_path(source_path, target_path)?;
+        return Ok(());
+    }
+
+    let source_meta = fs::metadata(source_path)
+        .with_context(|| format!("unable to read {}", source_path.display()))?;
+    let target_meta = fs::metadata(target_path)
+        .with_context(|| format!("unable to read {}", target_path.display()))?;
+
+    if source_meta.is_dir() && target_meta.is_dir() {
+        merge_directory_contents(source_path, target_path)?;
+        remove_dir_if_empty(source_path)?;
+        return Ok(());
+    }
+
+    if source_meta.is_file() && target_meta.is_file() {
+        return Ok(());
+    }
+
+    bail!(
+        "unable to merge {} into {}",
+        source_path.display(),
+        target_path.display()
+    )
+}
+
+fn move_path(source_path: &Path, target_path: &Path) -> Result<()> {
+    if let Some(parent) = target_path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("unable to create {}", parent.display()))?;
+    }
+
+    match fs::rename(source_path, target_path) {
+        Ok(()) => Ok(()),
+        Err(_) => copy_then_remove(source_path, target_path),
+    }
+}
+
+fn copy_then_remove(source_path: &Path, target_path: &Path) -> Result<()> {
+    let metadata = fs::metadata(source_path)
+        .with_context(|| format!("unable to read {}", source_path.display()))?;
+
+    if metadata.is_dir() {
+        copy_directory_recursive(source_path, target_path)?;
+        fs::remove_dir_all(source_path)
+            .with_context(|| format!("unable to remove {}", source_path.display()))?;
+    } else {
+        fs::copy(source_path, target_path).with_context(|| {
+            format!(
+                "unable to copy {} to {}",
+                source_path.display(),
+                target_path.display()
+            )
+        })?;
+        fs::remove_file(source_path)
+            .with_context(|| format!("unable to remove {}", source_path.display()))?;
+    }
+
+    Ok(())
+}
+
+fn copy_directory_recursive(source_dir: &Path, target_dir: &Path) -> Result<()> {
+    fs::create_dir_all(target_dir)
+        .with_context(|| format!("unable to create {}", target_dir.display()))?;
+
+    for entry in fs::read_dir(source_dir)
+        .with_context(|| format!("unable to read {}", source_dir.display()))?
+    {
+        let entry = entry.with_context(|| format!("unable to read {}", source_dir.display()))?;
+        let source_path = entry.path();
+        let target_path = target_dir.join(entry.file_name());
+        let metadata = fs::metadata(&source_path)
+            .with_context(|| format!("unable to read {}", source_path.display()))?;
+        if metadata.is_dir() {
+            copy_directory_recursive(&source_path, &target_path)?;
+        } else {
+            if let Some(parent) = target_path.parent() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("unable to create {}", parent.display()))?;
+            }
+            fs::copy(&source_path, &target_path).with_context(|| {
+                format!(
+                    "unable to copy {} to {}",
+                    source_path.display(),
+                    target_path.display()
+                )
+            })?;
+        }
+    }
+
+    Ok(())
+}
+
+fn remove_dir_if_empty(path: &Path) -> Result<()> {
+    if !path.is_dir() {
+        return Ok(());
+    }
+
+    let mut entries =
+        fs::read_dir(path).with_context(|| format!("unable to read {}", path.display()))?;
+    if entries.next().is_none() {
+        fs::remove_dir(path).with_context(|| format!("unable to remove {}", path.display()))?;
+    }
+    Ok(())
 }
 
 struct AudioAnalysis {
@@ -707,4 +962,16 @@ fn sanitize_stem(name: &str) -> String {
 
 fn default_speed() -> f32 {
     1.0
+}
+
+fn default_video_fps() -> u32 {
+    20
+}
+
+fn normalize_video_fps(fps: u32) -> u32 {
+    match fps {
+        60 => 60,
+        144 => 144,
+        _ => default_video_fps(),
+    }
 }

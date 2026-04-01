@@ -25,10 +25,11 @@ mod windows_platform {
                 ILRemoveLastID, SHDoDragDrop,
             },
             WindowsAndMessaging::{
-                FindWindowW, GWL_EXSTYLE, GWL_STYLE, GetWindowLongW, HWND_TOPMOST,
-                SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE,
-                SetWindowLongW, SetWindowPos, WS_CAPTION, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
-                WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_POPUP, WS_SYSMENU, WS_THICKFRAME,
+                FindWindowW, GWL_EXSTYLE, GWL_STYLE, GetWindowLongW, HWND_NOTOPMOST, HWND_TOPMOST,
+                IDC_ARROW, LoadCursorW, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE,
+                SWP_NOOWNERZORDER, SWP_NOSIZE, SetCursor, SetWindowLongW, SetWindowPos, WS_CAPTION,
+                WS_EX_APPWINDOW, WS_EX_TOOLWINDOW, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_POPUP,
+                WS_SYSMENU, WS_THICKFRAME,
             },
         },
     };
@@ -93,6 +94,32 @@ mod windows_platform {
                 DWMWA_WINDOW_CORNER_PREFERENCE,
                 &corner as *const _ as *const _,
                 std::mem::size_of_val(&corner) as u32,
+            );
+        }
+    }
+
+    pub fn set_native_window_topmost(frame: &Frame, enabled: bool) {
+        let Ok(window_handle) = frame.window_handle() else {
+            return;
+        };
+        let hwnd = match window_handle.as_raw() {
+            RawWindowHandle::Win32(handle) => HWND(handle.hwnd.get() as *mut _),
+            _ => return,
+        };
+
+        unsafe {
+            let _ = SetWindowPos(
+                hwnd,
+                Some(if enabled {
+                    HWND_TOPMOST
+                } else {
+                    HWND_NOTOPMOST
+                }),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER,
             );
         }
     }
@@ -207,29 +234,35 @@ mod windows_platform {
         unsafe {
             OleInitialize(None).context("unable to initialize OLE drag session")?;
             let _ole_guard = OleGuard;
+            let drag_result = (|| -> Result<()> {
+                let full_pidl = ILCreateFromPathW(PCWSTR(wide_path.as_ptr()));
+                if full_pidl.is_null() {
+                    bail!("unable to create shell drag path");
+                }
+                let _full_pidl_guard = PidlGuard(full_pidl);
 
-            let full_pidl = ILCreateFromPathW(PCWSTR(wide_path.as_ptr()));
-            if full_pidl.is_null() {
-                bail!("unable to create shell drag path");
+                let parent_pidl = ILClone(full_pidl);
+                let child_pidl = ILClone(ILFindLastID(full_pidl));
+                if parent_pidl.is_null() || child_pidl.is_null() {
+                    bail!("unable to create shell drag data");
+                }
+                let _parent_pidl_guard = PidlGuard(parent_pidl);
+                let _child_pidl_guard = PidlGuard(child_pidl);
+
+                let _ = ILRemoveLastID(Some(parent_pidl));
+                let child_items = [child_pidl as *const _];
+                let data_object =
+                    CIDLData_CreateFromIDArray(parent_pidl as *const _, Some(&child_items))
+                        .context("unable to build drag payload")?;
+                let drop_source: IDropSource = FileDropSource.into();
+                let _ = SHDoDragDrop(None, &data_object, &drop_source, DROPEFFECT_COPY)
+                    .context("unable to start drag and drop")?;
+                Ok(())
+            })();
+            if let Ok(cursor) = LoadCursorW(None, IDC_ARROW) {
+                let _ = SetCursor(Some(cursor));
             }
-            let _full_pidl_guard = PidlGuard(full_pidl);
-
-            let parent_pidl = ILClone(full_pidl);
-            let child_pidl = ILClone(ILFindLastID(full_pidl));
-            if parent_pidl.is_null() || child_pidl.is_null() {
-                bail!("unable to create shell drag data");
-            }
-            let _parent_pidl_guard = PidlGuard(parent_pidl);
-            let _child_pidl_guard = PidlGuard(child_pidl);
-
-            let _ = ILRemoveLastID(Some(parent_pidl));
-            let child_items = [child_pidl as *const _];
-            let data_object =
-                CIDLData_CreateFromIDArray(parent_pidl as *const _, Some(&child_items))
-                    .context("unable to build drag payload")?;
-            let drop_source: IDropSource = FileDropSource.into();
-            let _ = SHDoDragDrop(None, &data_object, &drop_source, DROPEFFECT_COPY)
-                .context("unable to start drag and drop")?;
+            drag_result?;
         }
 
         Ok(())
@@ -241,6 +274,9 @@ pub use windows_platform::*;
 
 #[cfg(not(windows))]
 pub fn set_native_window_shadow(_frame: &eframe::Frame, _enabled: bool) {}
+
+#[cfg(not(windows))]
+pub fn set_native_window_topmost(_frame: &eframe::Frame, _enabled: bool) {}
 
 #[cfg(not(windows))]
 pub fn set_overlay_window_native_visuals(

@@ -39,7 +39,6 @@ mod windows_impl {
         target_vk: AtomicU32,
         trigger_count: AtomicU64,
         pressed: AtomicBool,
-        suppress_next_release: AtomicBool,
         last_error: Mutex<Option<String>>,
         repaint_ctx: Mutex<Option<egui::Context>>,
     }
@@ -116,9 +115,6 @@ mod windows_impl {
             }
             self.current_key = key;
             self.state.pressed.store(false, Ordering::Relaxed);
-            self.state
-                .suppress_next_release
-                .store(false, Ordering::Relaxed);
             self.state.target_vk.store(
                 key.map(virtual_key_code).transpose()?.unwrap_or(0),
                 Ordering::Relaxed,
@@ -137,13 +133,6 @@ mod windows_impl {
             }
             self.last_seen = current;
             true
-        }
-
-        pub fn mark_consumed(&mut self) {
-            self.last_seen = self.state.trigger_count.load(Ordering::Relaxed);
-            self.state
-                .suppress_next_release
-                .store(true, Ordering::Relaxed);
         }
 
         pub fn take_error(&self) -> Option<String> {
@@ -188,9 +177,6 @@ mod windows_impl {
                             }
                             WM_KEYUP | WM_SYSKEYUP => {
                                 if state.pressed.swap(false, Ordering::Relaxed) {
-                                    if state.suppress_next_release.swap(false, Ordering::Relaxed) {
-                                        return LRESULT(1);
-                                    }
                                     state.trigger_count.fetch_add(1, Ordering::Relaxed);
                                     if let Some(ctx) = state.repaint_ctx.lock().unwrap().clone() {
                                         ctx.request_repaint();
@@ -313,8 +299,6 @@ impl GlobalHotkeyManager {
     pub fn take_triggered(&mut self) -> bool {
         false
     }
-
-    pub fn mark_consumed(&mut self) {}
 
     pub fn take_error(&self) -> Option<String> {
         None

@@ -130,9 +130,19 @@ fn run_already_running_notice() -> eframe::Result<()> {
 }
 
 #[cfg(windows)]
-#[derive(Default)]
 struct AlreadyRunningNoticeApp {
     started_at: Option<f64>,
+    centered_on_screen: bool,
+}
+
+#[cfg(windows)]
+impl Default for AlreadyRunningNoticeApp {
+    fn default() -> Self {
+        Self {
+            started_at: None,
+            centered_on_screen: false,
+        }
+    }
 }
 
 #[cfg(windows)]
@@ -209,6 +219,12 @@ impl eframe::App for AlreadyRunningNoticeApp {
             ctx.send_viewport_cmd(ViewportCommand::Close);
             return;
         }
+        if !self.centered_on_screen {
+            if let Some(center_cmd) = ViewportCommand::center_on_screen(ctx) {
+                ctx.send_viewport_cmd(center_cmd);
+            }
+            self.centered_on_screen = true;
+        }
 
         ctx.request_repaint_after(std::time::Duration::from_millis(16));
         CentralPanel::default()
@@ -216,10 +232,8 @@ impl eframe::App for AlreadyRunningNoticeApp {
             .show(ctx, |ui| {
                 let rect = ui.max_rect();
                 let painter = ui.painter_at(rect);
-                let center = Pos2::new(rect.center().x, rect.center().y + 10.0);
+                let center = rect.center();
                 let aura = (1.0 - (elapsed / 3.8)).clamp(0.0, 1.0);
-
-                painter.rect_filled(rect, 0.0, Color32::from_rgba_premultiplied(15, 8, 14, 32));
                 painter.circle_filled(
                     center,
                     126.0,
@@ -293,7 +307,7 @@ impl eframe::App for AlreadyRunningNoticeApp {
                 );
 
                 egui::Area::new(egui::Id::new("already-open-message"))
-                    .anchor(Align2::CENTER_TOP, vec2(0.0, 28.0))
+                    .anchor(Align2::CENTER_CENTER, vec2(0.0, 148.0))
                     .show(ctx, |ui| {
                         Frame::new()
                             .fill(Color32::from_rgba_premultiplied(255, 250, 252, 236))

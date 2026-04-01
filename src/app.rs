@@ -42,6 +42,14 @@ const RECORD_OVERLAY_ID: &str = "record-monitor-overlay";
 const RECORD_OVERLAY_TITLE: &str = "Sound FX Record Overlay";
 const ACTIVE_UI_REPAINT_MS: u64 = 33;
 const JOB_POLL_REPAINT_MS: u64 = 90;
+const DEFAULT_INTRO_DURATION_SEC: f32 = 1.35;
+const DEFAULT_OUTRO_DURATION_SEC: f32 = 0.72;
+const TRANSITION_WAVE_BUCKETS: usize = 160;
+const RECORD_EXPORT_VIDEO_FPS_OPTIONS: [u32; 3] = [
+    record_video::LOW_VIDEO_FPS,
+    record_video::STANDARD_VIDEO_FPS,
+    record_video::HIGH_VIDEO_FPS,
+];
 static DARK_THEME_ENABLED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -79,6 +87,7 @@ struct RecordVideoExportResult {
     processed_audio_path: PathBuf,
     video_path: PathBuf,
     duration_secs: f32,
+    video_fps: u32,
     video_name: String,
 }
 
@@ -97,6 +106,27 @@ enum MyinstantsWaveformMessage {
         audio_url: String,
         error: String,
     },
+}
+
+#[derive(Clone, Copy)]
+struct DownloadSiteBadge {
+    name: &'static str,
+    kind: DownloadSiteKind,
+    color: Color32,
+}
+
+#[derive(Clone, Copy)]
+enum DownloadSiteKind {
+    Youtube,
+    SoundCloud,
+    Bandcamp,
+    TikTok,
+    Facebook,
+    Instagram,
+    X,
+    Vimeo,
+    Twitch,
+    GoogleDrive,
 }
 
 pub struct SoundFxApp {
@@ -127,6 +157,7 @@ pub struct SoundFxApp {
     show_settings_panel: bool,
     show_trim_commit_panel: bool,
     import_dir: PathBuf,
+    import_audio_entries: Vec<PathBuf>,
     app_view: AppView,
     library_tab: LibraryTab,
     recorder: Recorder,
@@ -139,6 +170,7 @@ pub struct SoundFxApp {
     record_hotkey_manager: GlobalHotkeyManager,
     record_export_video_sharps: bool,
     record_export_video_animation: bool,
+    record_export_video_fps: u32,
     center_record_overlay_next_frame: bool,
     record_overlay_native_visuals_applied: bool,
     library_grid_scale: f32,
@@ -159,6 +191,7 @@ pub struct SoundFxApp {
     center_window_next_frame: bool,
     titlebar_drag_rect: Option<Rect>,
     native_shadow_applied: bool,
+    transition_window_topmost_applied: bool,
     record_overlay_open: bool,
     trim_timeline_zoom: f32,
     preview_cursor: Option<(Uuid, f32)>,
@@ -190,6 +223,8 @@ struct StartupSplashState {
     started_at: Option<f64>,
     duration_sec: f32,
     close_sent: bool,
+    sound_waveform: Vec<f32>,
+    sound_duration_sec: f32,
 }
 
 impl SoundFxApp {
@@ -256,6 +291,15 @@ impl SoundFxApp {
             .and_then(|value| Self::parse_key_name(&value));
         let startup_sound_name = storage.load_startup_sound_name().ok().flatten();
         let exit_sound_name = storage.load_exit_sound_name().ok().flatten();
+        let startup_transition_duration_sec = Self::custom_transition_duration_secs(
+            &storage,
+            &storage.startup_sound_path(),
+            DEFAULT_INTRO_DURATION_SEC,
+        );
+        let startup_transition_sound = Self::load_transition_sound_visual(
+            &storage,
+            storage.resolved_startup_sound_path().ok().flatten(),
+        );
 
         Self {
             storage,
@@ -285,6 +329,7 @@ impl SoundFxApp {
             show_settings_panel: false,
             show_trim_commit_panel: false,
             import_dir,
+            import_audio_entries: Vec::new(),
             app_view: AppView::Editor,
             library_tab: LibraryTab::Sounds,
             recorder: Recorder::new(),
@@ -297,6 +342,7 @@ impl SoundFxApp {
             record_hotkey_manager: GlobalHotkeyManager::new(),
             record_export_video_sharps: pitch_show_sharps,
             record_export_video_animation: pitch_overlay_animation,
+            record_export_video_fps: record_video::STANDARD_VIDEO_FPS,
             center_record_overlay_next_frame: false,
             record_overlay_native_visuals_applied: false,
             library_grid_scale,
@@ -316,12 +362,15 @@ impl SoundFxApp {
             startup: StartupSplashState {
                 phase: TransitionPhase::Intro,
                 started_at: None,
-                duration_sec: 1.35,
+                duration_sec: startup_transition_duration_sec,
                 close_sent: false,
+                sound_waveform: startup_transition_sound.0,
+                sound_duration_sec: startup_transition_sound.1,
             },
             center_window_next_frame: true,
             titlebar_drag_rect: None,
             native_shadow_applied: false,
+            transition_window_topmost_applied: false,
             record_overlay_open: false,
             trim_timeline_zoom: 1.0,
             preview_cursor: None,
@@ -346,6 +395,7 @@ impl SoundFxApp {
     fn with_initial_selection(mut self) -> Self {
         self.selected = self.sounds.first().map(|sound| sound.id);
         let _ = self.record_hotkey_manager.set_hotkey(self.record_hotkey);
+        self.refresh_import_audio_entries();
         self
     }
 
@@ -384,6 +434,34 @@ impl SoundFxApp {
 
     fn enforce_square_window_if_needed(&mut self, _ctx: &Context) {}
 
+    fn custom_transition_duration_secs(
+        storage: &Storage,
+        sound_path: &Path,
+        fallback_secs: f32,
+    ) -> f32 {
+        if !sound_path.exists() {
+            return fallback_secs;
+        }
+
+        storage
+            .audio_duration_secs(sound_path)
+            .unwrap_or(fallback_secs)
+            .max(0.05)
+    }
+
+    fn load_transition_sound_visual(
+        storage: &Storage,
+        sound_path: Option<PathBuf>,
+    ) -> (Vec<f32>, f32) {
+        let Some(sound_path) = sound_path else {
+            return (Vec::new(), 0.0);
+        };
+
+        storage
+            .analyze_audio_preview(&sound_path, TRANSITION_WAVE_BUCKETS)
+            .unwrap_or_else(|_| (Vec::new(), 0.0))
+    }
+
     fn request_close(&mut self, ctx: &Context) {
         if self.startup.phase == TransitionPhase::Outro {
             return;
@@ -398,7 +476,9 @@ impl SoundFxApp {
         }
         self.close_recording_review(true);
         self.video_viewer = None;
-        let _ = self.play_file_detached_if_exists(&self.storage.exit_sound_path());
+        if let Ok(Some(path)) = self.storage.resolved_exit_sound_path() {
+            let _ = self.play_file_detached_if_exists(&path);
+        }
         self.pitch_monitor.stop();
         self.pitch_overlay_native_visuals_applied = false;
         ctx.send_viewport_cmd_to(Self::pitch_overlay_viewport_id(), ViewportCommand::Close);
@@ -407,9 +487,19 @@ impl SoundFxApp {
             self.pending_save = false;
         }
 
+        let exit_transition_sound = Self::load_transition_sound_visual(
+            &self.storage,
+            self.storage.resolved_exit_sound_path().ok().flatten(),
+        );
         self.startup.phase = TransitionPhase::Outro;
         self.startup.started_at = None;
-        self.startup.duration_sec = 0.72;
+        self.startup.duration_sec = Self::custom_transition_duration_secs(
+            &self.storage,
+            &self.storage.exit_sound_path(),
+            DEFAULT_OUTRO_DURATION_SEC,
+        );
+        self.startup.sound_waveform = exit_transition_sound.0;
+        self.startup.sound_duration_sec = exit_transition_sound.1;
         ctx.request_repaint();
     }
 
@@ -469,8 +559,9 @@ impl SoundFxApp {
             return;
         }
         self.startup_sound_played = true;
-        let startup_path = self.storage.startup_sound_path();
-        let _ = self.play_file_if_exists(&startup_path);
+        if let Ok(Some(path)) = self.storage.resolved_startup_sound_path() {
+            let _ = self.play_file_if_exists(&path);
+        }
     }
 
     fn handle_space_preview(&mut self, ctx: &Context) {
@@ -610,6 +701,7 @@ impl SoundFxApp {
         let _ = self.storage.save_import_dir(
             (!self.import_dir.as_os_str().is_empty()).then_some(self.import_dir.as_path()),
         );
+        self.refresh_import_audio_entries();
     }
 
     fn truncate_middle_ascii(text: &str, max_chars: usize) -> String {
@@ -879,6 +971,14 @@ impl SoundFxApp {
         })
     }
 
+    fn normalize_record_export_video_fps(fps: u32) -> u32 {
+        match fps {
+            record_video::LOW_VIDEO_FPS => record_video::LOW_VIDEO_FPS,
+            record_video::HIGH_VIDEO_FPS => record_video::HIGH_VIDEO_FPS,
+            _ => record_video::STANDARD_VIDEO_FPS,
+        }
+    }
+
     fn stop_recording(&mut self) {
         self.recorder.stop();
         self.record_overlay_open = false;
@@ -919,6 +1019,19 @@ impl SoundFxApp {
     fn toggle_recording(&mut self) {
         if self.recorder.snapshot().running {
             self.stop_recording();
+        } else {
+            self.start_recording();
+        }
+    }
+
+    fn trigger_record_hotkey_action(&mut self, ctx: &Context) {
+        if self.recorder.snapshot().running {
+            self.reveal_record_review_on_open = true;
+            self.stop_recording();
+            if self.show_record_review_panel {
+                Self::reveal_window(ctx);
+                self.reveal_record_review_on_open = false;
+            }
         } else {
             self.start_recording();
         }
@@ -968,6 +1081,7 @@ impl SoundFxApp {
         let Some(draft) = self.recording_draft.as_ref() else {
             return;
         };
+        let keep_review_open = self.active_record_video_export.is_some();
 
         let export_path = match self
             .storage
@@ -987,7 +1101,9 @@ impl SoundFxApp {
                 self.sounds.insert(0, sound);
                 self.save_now();
                 let _ = fs::remove_file(&export_path);
-                self.close_recording_review(true);
+                if !keep_review_open {
+                    self.close_recording_review(true);
+                }
                 self.clear_status();
             }
             Err(error) => {
@@ -1014,6 +1130,7 @@ impl SoundFxApp {
         let root_dir = self.storage.root_dir().to_path_buf();
         let show_sharps = self.record_export_video_sharps;
         let animated = self.record_export_video_animation;
+        let export_fps = Self::normalize_record_export_video_fps(self.record_export_video_fps);
         let (tx, rx) = mpsc::channel();
         self.active_record_video_export = Some(RecordVideoExportState {
             progress: 0.04,
@@ -1045,7 +1162,7 @@ impl SoundFxApp {
 
                 send_progress(0.28, "Analyzing pitch");
                 let (duration_secs, frames) =
-                    analyze_pitch_file(&processed_audio, record_video::video_fps(), show_sharps)?;
+                    analyze_pitch_file(&processed_audio, export_fps, show_sharps)?;
 
                 let video_path = record_video::export_record_pitch_video(
                     &root_dir,
@@ -1053,6 +1170,7 @@ impl SoundFxApp {
                     &processed_audio,
                     &frames,
                     duration_secs,
+                    export_fps,
                     animated,
                     |progress, stage| send_progress(progress, stage),
                 )?;
@@ -1062,6 +1180,7 @@ impl SoundFxApp {
                     processed_audio_path: processed_audio,
                     video_path,
                     duration_secs,
+                    video_fps: export_fps,
                     video_name,
                 })
             })();
@@ -1112,6 +1231,7 @@ impl SoundFxApp {
                     &exported.video_path,
                     &exported.video_name,
                     exported.duration_secs,
+                    exported.video_fps,
                 ) {
                     Ok(mut video) => {
                         if let Ok(waveform) = self
@@ -1193,36 +1313,11 @@ impl SoundFxApp {
         if self.is_transition_active() {
             return;
         }
-        if let Some(key) = self.record_hotkey
-            && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, key))
-        {
-            self.record_hotkey_manager.mark_consumed();
-            if self.recorder.snapshot().running {
-                self.reveal_record_review_on_open = true;
-                self.stop_recording();
-                if self.show_record_review_panel {
-                    Self::reveal_window(ctx);
-                    self.reveal_record_review_on_open = false;
-                }
-            } else {
-                self.start_recording();
-            }
-            return;
-        }
         if let Some(error) = self.record_hotkey_manager.take_error() {
             self.set_error_status(error);
         }
         if self.record_hotkey_manager.take_triggered() {
-            if self.recorder.snapshot().running {
-                self.reveal_record_review_on_open = true;
-                self.stop_recording();
-                if self.show_record_review_panel {
-                    Self::reveal_window(ctx);
-                    self.reveal_record_review_on_open = false;
-                }
-            } else {
-                self.start_recording();
-            }
+            self.trigger_record_hotkey_action(ctx);
         }
     }
 
@@ -1473,10 +1568,8 @@ impl SoundFxApp {
         let export_path = self.storage.export_processed_sound(sound)?;
         self.ignored_drop_path =
             Some(fs::canonicalize(&export_path).unwrap_or_else(|_| export_path.clone()));
-        ctx.send_viewport_cmd(ViewportCommand::Visible(false));
+        self.pending_sound_drag = None;
         let result = platform::drag_file_out(&export_path);
-        ctx.send_viewport_cmd(ViewportCommand::Visible(true));
-        ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
         ctx.request_repaint();
         self.reset_cursor_icon_next_frame = true;
         result
@@ -1593,7 +1686,7 @@ impl SoundFxApp {
                     "-i",
                     &source_path.to_string_lossy(),
                     "-vf",
-                    &format!("fps={}", record_video::video_fps()),
+                    &format!("fps={}", video.normalized_fps()),
                     "-pix_fmt",
                     "rgb24",
                     &frame_pattern.to_string_lossy(),
@@ -2567,32 +2660,30 @@ impl SoundFxApp {
         }
     }
 
-    fn import_browser_entries(&self) -> Vec<(PathBuf, bool)> {
+    fn refresh_import_audio_entries(&mut self) {
+        self.import_audio_entries.clear();
         if self.import_dir.as_os_str().is_empty() || !self.import_dir.exists() {
-            return Vec::new();
+            return;
         }
 
-        let mut entries = fs::read_dir(&self.import_dir)
-            .ok()
-            .into_iter()
-            .flat_map(|iter| iter.filter_map(|entry| entry.ok()))
-            .filter_map(|entry| {
-                let path = entry.path();
-                let is_dir = path.is_dir();
-                if is_dir || is_supported_audio(&path) {
-                    Some((path, is_dir))
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<_>>();
+        Self::collect_audio_files_recursive(&self.import_dir, &mut self.import_audio_entries);
+        self.import_audio_entries
+            .sort_by(|left, right| left.cmp(right));
+    }
 
-        entries.sort_by(|(left_path, left_dir), (right_path, right_dir)| {
-            right_dir
-                .cmp(left_dir)
-                .then_with(|| left_path.file_name().cmp(&right_path.file_name()))
-        });
-        entries
+    fn collect_audio_files_recursive(root: &Path, output: &mut Vec<PathBuf>) {
+        let Ok(entries) = fs::read_dir(root) else {
+            return;
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                Self::collect_audio_files_recursive(&path, output);
+            } else if is_supported_audio(&path) {
+                output.push(path);
+            }
+        }
     }
 
     fn render_import_panel(&mut self, ctx: &Context) {
@@ -2601,9 +2692,7 @@ impl SoundFxApp {
         }
 
         let mut open_panel = self.show_import_panel;
-        let entries = self.import_browser_entries();
         let mut go_up = false;
-        let mut next_dir = None;
         let mut import_file = None;
         let mut close_request = false;
         let mut switch_root = None;
@@ -2741,12 +2830,17 @@ impl SoundFxApp {
                             return;
                         }
 
-                        for (path, is_dir) in entries {
+                        for path in &self.import_audio_entries {
                             let label = path
-                                .file_name()
+                                .strip_prefix(&self.import_dir)
+                                .ok()
                                 .and_then(|value| value.to_str())
-                                .unwrap_or("sound");
-                            let icon = if is_dir { 0xe2c8 } else { 0xeb82 };
+                                .filter(|value| !value.is_empty())
+                                .unwrap_or_else(|| {
+                                    path.file_name()
+                                        .and_then(|value| value.to_str())
+                                        .unwrap_or("sound")
+                                });
                             let row = Frame::new()
                                 .fill(Self::surface_fill())
                                 .stroke(Stroke::new(1.0, Self::border_color()))
@@ -2755,7 +2849,7 @@ impl SoundFxApp {
                                 .show(ui, |ui| {
                                     ui.horizontal(|ui| {
                                         ui.label(Self::icon(
-                                            icon,
+                                            0xeb82,
                                             18.0,
                                             Color32::from_rgb(214, 51, 132),
                                         ));
@@ -2777,11 +2871,7 @@ impl SoundFxApp {
                                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                             }
                             if response.clicked() {
-                                if is_dir {
-                                    next_dir = Some(path.clone());
-                                } else {
-                                    import_file = Some(path.clone());
-                                }
+                                import_file = Some(path.clone());
                             }
                             ui.add_space(10.0);
                         }
@@ -2799,9 +2889,6 @@ impl SoundFxApp {
         }
         if let Some(root) = switch_root {
             self.set_import_dir(Some(root));
-        }
-        if let Some(dir) = next_dir {
-            self.set_import_dir(Some(dir));
         }
         if let Some(path) = import_file {
             self.import_paths(vec![path]);
@@ -3202,18 +3289,85 @@ impl SoundFxApp {
                     });
 
                 ui.add_space(18.0);
-                ui.horizontal(|ui| {
-                    let animation =
-                        ui.checkbox(&mut self.record_export_video_animation, "Animation");
-                    if animation.changed() {
-                        ctx.request_repaint();
-                    }
-                    ui.add_space(10.0);
-                    let sharp = ui.checkbox(&mut self.record_export_video_sharps, "Sharp");
-                    if sharp.changed() {
-                        ctx.request_repaint();
-                    }
-                });
+                Frame::new()
+                    .fill(Self::panel_fill())
+                    .stroke(Stroke::new(1.0, Self::subtle_border_color()))
+                    .corner_radius(22.0)
+                    .inner_margin(Margin::same(16))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.allocate_ui_with_layout(
+                                vec2(44.0, 32.0),
+                                egui::Layout::left_to_right(Align::Center),
+                                |ui| {
+                                    ui.label(
+                                        RichText::new("Export")
+                                            .size(12.5)
+                                            .color(Self::muted_text_color()),
+                                    );
+                                },
+                            );
+                            ui.add_space(8.0);
+
+                            let animation = ui.add_sized(
+                                [108.0, 32.0],
+                                Self::action_button(
+                                    RichText::new("Animation").size(12.5),
+                                    self.record_export_video_animation,
+                                    false,
+                                ),
+                            );
+                            Self::decorate_button_response(ui, &animation);
+                            if animation.clicked() {
+                                self.record_export_video_animation =
+                                    !self.record_export_video_animation;
+                                ctx.request_repaint();
+                            }
+
+                            let sharp = ui.add_sized(
+                                [88.0, 32.0],
+                                Self::action_button(
+                                    RichText::new("Sharp").size(12.5),
+                                    self.record_export_video_sharps,
+                                    false,
+                                ),
+                            );
+                            Self::decorate_button_response(ui, &sharp);
+                            if sharp.clicked() {
+                                self.record_export_video_sharps = !self.record_export_video_sharps;
+                                ctx.request_repaint();
+                            }
+
+                            ui.add_space(10.0);
+                            ui.allocate_ui_with_layout(
+                                vec2(24.0, 32.0),
+                                egui::Layout::left_to_right(Align::Center),
+                                |ui| {
+                                    ui.label(
+                                        RichText::new("FPS")
+                                            .size(12.5)
+                                            .color(Self::muted_text_color()),
+                                    );
+                                },
+                            );
+                            for fps in RECORD_EXPORT_VIDEO_FPS_OPTIONS {
+                                let active = self.record_export_video_fps == fps;
+                                let response = ui.add_sized(
+                                    [74.0, 32.0],
+                                    Self::action_button(
+                                        RichText::new(format!("{fps}fps")).size(12.5),
+                                        active,
+                                        false,
+                                    ),
+                                );
+                                Self::decorate_button_response(ui, &response);
+                                if response.clicked() {
+                                    self.record_export_video_fps = fps;
+                                    ctx.request_repaint();
+                                }
+                            }
+                        });
+                    });
 
                 ui.add_space(12.0);
                 if let Some((progress, stage)) = export_progress.as_ref() {
@@ -3240,36 +3394,23 @@ impl SoundFxApp {
                 }
 
                 ui.horizontal_centered(|ui| {
-                    let preview = ui
-                        .add_enabled_ui(!exporting_video, |ui| {
-                            ui.add_sized(
-                                [118.0, 38.0],
-                                Self::action_button(
-                                    RichText::new(if is_playing { "Stop" } else { "Preview" })
-                                        .size(13.0),
-                                    is_playing,
-                                    false,
-                                ),
-                            )
-                        })
-                        .inner;
+                    let preview = ui.add_sized(
+                        [118.0, 38.0],
+                        Self::action_button(
+                            RichText::new(if is_playing { "Stop" } else { "Preview" }).size(13.0),
+                            is_playing,
+                            false,
+                        ),
+                    );
                     Self::decorate_button_response(ui, &preview);
                     if preview.clicked() {
                         preview_toggle = true;
                     }
 
-                    let save = ui
-                        .add_enabled_ui(!exporting_video, |ui| {
-                            ui.add_sized(
-                                [132.0, 38.0],
-                                Self::action_button(
-                                    RichText::new("Save audio").size(13.0),
-                                    false,
-                                    false,
-                                ),
-                            )
-                        })
-                        .inner;
+                    let save = ui.add_sized(
+                        [132.0, 38.0],
+                        Self::action_button(RichText::new("Save audio").size(13.0), false, false),
+                    );
                     Self::decorate_button_response(ui, &save);
                     if save.clicked() {
                         save_audio = true;
@@ -5868,7 +6009,8 @@ impl SoundFxApp {
                 ui.label("Space: preview or stop");
                 ui.label("Q: move the left trim to the mouse");
                 ui.label("W: move the right trim to the mouse");
-                ui.label("Ctrl + mouse wheel: zoom around the playhead");
+                ui.label("A / D: pan timeline left or right");
+                ui.label("Ctrl + mouse wheel: zoom around the hover playhead");
             });
             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                 ui.label(
@@ -5881,7 +6023,6 @@ impl SoundFxApp {
         ui.add_space(8.0);
 
         let viewport_width = ui.available_width().max(320.0);
-        let timeline_scroll_id = ui.make_persistent_id((sound.id, "trim-timeline-scroll"));
         let zoom_scroll_offset_id = egui::Id::new((sound.id, "trim-zoom-offset"));
         let pending_zoom_scroll_offset = ui
             .ctx()
@@ -5890,9 +6031,6 @@ impl SoundFxApp {
         let dark_theme = Self::dark_theme_enabled();
         let mut changed = false;
         let mut seek_requested = false;
-        let current_scroll_offset = egui::scroll_area::State::load(ui.ctx(), timeline_scroll_id)
-            .map(|state| state.offset.x)
-            .unwrap_or(0.0);
 
         ui.allocate_ui_with_layout(
             vec2(viewport_width, timeline_size.y + 10.0),
@@ -5907,6 +6045,7 @@ impl SoundFxApp {
                 scroll_area.show(ui, |ui| {
                     let (rect, response) =
                         ui.allocate_exact_size(timeline_size, Sense::click_and_drag());
+                    let viewport_rect = rect.intersect(ui.clip_rect());
                     let painter = ui.painter_at(rect);
                     let timeline_fill = if dark_theme {
                         Color32::from_rgb(11, 10, 14)
@@ -5980,23 +6119,6 @@ impl SoundFxApp {
                         Color32::from_rgb(214, 51, 132),
                     );
 
-                    let cursor_ratio = (*preview_cursor_secs / duration).clamp(0.0, 1.0);
-                    let cursor_x = rect.left() + rect.width() * cursor_ratio;
-                    painter.line_segment(
-                        [
-                            Pos2::new(cursor_x, rect.top() + 8.0),
-                            Pos2::new(cursor_x, rect.bottom() - 8.0),
-                        ],
-                        Stroke::new(
-                            2.0,
-                            if dark_theme {
-                                Color32::WHITE
-                            } else {
-                                Color32::from_rgb(42, 39, 44)
-                            },
-                        ),
-                    );
-
                     let start_handle_rect = Rect::from_center_size(
                         Pos2::new(start_x, rect.center().y),
                         vec2(24.0, rect.height()),
@@ -6016,18 +6138,75 @@ impl SoundFxApp {
                         Sense::click_and_drag(),
                     );
 
-                    let pointer_time = ui
+                    let pointer_pos = ui
                         .ctx()
                         .input(|input| input.pointer.hover_pos())
-                        .filter(|pos| rect.contains(*pos))
-                        .map(|pointer| {
-                            let ratio = ((pointer.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
-                            ratio * duration
-                        });
+                        .filter(|pos| viewport_rect.contains(*pos));
+                    let pointer_time = pointer_pos.map(|pointer| {
+                        let ratio = ((pointer.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
+                        ratio * duration
+                    });
+                    let playhead_outline = if dark_theme {
+                        Color32::from_rgba_premultiplied(8, 13, 19, 224)
+                    } else {
+                        Color32::from_rgba_premultiplied(255, 255, 255, 232)
+                    };
+                    let playhead_color = if dark_theme {
+                        Color32::from_rgb(108, 231, 255)
+                    } else {
+                        Color32::from_rgb(42, 39, 44)
+                    };
+                    let hover_playhead_color = if dark_theme {
+                        Color32::from_rgba_premultiplied(108, 231, 255, 150)
+                    } else {
+                        Color32::from_rgba_premultiplied(42, 39, 44, 110)
+                    };
+                    let hover_on_trim_handle = pointer_pos.is_some_and(|pointer| {
+                        start_handle_rect.expand(8.0).contains(pointer)
+                            || end_handle_rect.expand(8.0).contains(pointer)
+                    });
+                    let showing_hover_preview = response.hovered()
+                        && !hover_on_trim_handle
+                        && !start_response.is_pointer_button_down_on()
+                        && !end_response.is_pointer_button_down_on()
+                        && !response.dragged();
 
-                    if response.hovered() {
-                        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+                    if showing_hover_preview && let Some(pointer) = pointer_pos {
+                        painter.line_segment(
+                            [
+                                Pos2::new(pointer.x, rect.top() + 12.0),
+                                Pos2::new(pointer.x, rect.bottom() - 12.0),
+                            ],
+                            Stroke::new(1.0, hover_playhead_color),
+                        );
+                        painter.circle_filled(
+                            Pos2::new(pointer.x, rect.top() + 12.0),
+                            4.0,
+                            hover_playhead_color,
+                        );
                     }
+
+                    let cursor_ratio = (*preview_cursor_secs / duration).clamp(0.0, 1.0);
+                    let cursor_x = rect.left() + rect.width() * cursor_ratio;
+                    painter.line_segment(
+                        [
+                            Pos2::new(cursor_x, rect.top() + 8.0),
+                            Pos2::new(cursor_x, rect.bottom() - 8.0),
+                        ],
+                        Stroke::new(4.0, playhead_outline),
+                    );
+                    painter.line_segment(
+                        [
+                            Pos2::new(cursor_x, rect.top() + 8.0),
+                            Pos2::new(cursor_x, rect.bottom() - 8.0),
+                        ],
+                        Stroke::new(2.0, playhead_color),
+                    );
+                    painter.circle_filled(
+                        Pos2::new(cursor_x, rect.top() + 10.0),
+                        4.5,
+                        playhead_color,
+                    );
 
                     if response.hovered() && !ui.ctx().wants_keyboard_input() {
                         let zoom_delta = ui.input(|input| {
@@ -6038,16 +6217,23 @@ impl SoundFxApp {
                             }
                         });
                         if zoom_delta.abs() > 0.0 {
-                            let cursor_content_x = cursor_ratio * rect.width();
-                            let cursor_viewport_x = (cursor_content_x - current_scroll_offset)
-                                .clamp(0.0, viewport_width);
+                            let anchor_viewport_x = pointer_pos
+                                .map(|pointer| {
+                                    (pointer.x - viewport_rect.left())
+                                        .clamp(0.0, viewport_rect.width())
+                                })
+                                .unwrap_or(viewport_rect.width() * cursor_ratio.clamp(0.0, 1.0));
+                            let anchor_content_x = pointer_pos
+                                .map(|pointer| (pointer.x - rect.left()).clamp(0.0, rect.width()))
+                                .unwrap_or((cursor_ratio * rect.width()).clamp(0.0, rect.width()));
                             let factor = if zoom_delta > 0.0 { 1.12 } else { 1.0 / 1.12 };
                             *zoom = (*zoom * factor).clamp(1.0, 8.0);
                             let next_timeline_width = (viewport_width * *zoom).max(viewport_width);
-                            let next_cursor_content_x = cursor_ratio * next_timeline_width;
+                            let next_anchor_content_x =
+                                (anchor_content_x / rect.width().max(1.0)) * next_timeline_width;
                             let max_offset = (next_timeline_width - viewport_width).max(0.0);
                             let next_offset =
-                                (next_cursor_content_x - cursor_viewport_x).clamp(0.0, max_offset);
+                                (next_anchor_content_x - anchor_viewport_x).clamp(0.0, max_offset);
                             ui.ctx().data_mut(|data| {
                                 data.insert_temp(zoom_scroll_offset_id, next_offset);
                             });
@@ -6060,6 +6246,26 @@ impl SoundFxApp {
                         let move_right = ui.input_mut(|input| {
                             input.consume_key(egui::Modifiers::NONE, egui::Key::W)
                         });
+                        let pan_left = ui.input(|input| input.key_down(egui::Key::A));
+                        let pan_right = ui.input(|input| input.key_down(egui::Key::D));
+
+                        if pan_left || pan_right {
+                            let pan_speed = (viewport_rect.width() * 2.4).max(420.0);
+                            let pan_step =
+                                pan_speed * ui.input(|input| input.stable_dt).max(1.0 / 240.0);
+                            let max_offset = (rect.width() - viewport_rect.width()).max(0.0);
+                            let current_offset = (viewport_rect.left() - rect.left()).max(0.0);
+                            let delta = match (pan_left, pan_right) {
+                                (true, false) => -pan_step,
+                                (false, true) => pan_step,
+                                _ => 0.0,
+                            };
+                            let next_offset = (current_offset + delta).clamp(0.0, max_offset);
+                            ui.ctx().data_mut(|data| {
+                                data.insert_temp(zoom_scroll_offset_id, next_offset);
+                            });
+                            ui.ctx().request_repaint_after(Duration::from_millis(16));
+                        }
 
                         if let Some(pointer_time) = pointer_time {
                             if move_left {
@@ -6470,20 +6676,52 @@ impl SoundFxApp {
                     });
                 });
 
+                ui.add_space(12.0);
+                Self::render_download_site_badges(ui);
+
                 ui.add_space(10.0);
 
-                let response = ui.add(
-                    TextEdit::singleline(&mut self.download_url)
-                        .hint_text("https://youtube.com/watch?v=...")
-                        .desired_width(ui.available_width())
-                        .margin(Vec2::new(14.0, 12.0)),
-                );
-                if response.lost_focus()
-                    && ui.input(|input| input.key_pressed(egui::Key::Enter))
-                    && !snapshot.running
-                {
-                    should_start_download = true;
-                }
+                ui.horizontal(|ui| {
+                    let response = ui.add_sized(
+                        [ui.available_width() - 32.0, 42.0],
+                        TextEdit::singleline(&mut self.download_url)
+                            .hint_text("https://youtube.com/watch?v=... or soundcloud / tiktok / facebook")
+                            .desired_width(f32::INFINITY)
+                            .margin(Vec2::new(14.0, 12.0)),
+                    );
+                    if response.lost_focus()
+                        && ui.input(|input| input.key_pressed(egui::Key::Enter))
+                        && !snapshot.running
+                    {
+                        should_start_download = true;
+                    }
+
+                    let help = ui.add_sized(
+                        [24.0, 24.0],
+                        Button::new(Self::icon(0xe887, 16.0, Color32::from_rgb(214, 51, 132)))
+                            .fill(Self::surface_fill())
+                            .stroke(Stroke::new(1.0, Self::border_color()))
+                            .corner_radius(12.0),
+                    );
+                    if help.hovered() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::Help);
+                    }
+                    help.on_hover_ui_at_pointer(|ui| {
+                        ui.set_max_width(300.0);
+                        ui.label(
+                            RichText::new("Supported websites")
+                                .size(13.0)
+                                .color(Self::strong_text_color())
+                                .strong(),
+                        );
+                        ui.add_space(4.0);
+                        ui.label("Works through yt-dlp, so it supports many sites.");
+                        ui.label("Common examples: YouTube, SoundCloud, Bandcamp, TikTok, Facebook, Instagram, X/Twitter, Vimeo, Dailymotion, Bilibili, Twitch, Google Drive, direct media links.");
+                        ui.add_space(4.0);
+                        ui.label("Some sites can still fail because of login, region lock, cookies, or DRM.");
+                        ui.label("Spotify album / track links are usually DRM-protected and will not download.");
+                    });
+                });
 
                 ui.add_space(10.0);
 
@@ -7024,6 +7262,11 @@ impl SoundFxApp {
                 let rect = ui.max_rect();
                 let painter = ui.painter_at(rect);
                 let time = ctx.input(|input| input.time) as f32;
+                let audio_progress = self.transition_audio_progress(ctx).unwrap_or(progress);
+                let audio_level =
+                    Self::sample_waveform_level(&self.startup.sound_waveform, audio_progress);
+                let wave_bars =
+                    Self::transition_wave_bars(&self.startup.sound_waveform, audio_progress, 11);
                 let center = rect.center();
                 let (rose_ice, berry, magenta, plum, deep_plum, star_rgb, star_alpha_scale) =
                     if self.dark_theme {
@@ -7052,7 +7295,7 @@ impl SoundFxApp {
                     TransitionPhase::Outro => 1.0 - Self::ease_in_out_cubic(progress),
                     TransitionPhase::Live => 1.0,
                 };
-                let aura = (1.0 - t).clamp(0.0, 1.0);
+                let aura = ((1.0 - t) * (0.75 + audio_level * 0.5)).clamp(0.0, 1.0);
                 let overlay = match phase {
                     TransitionPhase::Intro => (1.0 - t * 0.7).clamp(0.0, 1.0),
                     TransitionPhase::Outro => Self::ease_in_out_cubic(progress),
@@ -7103,13 +7346,29 @@ impl SoundFxApp {
                         (118.0 + t * 124.0) as u8,
                     )
                 };
+                let note_base = if self.dark_theme {
+                    Color32::from_rgb(246, 124, 181)
+                } else {
+                    Color32::from_rgb(214, 51, 132)
+                };
+                let note_alt = if self.dark_theme {
+                    Color32::from_rgb(255, 188, 219)
+                } else {
+                    Color32::from_rgb(236, 116, 179)
+                };
+                let note_glow_rgb = if self.dark_theme {
+                    (227, 82, 149)
+                } else {
+                    (16, 10, 14)
+                };
                 let target_rect = Self::transition_target_rect(rect);
                 let base = rect.width().min(rect.height()).clamp(260.0, 440.0);
                 let half_w = egui::lerp((base * 0.17)..=(target_rect.width() * 0.5), t);
                 let half_h = egui::lerp((base * 0.13)..=(target_rect.height() * 0.5), t);
                 let exponent = egui::lerp(2.2..=6.4, t);
                 let wobble = (1.0 - t).powf(1.4) * 0.24;
-                let square_morph = Self::ease_in_out_cubic(((t - 0.48) / 0.52).clamp(0.0, 1.0));
+                let square_seed = ((t - 0.2) / 0.8).clamp(0.0, 1.0);
+                let square_morph = square_seed * square_seed * (3.0 - 2.0 * square_seed);
 
                 if self.dark_theme {
                     painter.circle_filled(
@@ -7336,17 +7595,14 @@ impl SoundFxApp {
                     vec2(half_w * 1.34, half_h * 1.12).min(target_rect.size() * 0.92),
                 );
                 let clip = painter.with_clip_rect(inner_rect.expand2(vec2(10.0, 10.0)));
-                let bars: [f32; 11] = [
-                    0.24, 0.42, 0.76, 0.94, 0.56, 0.28, 0.68, 0.88, 0.5, 0.22, 0.62,
-                ];
                 let band_rect = Rect::from_center_size(
                     Pos2::new(center.x, center.y - half_h * 0.06),
                     vec2(inner_rect.width() * 0.68, inner_rect.height() * 0.34),
                 );
-                let bar_width = band_rect.width() / bars.len() as f32;
-                for (index, bar) in bars.into_iter().enumerate() {
-                    let phase_shift = time * 4.4 + index as f32 * 0.68;
-                    let animated = (bar + 0.14_f32 * phase_shift.sin()).clamp(0.16, 1.0);
+                let bar_width = band_rect.width() / wave_bars.len().max(1) as f32;
+                for (index, bar) in wave_bars.iter().enumerate() {
+                    let phase_shift = time * 3.2 + index as f32 * 0.44;
+                    let animated = (*bar + 0.06_f32 * phase_shift.sin()).clamp(0.16, 1.0);
                     let x = band_rect.left() + (index as f32 + 0.5) * bar_width;
                     let half = animated * band_rect.height() * (0.2 + t * 0.3);
                     let wave_rect = Rect::from_min_max(
@@ -7364,13 +7620,17 @@ impl SoundFxApp {
                 for step in 0..120 {
                     let sample_t = step as f32 / 119.0;
                     let x = egui::lerp(ribbon_rect.left()..=ribbon_rect.right(), sample_t);
+                    let ribbon_energy = Self::sample_waveform_level(
+                        &self.startup.sound_waveform,
+                        (audio_progress + (sample_t - 0.5) * 0.18).clamp(0.0, 1.0),
+                    );
                     let y = ribbon_rect.center().y
                         + (sample_t * std::f32::consts::TAU * 2.2 + time * 2.9).sin()
                             * ribbon_rect.height()
-                            * 0.34
+                            * (0.18 + ribbon_energy * 0.34)
                         + (sample_t * std::f32::consts::TAU * 5.8 - time * 1.5).cos()
                             * ribbon_rect.height()
-                            * 0.14;
+                            * (0.08 + ribbon_energy * 0.14);
                     line.push(Pos2::new(x, y));
                 }
                 clip.add(egui::Shape::line(line, Stroke::new(4.0, ribbon_color)));
@@ -7392,30 +7652,103 @@ impl SoundFxApp {
 
                 for index in 0..7 {
                     let angle = time * 0.72 + index as f32 * 0.9;
-                    let orbit =
-                        egui::lerp((base * 0.32)..=(base * 0.18), t) + (index % 3) as f32 * 10.0;
+                    let orbit = egui::lerp((base * 0.32)..=(base * 0.18), t)
+                        + (index % 3) as f32 * 10.0
+                        + audio_level * 12.0;
                     let note_pos = Pos2::new(
                         center.x + angle.cos() * orbit,
                         center.y - half_h * 0.08 + angle.sin() * orbit * 0.72,
                     );
-                    let note_scale = 0.64 + (index % 3) as f32 * 0.12;
+                    let note_scale = 0.64 + (index % 3) as f32 * 0.12 + audio_level * 0.12;
                     let note_alpha = (160.0 * aura).clamp(0.0, 160.0) as u8;
                     let note_color = if index % 2 == 0 {
-                        Color32::from_rgba_premultiplied(255, 231, 242, note_alpha)
+                        Color32::from_rgba_premultiplied(
+                            note_base.r(),
+                            note_base.g(),
+                            note_base.b(),
+                            note_alpha,
+                        )
                     } else {
-                        Color32::from_rgba_premultiplied(238, 164, 202, note_alpha)
+                        Color32::from_rgba_premultiplied(
+                            note_alt.r(),
+                            note_alt.g(),
+                            note_alt.b(),
+                            note_alpha,
+                        )
                     };
-                    let glow_alpha = (96.0 * aura).clamp(0.0, 132.0) as u8;
+                    let glow_alpha = if self.dark_theme {
+                        (110.0 * aura).clamp(0.0, 148.0) as u8
+                    } else {
+                        (88.0 * aura).clamp(0.0, 128.0) as u8
+                    };
                     Self::paint_glowing_music_note(
                         &painter,
                         note_pos,
                         note_scale,
                         angle.sin() * 0.18,
                         note_color,
-                        Color32::from_rgba_premultiplied(227, 82, 149, glow_alpha),
+                        Color32::from_rgba_premultiplied(
+                            note_glow_rgb.0,
+                            note_glow_rgb.1,
+                            note_glow_rgb.2,
+                            glow_alpha,
+                        ),
                     );
                 }
             });
+    }
+
+    fn transition_audio_progress(&self, ctx: &Context) -> Option<f32> {
+        let started_at = self.startup.started_at?;
+        let duration_sec = self.startup.sound_duration_sec.max(0.0);
+        if duration_sec <= 0.0 {
+            return None;
+        }
+
+        let now = ctx.input(|input| input.time);
+        Some(((now - started_at) as f32 / duration_sec).clamp(0.0, 1.0))
+    }
+
+    fn sample_waveform_level(waveform: &[f32], progress: f32) -> f32 {
+        if waveform.is_empty() {
+            return 0.45;
+        }
+        if waveform.len() == 1 {
+            return waveform[0].clamp(0.05, 1.0);
+        }
+
+        let position = progress.clamp(0.0, 1.0) * (waveform.len() - 1) as f32;
+        let left_index = position.floor() as usize;
+        let right_index = position.ceil() as usize;
+        let mix = (position - left_index as f32).clamp(0.0, 1.0);
+        let left = waveform[left_index].clamp(0.05, 1.0);
+        let right = waveform[right_index.min(waveform.len() - 1)].clamp(0.05, 1.0);
+        egui::lerp(left..=right, mix)
+    }
+
+    fn transition_wave_bars(waveform: &[f32], progress: f32, count: usize) -> Vec<f32> {
+        if count == 0 {
+            return Vec::new();
+        }
+        if waveform.is_empty() {
+            return vec![
+                0.24, 0.42, 0.76, 0.94, 0.56, 0.28, 0.68, 0.88, 0.5, 0.22, 0.62,
+            ];
+        }
+
+        let mut bars = Vec::with_capacity(count);
+        let window = 0.26;
+        let middle = (count.saturating_sub(1)) as f32 * 0.5;
+        for index in 0..count {
+            let offset = if count <= 1 {
+                0.0
+            } else {
+                (index as f32 - middle) / middle.max(1.0)
+            };
+            let sample_progress = (progress + offset * window).clamp(0.0, 1.0);
+            bars.push(Self::sample_waveform_level(waveform, sample_progress));
+        }
+        bars
     }
 
     fn transition_target_rect(rect: Rect) -> Rect {
@@ -7470,35 +7803,26 @@ impl SoundFxApp {
             return blob;
         }
 
-        let mut points = Vec::with_capacity(blob.len());
-        let steps_per_side = (blob.len() / 4).max(1);
-        for (index, blob_point) in blob.into_iter().enumerate() {
-            let side = index / steps_per_side;
-            let side_t = (index % steps_per_side) as f32 / steps_per_side as f32;
-            let rect_point = match side {
-                0 => Pos2::new(
-                    egui::lerp(target_rect.left()..=target_rect.right(), side_t),
-                    target_rect.top(),
-                ),
-                1 => Pos2::new(
-                    target_rect.right(),
-                    egui::lerp(target_rect.top()..=target_rect.bottom(), side_t),
-                ),
-                2 => Pos2::new(
-                    egui::lerp(target_rect.right()..=target_rect.left(), side_t),
-                    target_rect.bottom(),
-                ),
-                _ => Pos2::new(
-                    target_rect.left(),
-                    egui::lerp(target_rect.bottom()..=target_rect.top(), side_t),
-                ),
-            };
-            points.push(Pos2::new(
-                egui::lerp(blob_point.x..=rect_point.x, morph),
-                egui::lerp(blob_point.y..=rect_point.y, morph),
-            ));
-        }
-        points
+        let target_exponent = egui::lerp(exponent.max(2.0)..=14.0, morph);
+        let target_shape = Self::squircle_points(
+            target_rect.center(),
+            target_rect.width() * 0.5,
+            target_rect.height() * 0.5,
+            target_exponent,
+            0.0,
+            0.0,
+        );
+        let eased_morph = morph * morph * (3.0 - 2.0 * morph);
+
+        blob.into_iter()
+            .zip(target_shape)
+            .map(|(blob_point, target_point)| {
+                Pos2::new(
+                    egui::lerp(blob_point.x..=target_point.x, eased_morph),
+                    egui::lerp(blob_point.y..=target_point.y, eased_morph),
+                )
+            })
+            .collect()
     }
 
     fn ease_in_out_cubic(t: f32) -> f32 {
@@ -7558,6 +7882,263 @@ impl SoundFxApp {
         }
         Self::paint_music_note(painter, center, scale, tilt, color);
     }
+
+    fn download_site_badges() -> [DownloadSiteBadge; 10] {
+        [
+            DownloadSiteBadge {
+                name: "YouTube",
+                kind: DownloadSiteKind::Youtube,
+                color: Color32::from_rgb(255, 77, 141),
+            },
+            DownloadSiteBadge {
+                name: "SoundCloud",
+                kind: DownloadSiteKind::SoundCloud,
+                color: Color32::from_rgb(255, 124, 72),
+            },
+            DownloadSiteBadge {
+                name: "Bandcamp",
+                kind: DownloadSiteKind::Bandcamp,
+                color: Color32::from_rgb(45, 156, 219),
+            },
+            DownloadSiteBadge {
+                name: "TikTok",
+                kind: DownloadSiteKind::TikTok,
+                color: Color32::from_rgb(24, 19, 30),
+            },
+            DownloadSiteBadge {
+                name: "Facebook",
+                kind: DownloadSiteKind::Facebook,
+                color: Color32::from_rgb(24, 119, 242),
+            },
+            DownloadSiteBadge {
+                name: "Instagram",
+                kind: DownloadSiteKind::Instagram,
+                color: Color32::from_rgb(193, 53, 132),
+            },
+            DownloadSiteBadge {
+                name: "X / Twitter",
+                kind: DownloadSiteKind::X,
+                color: Color32::from_rgb(16, 16, 16),
+            },
+            DownloadSiteBadge {
+                name: "Vimeo",
+                kind: DownloadSiteKind::Vimeo,
+                color: Color32::from_rgb(25, 183, 234),
+            },
+            DownloadSiteBadge {
+                name: "Twitch",
+                kind: DownloadSiteKind::Twitch,
+                color: Color32::from_rgb(145, 70, 255),
+            },
+            DownloadSiteBadge {
+                name: "Google Drive",
+                kind: DownloadSiteKind::GoogleDrive,
+                color: Color32::from_rgb(52, 168, 83),
+            },
+        ]
+    }
+
+    fn render_download_site_badges(ui: &mut Ui) {
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
+            for badge in Self::download_site_badges() {
+                let fill = if Self::dark_theme_enabled() {
+                    Color32::from_rgb(29, 25, 35)
+                } else {
+                    Color32::from_rgb(255, 251, 254)
+                };
+                let stroke = if Self::dark_theme_enabled() {
+                    Color32::from_rgb(82, 67, 90)
+                } else {
+                    Color32::from_rgb(230, 221, 229)
+                };
+                let response = Frame::new()
+                    .fill(fill)
+                    .stroke(Stroke::new(1.0, stroke))
+                    .corner_radius(14.0)
+                    .inner_margin(Margin::same(6))
+                    .show(ui, |ui| {
+                        let (icon_rect, _) =
+                            ui.allocate_exact_size(vec2(24.0, 24.0), Sense::hover());
+                        let painter = ui.painter_at(icon_rect);
+                        Self::paint_download_site_icon(&painter, icon_rect, badge);
+                    })
+                    .response
+                    .on_hover_text(badge.name);
+                Self::decorate_button_response(ui, &response);
+            }
+        });
+    }
+
+    fn paint_download_site_icon(painter: &egui::Painter, rect: Rect, badge: DownloadSiteBadge) {
+        let center = rect.center();
+        let white = Color32::WHITE;
+        let radius = rect.width().min(rect.height()) * 0.5;
+        painter.circle_filled(center, radius, badge.color);
+
+        match badge.kind {
+            DownloadSiteKind::Youtube => {
+                let body = Rect::from_center_size(center, vec2(15.0, 10.4));
+                painter.rect_filled(body, 4.0, white);
+                painter.add(egui::Shape::convex_polygon(
+                    vec![
+                        Pos2::new(center.x - 2.6, center.y - 3.4),
+                        Pos2::new(center.x - 2.6, center.y + 3.4),
+                        Pos2::new(center.x + 4.2, center.y),
+                    ],
+                    badge.color,
+                    Stroke::NONE,
+                ));
+            }
+            DownloadSiteKind::SoundCloud => {
+                let base_y = center.y + 4.2;
+                for (index, height) in [5.0, 6.6, 8.2, 9.2, 9.2].into_iter().enumerate() {
+                    let x = center.x - 7.0 + index as f32 * 2.1;
+                    let bar = Rect::from_min_max(
+                        Pos2::new(x, base_y - height),
+                        Pos2::new(x + 1.4, base_y + 0.8),
+                    );
+                    painter.rect_filled(bar, 1.0, white);
+                }
+                painter.circle_filled(Pos2::new(center.x + 2.4, center.y + 0.2), 4.4, white);
+                painter.circle_filled(Pos2::new(center.x + 5.6, center.y + 1.4), 3.2, white);
+                painter.rect_filled(
+                    Rect::from_min_max(
+                        Pos2::new(center.x - 0.2, center.y + 1.0),
+                        Pos2::new(center.x + 8.0, center.y + 4.8),
+                    ),
+                    2.0,
+                    white,
+                );
+            }
+            DownloadSiteKind::Bandcamp => {
+                painter.add(egui::Shape::convex_polygon(
+                    vec![
+                        Pos2::new(center.x - 6.6, center.y + 5.4),
+                        Pos2::new(center.x - 0.6, center.y - 5.4),
+                        Pos2::new(center.x + 7.0, center.y - 5.4),
+                        Pos2::new(center.x + 1.0, center.y + 5.4),
+                    ],
+                    white,
+                    Stroke::NONE,
+                ));
+            }
+            DownloadSiteKind::TikTok => {
+                painter.line_segment(
+                    [
+                        Pos2::new(center.x + 2.0, center.y - 6.6),
+                        Pos2::new(center.x + 2.0, center.y + 1.0),
+                    ],
+                    Stroke::new(2.4, white),
+                );
+                painter.line_segment(
+                    [
+                        Pos2::new(center.x + 2.0, center.y - 6.4),
+                        Pos2::new(center.x + 6.2, center.y - 4.3),
+                    ],
+                    Stroke::new(2.4, white),
+                );
+                painter.circle_stroke(
+                    Pos2::new(center.x - 1.8, center.y + 3.2),
+                    3.3,
+                    Stroke::new(2.0, white),
+                );
+            }
+            DownloadSiteKind::Facebook => {
+                painter.text(
+                    Pos2::new(center.x, center.y + 0.3),
+                    egui::Align2::CENTER_CENTER,
+                    "f",
+                    egui::FontId::proportional(18.0),
+                    white,
+                );
+            }
+            DownloadSiteKind::Instagram => {
+                let body = Rect::from_center_size(center, vec2(12.8, 12.8));
+                painter.rect_stroke(body, 4.0, Stroke::new(1.8, white), StrokeKind::Outside);
+                painter.circle_stroke(center, 3.3, Stroke::new(1.8, white));
+                painter.circle_filled(Pos2::new(center.x + 3.8, center.y - 3.8), 1.1, white);
+            }
+            DownloadSiteKind::X => {
+                painter.line_segment(
+                    [
+                        Pos2::new(center.x - 5.2, center.y - 5.4),
+                        Pos2::new(center.x + 5.4, center.y + 5.4),
+                    ],
+                    Stroke::new(2.2, white),
+                );
+                painter.line_segment(
+                    [
+                        Pos2::new(center.x + 5.2, center.y - 5.4),
+                        Pos2::new(center.x - 1.0, center.y + 0.4),
+                    ],
+                    Stroke::new(2.2, white),
+                );
+            }
+            DownloadSiteKind::Vimeo => {
+                painter.add(egui::Shape::line(
+                    vec![
+                        Pos2::new(center.x - 5.8, center.y - 2.2),
+                        Pos2::new(center.x - 2.0, center.y + 5.2),
+                        Pos2::new(center.x + 1.6, center.y - 0.8),
+                        Pos2::new(center.x + 5.2, center.y - 4.8),
+                    ],
+                    Stroke::new(2.4, white),
+                ));
+            }
+            DownloadSiteKind::Twitch => {
+                painter.add(egui::Shape::convex_polygon(
+                    vec![
+                        Pos2::new(center.x - 6.2, center.y - 5.6),
+                        Pos2::new(center.x + 5.4, center.y - 5.6),
+                        Pos2::new(center.x + 5.4, center.y + 2.0),
+                        Pos2::new(center.x + 1.4, center.y + 5.8),
+                        Pos2::new(center.x + 1.2, center.y + 2.0),
+                        Pos2::new(center.x - 6.2, center.y + 2.0),
+                    ],
+                    white,
+                    Stroke::NONE,
+                ));
+                painter.rect_filled(
+                    Rect::from_min_max(
+                        Pos2::new(center.x - 2.4, center.y - 2.4),
+                        Pos2::new(center.x - 0.9, center.y + 1.2),
+                    ),
+                    0.5,
+                    badge.color,
+                );
+                painter.rect_filled(
+                    Rect::from_min_max(
+                        Pos2::new(center.x + 0.8, center.y - 2.4),
+                        Pos2::new(center.x + 2.3, center.y + 1.2),
+                    ),
+                    0.5,
+                    badge.color,
+                );
+            }
+            DownloadSiteKind::GoogleDrive => {
+                let top = Pos2::new(center.x, center.y - 6.0);
+                let left = Pos2::new(center.x - 5.8, center.y + 4.8);
+                let right = Pos2::new(center.x + 5.8, center.y + 4.8);
+                let upper_left = Pos2::new(center.x - 2.0, center.y - 0.3);
+                let upper_right = Pos2::new(center.x + 2.0, center.y - 0.3);
+                painter.line_segment(
+                    [top, upper_left],
+                    Stroke::new(2.3, Color32::from_rgb(255, 205, 86)),
+                );
+                painter.line_segment(
+                    [top, upper_right],
+                    Stroke::new(2.3, Color32::from_rgb(66, 133, 244)),
+                );
+                painter.line_segment([left, upper_left], Stroke::new(2.3, white));
+                painter.line_segment([right, upper_right], Stroke::new(2.3, white));
+                painter.line_segment(
+                    [left, right],
+                    Stroke::new(2.3, Color32::from_rgb(15, 157, 88)),
+                );
+            }
+        }
+    }
 }
 
 impl eframe::App for SoundFxApp {
@@ -7568,6 +8149,7 @@ impl eframe::App for SoundFxApp {
 
     fn update(&mut self, ctx: &Context, frame: &mut eframe::Frame) {
         Self::apply_theme(ctx, self.dark_theme);
+        ctx.set_cursor_icon(egui::CursorIcon::Default);
         self.center_window_if_needed(ctx);
         self.intercept_close_request(ctx);
         self.poll_myinstants_waveform_jobs();
@@ -7585,6 +8167,11 @@ impl eframe::App for SoundFxApp {
         if self.native_shadow_applied != wants_shadow {
             platform::set_native_window_shadow(frame, wants_shadow);
             self.native_shadow_applied = wants_shadow;
+        }
+        let wants_transition_topmost = self.is_transition_active();
+        if self.transition_window_topmost_applied != wants_transition_topmost {
+            platform::set_native_window_topmost(frame, wants_transition_topmost);
+            self.transition_window_topmost_applied = wants_transition_topmost;
         }
 
         self.enforce_square_window_if_needed(ctx);

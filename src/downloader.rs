@@ -13,6 +13,10 @@ use zip::ZipArchive;
 
 const YTDLP_DOWNLOAD_URL: &str =
     "https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp.exe";
+const YTDLP_RELEASE_PAGE_URL: &str =
+    "https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest";
+const YTDLP_RELEASE_API_URL: &str =
+    "https://api.github.com/repos/yt-dlp/yt-dlp-nightly-builds/releases/latest";
 const FFMPEG_RELEASE_API_URL: &str =
     "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest";
 const DENO_DOWNLOAD_URL: &str =
@@ -182,8 +186,27 @@ fn run_download_job(
     }
     args.push(url.to_owned());
 
+    match run_ytdlp_download_attempt(&ytdlp_exe, &args, download_dir) {
+        Ok(path) => Ok(path),
+        Err(first_error) => {
+            update_state(state, "Refresh yt-dlp", None, None);
+            let refresh_note = refresh_ytdlp_after_failure(state, bin_dir)?;
+            update_state(state, "Retry download", None, None);
+            match run_ytdlp_download_attempt(&ytdlp_exe, &args, download_dir) {
+                Ok(path) => Ok(path),
+                Err(retry_error) => bail!("{first_error} | {refresh_note} | {retry_error}"),
+            }
+        }
+    }
+}
+
+fn run_ytdlp_download_attempt(
+    ytdlp_exe: &Path,
+    args: &[String],
+    download_dir: &Path,
+) -> Result<PathBuf> {
     let mut cmd = Command::new(&ytdlp_exe);
-    cmd.args(&args);
+    cmd.args(args);
     #[cfg(windows)]
     cmd.creation_flags(0x08000000);
 
@@ -216,7 +239,7 @@ fn run_download_job(
 
 fn ensure_ytdlp_installed(state: &Arc<Mutex<DownloadSnapshot>>, bin_dir: &Path) -> Result<()> {
     let ytdlp_path = bin_dir.join("yt-dlp.exe");
-    if ytdlp_path.exists() {
+    if ytdlp_path.exists() && validate_tool(&ytdlp_path, "--version").is_ok() {
         update_state(state, "yt-dlp ready", Some(1.0), None);
         return Ok(());
     }
@@ -228,6 +251,39 @@ fn ensure_ytdlp_installed(state: &Arc<Mutex<DownloadSnapshot>>, bin_dir: &Path) 
         "yt-dlp",
         "yt-dlp ready",
     )
+}
+
+fn refresh_ytdlp_after_failure(
+    state: &Arc<Mutex<DownloadSnapshot>>,
+    bin_dir: &Path,
+) -> Result<String> {
+    let ytdlp_path = bin_dir.join("yt-dlp.exe");
+    let local_version = read_local_ytdlp_version(&ytdlp_path).ok();
+    let remote_version = fetch_latest_ytdlp_version().ok();
+
+    if let (Some(local), Some(remote)) = (&local_version, &remote_version)
+        && local == remote
+    {
+        return Ok(format!("yt-dlp already up to date ({local})"));
+    }
+
+    let stage = if let Some(remote) = &remote_version {
+        format!("Updating yt-dlp {remote}")
+    } else {
+        "Updating yt-dlp".to_owned()
+    };
+    download_file(
+        YTDLP_DOWNLOAD_URL,
+        &ytdlp_path,
+        state,
+        &stage,
+        "yt-dlp ready",
+    )?;
+    let installed = read_local_ytdlp_version(&ytdlp_path)
+        .ok()
+        .or(remote_version)
+        .unwrap_or_else(|| "latest".to_owned());
+    Ok(format!("yt-dlp updated ({installed})"))
 }
 
 fn ensure_ffmpeg_installed(state: &Arc<Mutex<DownloadSnapshot>>, bin_dir: &Path) -> Result<()> {
@@ -345,6 +401,57 @@ fn download_file(
     fs::rename(&temp_path, path).with_context(|| format!("unable to write {}", path.display()))?;
     update_state(state, done_stage, Some(1.0), None);
     Ok(())
+}
+
+fn fetch_latest_ytdlp_version() -> Result<String> {
+    let _ = ureq::get(YTDLP_RELEASE_PAGE_URL)
+        .header("User-Agent", "Mozilla/5.0")
+        .call();
+
+    let response = ureq::get(YTDLP_RELEASE_API_URL)
+        .header("User-Agent", "SoundFxManager")
+        .header("Accept", "application/vnd.github+json")
+        .call()
+        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+    let body = response
+        .into_body()
+        .read_to_string()
+        .context("unable to read yt-dlp release metadata")?;
+    extract_json_string_field(&body, "tag_name")
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| anyhow::anyhow!("could not parse latest yt-dlp tag"))
+}
+
+fn read_local_ytdlp_version(ytdlp_path: &Path) -> Result<String> {
+    let mut cmd = Command::new(ytdlp_path);
+    cmd.arg("--version");
+    #[cfg(windows)]
+    cmd.creation_flags(0x08000000);
+
+    let output = cmd
+        .output()
+        .with_context(|| format!("failed to launch {}", ytdlp_path.display()))?;
+    if !output.status.success() {
+        bail!("yt-dlp --version failed: {}", output.status);
+    }
+
+    let version = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    if version.is_empty() {
+        bail!("yt-dlp --version returned empty output");
+    }
+    Ok(version)
+}
+
+fn extract_json_string_field(json: &str, field: &str) -> Option<String> {
+    let needle = format!("\"{field}\"");
+    let position = json.find(&needle)?;
+    let after_key = &json[position + needle.len()..];
+    let colon = after_key.find(':')?;
+    let after_colon = &after_key[colon + 1..];
+    let quote_start = after_colon.find('"')?;
+    let value_start = quote_start + 1;
+    let quote_end = after_colon[value_start..].find('"')?;
+    Some(after_colon[value_start..value_start + quote_end].to_owned())
 }
 
 fn resolve_ffmpeg_download_url() -> Result<String> {

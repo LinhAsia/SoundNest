@@ -504,7 +504,7 @@ pub fn analyze_pitch_file(
     }
 
     let duration_secs = mono.len() as f32 / sample_rate as f32;
-    let fps = fps.clamp(8, 30);
+    let fps = fps.clamp(8, 144);
     let frame_count = (duration_secs * fps as f32).ceil().max(1.0) as usize;
     let samples_per_frame = ((sample_rate as f32 / fps as f32).round() as usize).max(1);
     let mut frames = Vec::with_capacity(frame_count);

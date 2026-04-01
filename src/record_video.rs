@@ -8,11 +8,9 @@ use std::process::Command;
 
 const VIDEO_WIDTH: usize = 960;
 const VIDEO_HEIGHT: usize = 540;
-const VIDEO_FPS: u32 = 20;
-
-pub fn video_fps() -> u32 {
-    VIDEO_FPS
-}
+pub const STANDARD_VIDEO_FPS: u32 = 60;
+pub const HIGH_VIDEO_FPS: u32 = 144;
+pub const LOW_VIDEO_FPS: u32 = 30;
 
 pub fn export_record_pitch_video<F>(
     root_dir: &Path,
@@ -20,6 +18,7 @@ pub fn export_record_pitch_video<F>(
     audio_path: &Path,
     frames: &[OfflinePitchFrame],
     duration_secs: f32,
+    fps: u32,
     animated: bool,
     mut progress: F,
 ) -> Result<PathBuf>
@@ -29,6 +28,7 @@ where
     if frames.is_empty() {
         bail!("recording is empty");
     }
+    let fps = normalize_export_fps(fps);
 
     let output_dir = root_dir.join("record-videos");
     fs::create_dir_all(&output_dir)
@@ -57,20 +57,23 @@ where
     }
 
     let ass_path = temp_dir.join("notes.ass");
-    fs::write(&ass_path, build_ass_script(frames, duration_secs, animated))
-        .with_context(|| format!("unable to write {}", ass_path.display()))?;
+    fs::write(
+        &ass_path,
+        build_ass_script(frames, duration_secs, fps, animated),
+    )
+    .with_context(|| format!("unable to write {}", ass_path.display()))?;
 
     let mut cmd = Command::new(ffmpeg_path);
     cmd.current_dir(&temp_dir)
         .arg("-y")
         .arg("-framerate")
-        .arg(VIDEO_FPS.to_string())
+        .arg(fps.to_string())
         .arg("-i")
         .arg("frame_%05d.ppm")
         .arg("-i")
         .arg(audio_path)
         .arg("-vf")
-        .arg("ass=notes.ass")
+        .arg(format!("ass=notes.ass,fps={fps}"))
         .arg("-c:v")
         .arg("libx264")
         .arg("-pix_fmt")
@@ -371,7 +374,12 @@ fn draw_organic_blob(
     }
 }
 
-fn build_ass_script(frames: &[OfflinePitchFrame], duration_secs: f32, animated: bool) -> String {
+fn build_ass_script(
+    frames: &[OfflinePitchFrame],
+    duration_secs: f32,
+    fps: u32,
+    animated: bool,
+) -> String {
     let note_style = if animated {
         "Style: Note,Segoe UI,58,&H00FCE2F1,&H00FCE2F1,&H00511431,&H00000000,1,0,0,0,100,100,0,0,1,1.8,0,5,0,0,140,1"
     } else {
@@ -389,8 +397,8 @@ fn build_ass_script(frames: &[OfflinePitchFrame], duration_secs: f32, animated: 
             end += 1;
         }
         if note != "--" {
-            let from = start as f32 / VIDEO_FPS as f32;
-            let to = (end as f32 / VIDEO_FPS as f32).min(duration_secs.max(from + 0.05));
+            let from = start as f32 / fps as f32;
+            let to = (end as f32 / fps as f32).min(duration_secs.max(from + 0.05));
             script.push_str(&format!(
                 "Dialogue: 0,{},{},Note,,0,0,0,,{}\n",
                 ass_time(from),
@@ -579,4 +587,12 @@ fn unique_path(path: PathBuf) -> PathBuf {
         }
     }
     path
+}
+
+fn normalize_export_fps(fps: u32) -> u32 {
+    match fps {
+        LOW_VIDEO_FPS => LOW_VIDEO_FPS,
+        HIGH_VIDEO_FPS => HIGH_VIDEO_FPS,
+        _ => STANDARD_VIDEO_FPS,
+    }
 }
