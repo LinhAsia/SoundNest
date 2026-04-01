@@ -7307,9 +7307,16 @@ impl SoundFxApp {
                     TransitionPhase::Outro => 1.0,
                     TransitionPhase::Live => 1.0,
                 };
+                let ornament_alpha = match phase {
+                    TransitionPhase::Intro => {
+                        1.0 - Self::ease_in_out_cubic(((progress - 0.68) / 0.14).clamp(0.0, 1.0))
+                    }
+                    TransitionPhase::Outro => 1.0,
+                    TransitionPhase::Live => 1.0,
+                };
                 let ui_match = match phase {
                     TransitionPhase::Intro => {
-                        Self::ease_in_out_cubic(((progress - 0.86) / 0.10).clamp(0.0, 1.0))
+                        Self::ease_in_out_cubic(((progress - 0.72) / 0.16).clamp(0.0, 1.0))
                     }
                     TransitionPhase::Outro => 0.0,
                     TransitionPhase::Live => 1.0,
@@ -7374,7 +7381,7 @@ impl SoundFxApp {
                         Self::surface_fill(),
                         ui_match * 0.72,
                     ),
-                    layer_alpha,
+                    layer_alpha * ornament_alpha,
                 );
                 let wave_color = Self::with_alpha(
                     if self.dark_theme {
@@ -7387,7 +7394,7 @@ impl SoundFxApp {
                             (92.0 + t * 132.0) as u8,
                         )
                     },
-                    layer_alpha,
+                    layer_alpha * ornament_alpha,
                 );
                 let ribbon_color = Self::with_alpha(
                     if self.dark_theme {
@@ -7400,7 +7407,7 @@ impl SoundFxApp {
                             (118.0 + t * 124.0) as u8,
                         )
                     },
-                    layer_alpha,
+                    layer_alpha * ornament_alpha,
                 );
                 let note_base = if self.dark_theme {
                     Color32::from_rgb(246, 124, 181)
@@ -7558,10 +7565,10 @@ impl SoundFxApp {
                     );
                     painter.add(egui::Shape::convex_polygon(
                         points,
-                        Self::with_alpha(fill, layer_alpha),
+                        Self::with_alpha(fill, layer_alpha * ornament_alpha),
                         Stroke::new(
                             (1.8 - layer_index as f32 * 0.24) * (1.0 - square_morph * 0.3),
-                            Self::with_alpha(stroke, layer_alpha),
+                            Self::with_alpha(stroke, layer_alpha * ornament_alpha),
                         ),
                     ));
                 }
@@ -7737,7 +7744,7 @@ impl SoundFxApp {
                                 note_base.b(),
                                 note_alpha,
                             ),
-                            layer_alpha,
+                            layer_alpha * ornament_alpha,
                         )
                     } else {
                         Self::with_alpha(
@@ -7747,7 +7754,7 @@ impl SoundFxApp {
                                 note_alt.b(),
                                 note_alpha,
                             ),
-                            layer_alpha,
+                            layer_alpha * ornament_alpha,
                         )
                     };
                     let glow_alpha = if self.dark_theme {
@@ -7768,7 +7775,7 @@ impl SoundFxApp {
                                 note_glow_rgb.2,
                                 glow_alpha,
                             ),
-                            layer_alpha,
+                            layer_alpha * ornament_alpha,
                         ),
                     );
                 }
@@ -8260,7 +8267,7 @@ impl eframe::App for SoundFxApp {
 
         let transition = self.transition_progress(ctx);
         let download_snapshot = self.downloader.snapshot();
-        let wants_shadow = self.startup.phase == TransitionPhase::Live;
+        let wants_shadow = false;
         if self.native_shadow_applied != wants_shadow {
             platform::set_native_window_shadow(frame, wants_shadow);
             self.native_shadow_applied = wants_shadow;
@@ -8358,12 +8365,7 @@ impl eframe::App for SoundFxApp {
             return;
         }
 
-        let root_fill =
-            if intro_transition.is_some_and(|progress| progress >= intro_ui_reveal_threshold) {
-                Color32::TRANSPARENT
-            } else {
-                Self::page_fill()
-            };
+        let root_fill = Color32::TRANSPARENT;
 
         CentralPanel::default()
             .frame(Frame::new().fill(root_fill).inner_margin(0.0))
