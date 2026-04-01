@@ -6254,12 +6254,12 @@ impl SoundFxApp {
                             let pan_step =
                                 pan_speed * ui.input(|input| input.stable_dt).max(1.0 / 240.0);
                             let max_offset = (rect.width() - viewport_rect.width()).max(0.0);
-                            let current_offset = (viewport_rect.left() - rect.left()).max(0.0);
                             let delta = match (pan_left, pan_right) {
                                 (true, false) => -pan_step,
                                 (false, true) => pan_step,
                                 _ => 0.0,
                             };
+                            let current_offset = (viewport_rect.left() - rect.left()).max(0.0);
                             let next_offset = (current_offset + delta).clamp(0.0, max_offset);
                             ui.ctx().data_mut(|data| {
                                 data.insert_temp(zoom_scroll_offset_id, next_offset);
@@ -7260,6 +7260,11 @@ impl SoundFxApp {
             .frame(Frame::new().fill(Color32::TRANSPARENT).inner_margin(0.0))
             .show(ctx, |ui| {
                 let rect = ui.max_rect();
+                let _ = ui.interact(
+                    rect,
+                    ui.id().with("transition-layer"),
+                    Sense::click_and_drag(),
+                );
                 let painter = ui.painter_at(rect);
                 let time = ctx.input(|input| input.time) as f32;
                 let audio_progress = self.transition_audio_progress(ctx).unwrap_or(progress);
@@ -7295,57 +7300,108 @@ impl SoundFxApp {
                     TransitionPhase::Outro => 1.0 - Self::ease_in_out_cubic(progress),
                     TransitionPhase::Live => 1.0,
                 };
+                let intro_reveal =
+                    Self::ease_in_out_cubic(((progress - 0.90) / 0.10).clamp(0.0, 1.0));
+                let layer_alpha = match phase {
+                    TransitionPhase::Intro => 1.0 - intro_reveal,
+                    TransitionPhase::Outro => 1.0,
+                    TransitionPhase::Live => 1.0,
+                };
+                let ui_match = match phase {
+                    TransitionPhase::Intro => {
+                        Self::ease_in_out_cubic(((progress - 0.86) / 0.10).clamp(0.0, 1.0))
+                    }
+                    TransitionPhase::Outro => 0.0,
+                    TransitionPhase::Live => 1.0,
+                };
                 let aura = ((1.0 - t) * (0.75 + audio_level * 0.5)).clamp(0.0, 1.0);
                 let overlay = match phase {
                     TransitionPhase::Intro => (1.0 - t * 0.7).clamp(0.0, 1.0),
                     TransitionPhase::Outro => Self::ease_in_out_cubic(progress),
                     TransitionPhase::Live => 0.0,
                 };
-                let card_fill = if self.dark_theme {
-                    Color32::from_rgba_premultiplied(12, 9, 15, (232.0 + t * 18.0) as u8)
-                } else {
-                    Color32::from_rgba_premultiplied(255, 247, 251, (208.0 + t * 28.0) as u8)
-                };
-                let card_stroke = if self.dark_theme {
-                    Color32::from_rgba_premultiplied(232, 162, 202, (84.0 + t * 56.0) as u8)
-                } else {
-                    Color32::from_rgba_premultiplied(229, 168, 199, (116.0 + t * 68.0) as u8)
-                };
-                let glaze_fill = if self.dark_theme {
-                    Color32::from_rgba_premultiplied(
-                        255,
-                        214,
-                        234,
-                        (20.0 + (1.0 - aura) * 18.0) as u8,
-                    )
-                } else {
-                    Color32::from_rgba_premultiplied(
-                        rose_ice.r(),
-                        rose_ice.g(),
-                        rose_ice.b(),
-                        (40.0 + (1.0 - aura) * 28.0) as u8,
-                    )
-                };
-                let wave_color = if self.dark_theme {
-                    Color32::from_rgba_premultiplied(255, 248, 252, (118.0 + t * 120.0) as u8)
-                } else {
-                    Color32::from_rgba_premultiplied(
-                        magenta.r(),
-                        magenta.g(),
-                        magenta.b(),
-                        (92.0 + t * 132.0) as u8,
-                    )
-                };
-                let ribbon_color = if self.dark_theme {
-                    Color32::from_rgba_premultiplied(255, 250, 252, (136.0 + t * 108.0) as u8)
-                } else {
-                    Color32::from_rgba_premultiplied(
-                        berry.r(),
-                        berry.g(),
-                        berry.b(),
-                        (118.0 + t * 124.0) as u8,
-                    )
-                };
+                let card_fill = Self::with_alpha(
+                    Self::lerp_color(
+                        if self.dark_theme {
+                            Color32::from_rgba_premultiplied(12, 9, 15, (232.0 + t * 18.0) as u8)
+                        } else {
+                            Color32::from_rgba_premultiplied(
+                                255,
+                                247,
+                                251,
+                                (208.0 + t * 28.0) as u8,
+                            )
+                        },
+                        Self::page_fill(),
+                        ui_match,
+                    ),
+                    layer_alpha,
+                );
+                let card_stroke = Self::with_alpha(
+                    Self::lerp_color(
+                        if self.dark_theme {
+                            Color32::from_rgba_premultiplied(232, 162, 202, (84.0 + t * 56.0) as u8)
+                        } else {
+                            Color32::from_rgba_premultiplied(
+                                229,
+                                168,
+                                199,
+                                (116.0 + t * 68.0) as u8,
+                            )
+                        },
+                        Self::border_color(),
+                        ui_match,
+                    ),
+                    layer_alpha,
+                );
+                let glaze_fill = Self::with_alpha(
+                    Self::lerp_color(
+                        if self.dark_theme {
+                            Color32::from_rgba_premultiplied(
+                                255,
+                                214,
+                                234,
+                                (20.0 + (1.0 - aura) * 18.0) as u8,
+                            )
+                        } else {
+                            Color32::from_rgba_premultiplied(
+                                rose_ice.r(),
+                                rose_ice.g(),
+                                rose_ice.b(),
+                                (40.0 + (1.0 - aura) * 28.0) as u8,
+                            )
+                        },
+                        Self::surface_fill(),
+                        ui_match * 0.72,
+                    ),
+                    layer_alpha,
+                );
+                let wave_color = Self::with_alpha(
+                    if self.dark_theme {
+                        Color32::from_rgba_premultiplied(255, 248, 252, (118.0 + t * 120.0) as u8)
+                    } else {
+                        Color32::from_rgba_premultiplied(
+                            magenta.r(),
+                            magenta.g(),
+                            magenta.b(),
+                            (92.0 + t * 132.0) as u8,
+                        )
+                    },
+                    layer_alpha,
+                );
+                let ribbon_color = Self::with_alpha(
+                    if self.dark_theme {
+                        Color32::from_rgba_premultiplied(255, 250, 252, (136.0 + t * 108.0) as u8)
+                    } else {
+                        Color32::from_rgba_premultiplied(
+                            berry.r(),
+                            berry.g(),
+                            berry.b(),
+                            (118.0 + t * 124.0) as u8,
+                        )
+                    },
+                    layer_alpha,
+                );
                 let note_base = if self.dark_theme {
                     Color32::from_rgb(246, 124, 181)
                 } else {
@@ -7367,19 +7423,30 @@ impl SoundFxApp {
                 let half_h = egui::lerp((base * 0.13)..=(target_rect.height() * 0.5), t);
                 let exponent = egui::lerp(2.2..=6.4, t);
                 let wobble = (1.0 - t).powf(1.4) * 0.24;
-                let square_seed = ((t - 0.2) / 0.8).clamp(0.0, 1.0);
+                let square_seed = ((t - 0.08) / 0.66).clamp(0.0, 1.0);
                 let square_morph = square_seed * square_seed * (3.0 - 2.0 * square_seed);
 
                 if self.dark_theme {
                     painter.circle_filled(
                         center,
                         base * 0.56,
-                        Color32::from_rgba_premultiplied(9, 6, 12, (34.0 + aura * 54.0) as u8),
+                        Self::with_alpha(
+                            Color32::from_rgba_premultiplied(9, 6, 12, (34.0 + aura * 54.0) as u8),
+                            layer_alpha,
+                        ),
                     );
                     painter.circle_filled(
                         Pos2::new(center.x, center.y + base * 0.02),
                         base * 0.42,
-                        Color32::from_rgba_premultiplied(120, 25, 72, (16.0 + aura * 34.0) as u8),
+                        Self::with_alpha(
+                            Color32::from_rgba_premultiplied(
+                                120,
+                                25,
+                                72,
+                                (16.0 + aura * 34.0) as u8,
+                            ),
+                            layer_alpha,
+                        ),
                     );
                 }
 
@@ -7393,11 +7460,14 @@ impl SoundFxApp {
                     painter.circle_filled(
                         Pos2::new(px, py),
                         0.8 + (star_index % 3) as f32 * 0.35,
-                        Color32::from_rgba_premultiplied(
-                            star_rgb.0,
-                            star_rgb.1,
-                            star_rgb.2,
-                            (26.0 * star_alpha_scale * twinkle * (0.35 + aura * 0.65)) as u8,
+                        Self::with_alpha(
+                            Color32::from_rgba_premultiplied(
+                                star_rgb.0,
+                                star_rgb.1,
+                                star_rgb.2,
+                                (26.0 * star_alpha_scale * twinkle * (0.35 + aura * 0.65)) as u8,
+                            ),
+                            layer_alpha,
                         ),
                     );
                 }
@@ -7421,7 +7491,7 @@ impl SoundFxApp {
                         ),
                     ),
                     (
-                        Pos2::new(center.x - base * 0.018, center.y + base * 0.018),
+                        Pos2::new(center.x, center.y + base * 0.018),
                         base * 0.31,
                         base * 0.24,
                         Color32::from_rgba_premultiplied(
@@ -7438,7 +7508,7 @@ impl SoundFxApp {
                         ),
                     ),
                     (
-                        Pos2::new(center.x + base * 0.024, center.y + base * 0.012),
+                        Pos2::new(center.x, center.y + base * 0.016),
                         base * 0.39,
                         base * 0.3,
                         Color32::from_rgba_premultiplied(
@@ -7455,7 +7525,7 @@ impl SoundFxApp {
                         ),
                     ),
                     (
-                        Pos2::new(center.x - base * 0.012, center.y + base * 0.03),
+                        Pos2::new(center.x, center.y + base * 0.022),
                         base * 0.47,
                         base * 0.35,
                         Color32::from_rgba_premultiplied(
@@ -7488,10 +7558,10 @@ impl SoundFxApp {
                     );
                     painter.add(egui::Shape::convex_polygon(
                         points,
-                        fill,
+                        Self::with_alpha(fill, layer_alpha),
                         Stroke::new(
                             (1.8 - layer_index as f32 * 0.24) * (1.0 - square_morph * 0.3),
-                            stroke,
+                            Self::with_alpha(stroke, layer_alpha),
                         ),
                     ));
                 }
@@ -7505,11 +7575,14 @@ impl SoundFxApp {
                     painter.circle_filled(
                         center,
                         egui::lerp((radius * 0.75)..=radius, 1.0 - aura * 0.22),
-                        Color32::from_rgba_premultiplied(
-                            berry.r(),
-                            berry.g(),
-                            berry.b(),
-                            (alpha * (0.2 + aura * 0.8)) as u8,
+                        Self::with_alpha(
+                            Color32::from_rgba_premultiplied(
+                                berry.r(),
+                                berry.g(),
+                                berry.b(),
+                                (alpha * (0.2 + aura * 0.8)) as u8,
+                            ),
+                            layer_alpha,
                         ),
                     );
                 }
@@ -7526,11 +7599,14 @@ impl SoundFxApp {
                 );
                 painter.add(egui::Shape::convex_polygon(
                     shadow_points,
-                    Color32::from_rgba_premultiplied(
-                        deep_plum.r(),
-                        deep_plum.g(),
-                        deep_plum.b(),
-                        ((36.0 + t * 42.0) * (1.0 - square_morph * 0.82)) as u8,
+                    Self::with_alpha(
+                        Color32::from_rgba_premultiplied(
+                            deep_plum.r(),
+                            deep_plum.g(),
+                            deep_plum.b(),
+                            ((36.0 + t * 42.0) * (1.0 - square_morph * 0.82)) as u8,
+                        ),
+                        layer_alpha,
                     ),
                     Stroke::NONE,
                 ));
@@ -7550,32 +7626,21 @@ impl SoundFxApp {
                     card_fill,
                     Stroke::new((1.2 - square_morph * 0.55).max(0.35), card_stroke),
                 ));
-
-                let glaze_rect = Rect::from_min_max(
-                    Pos2::new(
-                        egui::lerp(
-                            target_rect.left()..=center.x - half_w * 0.92,
-                            1.0 - square_morph,
-                        ),
-                        egui::lerp(
-                            target_rect.top()..=center.y - half_h * 0.68,
-                            1.0 - square_morph,
-                        ),
-                    ),
-                    Pos2::new(
-                        egui::lerp(
-                            target_rect.right()..=center.x + half_w * 0.92,
-                            1.0 - square_morph,
-                        ),
-                        egui::lerp(
-                            target_rect.top() + target_rect.height() * 0.34
-                                ..=center.y - half_h * 0.14 + half_h * 0.54,
-                            1.0 - square_morph,
-                        ),
+                let glaze_center = Pos2::new(
+                    center.x,
+                    egui::lerp(
+                        (center.y - half_h * 0.06)
+                            ..=(target_rect.top() + target_rect.height() * 0.22),
+                        square_morph,
                     ),
                 );
+                let glaze_size = vec2(
+                    egui::lerp((half_w * 1.84)..=(target_rect.width() * 0.84), square_morph),
+                    egui::lerp((half_h * 0.96)..=(target_rect.height() * 0.4), square_morph),
+                );
+                let glaze_rect = Rect::from_center_size(glaze_center, glaze_size);
                 let glaze_points = Self::morph_squircle_to_rect(
-                    Pos2::new(center.x, center.y - half_h * 0.14),
+                    glaze_center,
                     half_w * 0.92,
                     half_h * 0.54,
                     exponent,
@@ -7642,11 +7707,14 @@ impl SoundFxApp {
                 clip.rect_filled(
                     accent_rect,
                     9.0,
-                    Color32::from_rgba_premultiplied(
-                        rose_ice.r(),
-                        rose_ice.g(),
-                        rose_ice.b(),
-                        (34.0 + t * 38.0) as u8,
+                    Self::with_alpha(
+                        Color32::from_rgba_premultiplied(
+                            rose_ice.r(),
+                            rose_ice.g(),
+                            rose_ice.b(),
+                            (34.0 + t * 38.0) as u8,
+                        ),
+                        layer_alpha,
                     ),
                 );
 
@@ -7662,18 +7730,24 @@ impl SoundFxApp {
                     let note_scale = 0.64 + (index % 3) as f32 * 0.12 + audio_level * 0.12;
                     let note_alpha = (160.0 * aura).clamp(0.0, 160.0) as u8;
                     let note_color = if index % 2 == 0 {
-                        Color32::from_rgba_premultiplied(
-                            note_base.r(),
-                            note_base.g(),
-                            note_base.b(),
-                            note_alpha,
+                        Self::with_alpha(
+                            Color32::from_rgba_premultiplied(
+                                note_base.r(),
+                                note_base.g(),
+                                note_base.b(),
+                                note_alpha,
+                            ),
+                            layer_alpha,
                         )
                     } else {
-                        Color32::from_rgba_premultiplied(
-                            note_alt.r(),
-                            note_alt.g(),
-                            note_alt.b(),
-                            note_alpha,
+                        Self::with_alpha(
+                            Color32::from_rgba_premultiplied(
+                                note_alt.r(),
+                                note_alt.g(),
+                                note_alt.b(),
+                                note_alpha,
+                            ),
+                            layer_alpha,
                         )
                     };
                     let glow_alpha = if self.dark_theme {
@@ -7687,11 +7761,14 @@ impl SoundFxApp {
                         note_scale,
                         angle.sin() * 0.18,
                         note_color,
-                        Color32::from_rgba_premultiplied(
-                            note_glow_rgb.0,
-                            note_glow_rgb.1,
-                            note_glow_rgb.2,
-                            glow_alpha,
+                        Self::with_alpha(
+                            Color32::from_rgba_premultiplied(
+                                note_glow_rgb.0,
+                                note_glow_rgb.1,
+                                note_glow_rgb.2,
+                                glow_alpha,
+                            ),
+                            layer_alpha,
                         ),
                     );
                 }
@@ -7707,6 +7784,26 @@ impl SoundFxApp {
 
         let now = ctx.input(|input| input.time);
         Some(((now - started_at) as f32 / duration_sec).clamp(0.0, 1.0))
+    }
+
+    fn with_alpha(color: Color32, factor: f32) -> Color32 {
+        let factor = factor.clamp(0.0, 1.0);
+        Color32::from_rgba_premultiplied(
+            color.r(),
+            color.g(),
+            color.b(),
+            ((color.a() as f32) * factor).round().clamp(0.0, 255.0) as u8,
+        )
+    }
+
+    fn lerp_color(from: Color32, to: Color32, t: f32) -> Color32 {
+        let t = t.clamp(0.0, 1.0);
+        Color32::from_rgba_premultiplied(
+            egui::lerp(from.r() as f32..=to.r() as f32, t).round() as u8,
+            egui::lerp(from.g() as f32..=to.g() as f32, t).round() as u8,
+            egui::lerp(from.b() as f32..=to.b() as f32, t).round() as u8,
+            egui::lerp(from.a() as f32..=to.a() as f32, t).round() as u8,
+        )
     }
 
     fn sample_waveform_level(waveform: &[f32], progress: f32) -> f32 {
@@ -8243,7 +8340,15 @@ impl eframe::App for SoundFxApp {
 
         self.flush_pending_save(ctx);
 
-        if let Some((TransitionPhase::Intro, progress)) = transition {
+        let intro_transition = match transition {
+            Some((TransitionPhase::Intro, progress)) => Some(progress),
+            _ => None,
+        };
+        let intro_ui_reveal_threshold = 0.86;
+
+        if let Some(progress) = intro_transition
+            && progress < intro_ui_reveal_threshold
+        {
             self.render_transition_layer(ctx, progress, TransitionPhase::Intro);
             return;
         }
@@ -8253,8 +8358,15 @@ impl eframe::App for SoundFxApp {
             return;
         }
 
+        let root_fill =
+            if intro_transition.is_some_and(|progress| progress >= intro_ui_reveal_threshold) {
+                Color32::TRANSPARENT
+            } else {
+                Self::page_fill()
+            };
+
         CentralPanel::default()
-            .frame(Frame::new().fill(Self::page_fill()).inner_margin(0.0))
+            .frame(Frame::new().fill(root_fill).inner_margin(0.0))
             .show(ctx, |ui| {
                 Frame::new()
                     .fill(Self::page_fill())
@@ -8313,6 +8425,9 @@ impl eframe::App for SoundFxApp {
         self.render_record_overlay_viewport(ctx);
         self.render_titlebar_drag_zone(ctx);
         self.render_custom_window_resize_handles(ctx);
+        if let Some(progress) = intro_transition {
+            self.render_transition_layer(ctx, progress, TransitionPhase::Intro);
+        }
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
