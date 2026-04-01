@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::fs::File;
 use std::io::BufReader;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
@@ -572,24 +573,18 @@ struct DecodedAudio {
 }
 
 fn analyze_audio_file(path: &Path, buckets: usize) -> Result<AudioAnalysis> {
-    let decoder = open_decoder(path)?;
-    let sample_rate = decoder.sample_rate();
-    let channels = decoder.channels();
+    let decoded = decode_audio_file(path)?;
     let bucket_count = buckets.max(64);
-    let samples = decoder.convert_samples::<f32>().collect::<Vec<_>>();
-    if samples.is_empty() {
-        bail!("audio file is empty");
-    }
-
-    let samples_per_bucket = (samples.len() / bucket_count).max(1);
+    let samples_per_bucket = (decoded.samples.len() / bucket_count).max(1);
     let mut peaks = vec![0.0f32; bucket_count];
-    for (sample_index, sample) in samples.iter().enumerate() {
+    for (sample_index, sample) in decoded.samples.iter().enumerate() {
         let bucket = (sample_index / samples_per_bucket).min(bucket_count - 1);
         peaks[bucket] = peaks[bucket].max(sample.abs());
     }
 
-    let decoded_duration_secs =
-        samples.len() as f32 / channels.max(1) as f32 / sample_rate.max(1) as f32;
+    let decoded_duration_secs = decoded.samples.len() as f32
+        / decoded.channels.max(1) as f32
+        / decoded.sample_rate.max(1) as f32;
 
     let peak_max = peaks.iter().copied().fold(0.0f32, f32::max);
     if peak_max > 0.0 {
@@ -605,20 +600,24 @@ fn analyze_audio_file(path: &Path, buckets: usize) -> Result<AudioAnalysis> {
 }
 
 fn decode_audio_file(path: &Path) -> Result<DecodedAudio> {
-    let decoder = open_decoder(path)?;
-    let channels = decoder.channels();
-    let sample_rate = decoder.sample_rate();
-    let samples = decoder.convert_samples::<f32>().collect::<Vec<_>>();
+    let path_buf = path.to_path_buf();
+    catch_unwind(AssertUnwindSafe(|| -> Result<DecodedAudio> {
+        let decoder = open_decoder(&path_buf)?;
+        let channels = decoder.channels();
+        let sample_rate = decoder.sample_rate();
+        let samples = decoder.convert_samples::<f32>().collect::<Vec<_>>();
 
-    if samples.is_empty() {
-        bail!("audio file is empty");
-    }
+        if samples.is_empty() {
+            bail!("audio file is empty");
+        }
 
-    Ok(DecodedAudio {
-        channels,
-        sample_rate,
-        samples,
-    })
+        Ok(DecodedAudio {
+            channels,
+            sample_rate,
+            samples,
+        })
+    }))
+    .map_err(|_| anyhow::anyhow!("audio decoder crashed while reading {}", path_buf.display()))?
 }
 
 fn write_processed_wav(source_path: &Path, target_path: &Path, sound: &SoundEffect) -> Result<()> {
