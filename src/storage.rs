@@ -506,7 +506,12 @@ impl Storage {
         })
     }
 
-    fn save_special_sound<F>(&self, sound: &SoundEffect, target_path: &Path, apply_name: F) -> Result<()>
+    fn save_special_sound<F>(
+        &self,
+        sound: &SoundEffect,
+        target_path: &Path,
+        apply_name: F,
+    ) -> Result<()>
     where
         F: FnOnce(&mut PreferencesFile, String),
     {
@@ -652,7 +657,7 @@ fn write_processed_wav(source_path: &Path, target_path: &Path, sound: &SoundEffe
 
     let mut writer =
         WavWriter::create(target_path, spec).context("unable to create exported wav file")?;
-    let volume = sound.volume.clamp(0.0, 2.0);
+    let volume = sound.volume.clamp(0.0, 5.0);
     let start_sample = start_frame * channels as usize;
     let end_sample = end_frame * channels as usize;
 

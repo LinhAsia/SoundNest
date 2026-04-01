@@ -3,9 +3,11 @@ use anyhow::{Context, Result, bail};
 use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source, buffer::SamplesBuffer};
 use std::fs::File;
 use std::io::BufReader;
-use std::path::{Path, PathBuf};
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
+
+const POP_FADE_MS: f32 = 18.0;
 
 pub struct AudioEngine {
     _stream: OutputStream,
@@ -14,6 +16,7 @@ pub struct AudioEngine {
     current_id: Option<Uuid>,
     current_file_path: Option<PathBuf>,
     current_total_duration_secs: f32,
+    current_trim_start_secs: f32,
     current_start_offset_secs: f32,
     current_speed: f32,
 }
@@ -30,6 +33,7 @@ impl AudioEngine {
             current_id: None,
             current_file_path: None,
             current_total_duration_secs: 0.0,
+            current_trim_start_secs: 0.0,
             current_start_offset_secs: 0.0,
             current_speed: 1.0,
         })
@@ -71,6 +75,7 @@ impl AudioEngine {
         self.current_id = Some(sound.id);
         self.current_file_path = None;
         self.current_total_duration_secs = total_duration_secs;
+        self.current_trim_start_secs = sound.trim_start_secs;
         self.current_start_offset_secs = start_offset_secs;
         self.current_speed = speed;
         self.sink = Some(sink);
@@ -80,10 +85,11 @@ impl AudioEngine {
     pub fn play_file(&mut self, asset_path: &Path) -> Result<()> {
         self.stop();
 
-        let (channels, sample_rate, samples) = decode_audio_file(asset_path)?;
+        let (channels, sample_rate, mut samples) = decode_audio_file(asset_path)?;
         if samples.is_empty() {
             bail!("audio file is empty");
         }
+        soften_sample_edges(&mut samples, channels, sample_rate, POP_FADE_MS);
 
         let duration_secs =
             samples.len() as f32 / channels.max(1) as f32 / sample_rate.max(1) as f32;
@@ -95,6 +101,7 @@ impl AudioEngine {
         self.current_id = None;
         self.current_file_path = Some(asset_path.to_path_buf());
         self.current_total_duration_secs = duration_secs;
+        self.current_trim_start_secs = 0.0;
         self.current_start_offset_secs = 0.0;
         self.current_speed = 1.0;
         self.sink = Some(sink);
@@ -108,6 +115,7 @@ impl AudioEngine {
         self.current_id = None;
         self.current_file_path = None;
         self.current_total_duration_secs = 0.0;
+        self.current_trim_start_secs = 0.0;
         self.current_start_offset_secs = 0.0;
         self.current_speed = 1.0;
     }
@@ -139,6 +147,18 @@ impl AudioEngine {
         Some((played / total_duration).clamp(0.0, 1.0))
     }
 
+    pub fn playback_position_secs(&self, sound_id: Uuid) -> Option<f32> {
+        if self.current_id != Some(sound_id) {
+            return None;
+        }
+
+        let sink = self.sink.as_ref()?;
+        let total_duration = self.current_total_duration_secs.max(0.05);
+        let elapsed = sink.get_pos().as_secs_f32() * self.current_speed.max(0.25);
+        let played = (self.current_start_offset_secs + elapsed).clamp(0.0, total_duration);
+        Some(self.current_trim_start_secs + played)
+    }
+
     pub fn playback_progress_for_file(&self, path: &Path) -> Option<f32> {
         if self.current_file_path.as_deref() != Some(path) {
             return None;
@@ -158,7 +178,8 @@ impl AudioEngine {
 pub fn play_file_blocking(asset_path: &Path) -> Result<()> {
     let (_stream, handle) =
         OutputStream::try_default().context("unable to open default audio output")?;
-    let (channels, sample_rate, samples) = decode_audio_file(asset_path)?;
+    let (channels, sample_rate, mut samples) = decode_audio_file(asset_path)?;
+    soften_sample_edges(&mut samples, channels, sample_rate, POP_FADE_MS);
     let sink = Sink::try_new(&handle).context("unable to create audio sink")?;
     sink.append(SamplesBuffer::new(channels, sample_rate, samples));
     sink.sleep_until_end();
@@ -203,12 +224,40 @@ fn decode_audio_file(asset_path: &Path) -> Result<(u16, u32, Vec<f32>)> {
     catch_unwind(AssertUnwindSafe(|| -> Result<(u16, u32, Vec<f32>)> {
         let file =
             File::open(&path).with_context(|| format!("unable to open {}", path.display()))?;
-        let decoder =
-            Decoder::new(BufReader::new(file)).context("unsupported audio file")?;
+        let decoder = Decoder::new(BufReader::new(file)).context("unsupported audio file")?;
         let channels = decoder.channels().max(1);
         let sample_rate = decoder.sample_rate().max(1);
         let samples = decoder.convert_samples::<f32>().collect::<Vec<_>>();
         Ok((channels, sample_rate, samples))
     }))
     .map_err(|_| anyhow::anyhow!("audio decoder crashed while reading {}", path.display()))?
+}
+
+fn soften_sample_edges(samples: &mut [f32], channels: u16, sample_rate: u32, fade_ms: f32) {
+    if samples.is_empty() || channels == 0 || sample_rate == 0 {
+        return;
+    }
+
+    let total_frames = samples.len() / channels as usize;
+    if total_frames < 2 {
+        return;
+    }
+
+    let fade_frames =
+        ((sample_rate as f32 * (fade_ms / 1000.0)).round() as usize).clamp(1, total_frames / 2);
+    if fade_frames == 0 {
+        return;
+    }
+
+    let denom = fade_frames.saturating_sub(1).max(1) as f32;
+    for frame in 0..fade_frames {
+        let fade_in = frame as f32 / denom;
+        let fade_out = (fade_frames.saturating_sub(1) - frame) as f32 / denom;
+        let start_base = frame * channels as usize;
+        let end_base = (total_frames - 1 - frame) * channels as usize;
+        for channel in 0..channels as usize {
+            samples[start_base + channel] *= fade_in;
+            samples[end_base + channel] *= fade_out;
+        }
+    }
 }
