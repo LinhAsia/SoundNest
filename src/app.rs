@@ -6719,18 +6719,14 @@ impl SoundFxApp {
         }
 
         let snapshot = self.downloader.snapshot();
-        let youtube_results = snapshot.youtube_results.clone();
         let mut open_panel = self.show_download_panel;
         let mut should_start_download = false;
-        let mut should_search_youtube = false;
         let mut add_to_library = false;
         let mut open_file = false;
         let mut open_folder = false;
         let mut clear_result = false;
-        let mut clear_youtube_results = false;
         let mut minimize_request = false;
         let mut close_request = false;
-        let mut youtube_download_request: Option<String> = None;
 
         egui::Window::new("")
             .id(egui::Id::new("youtube-audio-download"))
@@ -6738,7 +6734,7 @@ impl SoundFxApp {
             .title_bar(false)
             .resizable(false)
             .collapsible(false)
-            .fixed_size(vec2(720.0, 640.0))
+            .fixed_size(vec2(520.0, 260.0))
             .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
             .open(&mut open_panel)
             .frame(
@@ -6775,16 +6771,15 @@ impl SoundFxApp {
 
                 ui.horizontal(|ui| {
                     let response = ui.add_sized(
-                        [ui.available_width() - 34.0, 42.0],
+                        [ui.available_width() - 32.0, 42.0],
                         TextEdit::singleline(&mut self.download_url)
-                            .hint_text("Paste URL to download directly, or type keywords then use YouTube Search")
+                            .hint_text("https://youtube.com/watch?v=... or soundcloud / tiktok / facebook")
                             .desired_width(f32::INFINITY)
                             .margin(Vec2::new(14.0, 12.0)),
                     );
                     if response.lost_focus()
                         && ui.input(|input| input.key_pressed(egui::Key::Enter))
                         && !snapshot.running
-                        && !snapshot.searching
                     {
                         should_start_download = true;
                     }
@@ -6820,7 +6815,7 @@ impl SoundFxApp {
 
                 ui.horizontal(|ui| {
                     let start_button = ui.add_enabled(
-                        !snapshot.running && !snapshot.searching && !self.download_url.trim().is_empty(),
+                        !snapshot.running && !self.download_url.trim().is_empty(),
                         Button::new(Self::icon(0xe2c4, 16.0, Color32::WHITE))
                             .fill(Color32::from_rgb(214, 51, 132))
                             .stroke(Stroke::NONE)
@@ -6831,15 +6826,7 @@ impl SoundFxApp {
                         should_start_download = true;
                     }
 
-                    let youtube_button = Self::youtube_search_button(
-                        ui,
-                        !snapshot.running && !snapshot.searching && !self.download_url.trim().is_empty(),
-                    );
-                    if youtube_button.clicked() {
-                        should_search_youtube = true;
-                    }
-
-                    if snapshot.running || snapshot.searching {
+                    if snapshot.running {
                         ui.label(
                             RichText::new(snapshot.stage.clone())
                                 .size(13.0)
@@ -6864,38 +6851,6 @@ impl SoundFxApp {
                             .size(13.0)
                             .color(Color32::from_rgb(171, 54, 91)),
                     );
-                }
-
-                if !youtube_results.is_empty() {
-                    ui.add_space(14.0);
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new("YouTube Results")
-                                .size(14.0)
-                                .color(Self::strong_text_color())
-                                .strong(),
-                        );
-                        ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                            if Self::icon_action(ui, [42.0, 32.0], 0xe14c, false, false).clicked() {
-                                clear_youtube_results = true;
-                            }
-                        });
-                    });
-                    ui.add_space(8.0);
-                    ScrollArea::vertical()
-                        .auto_shrink([false, false])
-                        .max_height(260.0)
-                        .show(ui, |ui| {
-                            for result in youtube_results
-                                .iter()
-                                .take(self.youtube_search_visible_count)
-                            {
-                                if Self::render_youtube_result_row(ui, result) {
-                                    youtube_download_request = Some(result.webpage_url.clone());
-                                }
-                                ui.add_space(8.0);
-                            }
-                        });
                 }
 
                 if let Some(path) = &snapshot.last_file {
@@ -6956,24 +6911,6 @@ impl SoundFxApp {
             }
         }
 
-        if should_search_youtube {
-            match self
-                .downloader
-                .start_youtube_search(self.download_url.trim().to_owned())
-            {
-                Ok(()) => self.clear_status(),
-                Err(error) => self.set_error_status(error),
-            }
-        }
-
-        if let Some(url) = youtube_download_request {
-            self.download_url = url.clone();
-            match self.downloader.start_audio_download(url) {
-                Ok(()) => self.clear_status(),
-                Err(error) => self.set_error_status(error),
-            }
-        }
-
         if let Some(path) = snapshot.last_file.clone() {
             if add_to_library {
                 self.import_paths(vec![path.clone()]);
@@ -6994,9 +6931,6 @@ impl SoundFxApp {
         if clear_result {
             self.downloader.clear_result();
         }
-        if clear_youtube_results {
-            self.downloader.clear_youtube_results();
-        }
     }
 
     fn render_myinstants_panel(&mut self, ctx: &Context) {
@@ -7005,15 +6939,20 @@ impl SoundFxApp {
         }
 
         let snapshot = self.myinstants.snapshot();
+        let youtube_snapshot = self.downloader.snapshot();
+        let youtube_results = youtube_snapshot.youtube_results.clone();
         let was_open = self.show_myinstants_panel;
         let mut open_panel = self.show_myinstants_panel;
         let mut close_request = false;
         let mut search_request = false;
+        let mut youtube_search_request = false;
         let mut add_request: Option<MyinstantsResult> = None;
         let mut download_request: Option<MyinstantsResult> = None;
         let mut preview_request: Option<MyinstantsResult> = None;
         let mut folder_request: Option<MyinstantsResult> = None;
         let mut copy_request: Option<MyinstantsResult> = None;
+        let mut youtube_download_request: Option<String> = None;
+        let mut clear_youtube_results = false;
         let mut more_request = false;
 
         egui::Window::new("")
@@ -7022,7 +6961,7 @@ impl SoundFxApp {
             .title_bar(false)
             .resizable(false)
             .collapsible(false)
-            .fixed_size(vec2(560.0, 560.0))
+            .fixed_size(vec2(720.0, 620.0))
             .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
             .open(&mut open_panel)
             .frame(
@@ -7051,7 +6990,7 @@ impl SoundFxApp {
                 ui.add_space(12.0);
                 ui.horizontal(|ui| {
                     let response = ui.add_sized(
-                        [ui.available_width() - 68.0, 42.0],
+                        [ui.available_width() - 240.0, 42.0],
                         TextEdit::singleline(&mut self.myinstants_query)
                             .hint_text("sound effect")
                             .margin(Vec2::new(14.0, 12.0)),
@@ -7064,18 +7003,41 @@ impl SoundFxApp {
                     if Self::icon_action(ui, [52.0, 42.0], 0xe8b6, false, true).clicked() {
                         search_request = true;
                     }
+                    let youtube_button = Self::youtube_search_button(
+                        ui,
+                        !snapshot.searching
+                            && !snapshot.downloading
+                            && !youtube_snapshot.running
+                            && !youtube_snapshot.searching
+                            && !self.myinstants_query.trim().is_empty(),
+                    );
+                    if youtube_button.clicked() {
+                        youtube_search_request = true;
+                    }
                 });
 
                 ui.add_space(14.0);
-                if snapshot.searching || snapshot.downloading {
+                if snapshot.searching
+                    || snapshot.downloading
+                    || youtube_snapshot.searching
+                    || youtube_snapshot.running
+                {
                     ui.label(
-                        RichText::new("...")
-                            .size(14.0)
-                            .color(Color32::from_rgb(214, 51, 132)),
+                        RichText::new(if youtube_snapshot.searching || youtube_snapshot.running {
+                            youtube_snapshot.stage.as_str()
+                        } else {
+                            "..."
+                        })
+                        .size(14.0)
+                        .color(Color32::from_rgb(214, 51, 132)),
                     );
                     ui.add_space(8.0);
                 }
-                if let Some(error) = snapshot.error.as_deref() {
+                if let Some(error) = snapshot
+                    .error
+                    .as_deref()
+                    .or(youtube_snapshot.error.as_deref())
+                {
                     ui.label(
                         RichText::new(Self::truncate_middle_ascii(error, 80))
                             .size(12.0)
@@ -7087,6 +7049,35 @@ impl SoundFxApp {
                 ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
+                        if !youtube_results.is_empty() {
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new("YouTube")
+                                        .size(14.0)
+                                        .color(Self::strong_text_color())
+                                        .strong(),
+                                );
+                                ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                                    if Self::icon_action(ui, [42.0, 32.0], 0xe14c, false, false)
+                                        .clicked()
+                                    {
+                                        clear_youtube_results = true;
+                                    }
+                                });
+                            });
+                            ui.add_space(8.0);
+                            for result in youtube_results
+                                .iter()
+                                .take(self.youtube_search_visible_count)
+                            {
+                                if Self::render_youtube_result_row(ui, result) {
+                                    youtube_download_request = Some(result.webpage_url.clone());
+                                }
+                                ui.add_space(8.0);
+                            }
+                            ui.add_space(12.0);
+                        }
+
                         for result in snapshot.results.iter().take(self.myinstants_visible_count) {
                             self.queue_myinstants_waveform_prefetch(result);
                             let downloaded_path =
@@ -7240,9 +7231,31 @@ impl SoundFxApp {
                 Err(error) => self.set_error_status(error),
             }
         }
+        if youtube_search_request {
+            match self
+                .downloader
+                .start_youtube_search(self.myinstants_query.clone())
+            {
+                Ok(()) => {
+                    self.youtube_search_visible_count = 8;
+                    self.clear_status();
+                }
+                Err(error) => self.set_error_status(error),
+            }
+        }
         if more_request {
             self.myinstants_visible_count =
                 (self.myinstants_visible_count + 10).min(snapshot.results.len());
+        }
+        if let Some(url) = youtube_download_request {
+            self.download_url = url.clone();
+            match self.downloader.start_audio_download(url) {
+                Ok(()) => self.clear_status(),
+                Err(error) => self.set_error_status(error),
+            }
+        }
+        if clear_youtube_results {
+            self.downloader.clear_youtube_results();
         }
         if let Some(result) = preview_request {
             match self.toggle_myinstants_preview(&result) {
