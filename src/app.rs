@@ -7004,8 +7004,6 @@ impl SoundFxApp {
                         ui,
                         !snapshot.searching
                             && !snapshot.downloading
-                            && !youtube_snapshot.running
-                            && !youtube_snapshot.searching
                             && !self.myinstants_query.trim().is_empty(),
                     )
                     .clicked()
@@ -8840,7 +8838,7 @@ impl SoundFxApp {
 
     fn search_sound_button(ui: &mut Ui, enabled: bool) -> egui::Response {
         if enabled {
-            Self::icon_action(ui, [52.0, 42.0], 0xe8b6, false, true)
+            Self::icon_action(ui, [36.0, 36.0], 0xe8b6, false, true)
         } else {
             let response = ui.add_enabled(
                 false,
