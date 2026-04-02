@@ -1610,11 +1610,14 @@ impl SoundFxApp {
             Some(fs::canonicalize(&export_path).unwrap_or_else(|_| export_path.clone()));
         self.pending_sound_drag = None;
         ctx.memory_mut(|memory| memory.stop_text_input());
-        let result = platform::drag_file_out(&export_path);
         ctx.request_repaint();
         self.reset_cursor_icon_next_frame = true;
         self.suppress_custom_cursor_frames = self.suppress_custom_cursor_frames.max(12);
-        result
+        let drag_path = export_path.clone();
+        thread::spawn(move || {
+            let _ = platform::drag_file_out(&drag_path);
+        });
+        Ok(())
     }
 
     fn copy_video_file_to_clipboard(&self, video: &VideoAsset) -> Result<()> {
