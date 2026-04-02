@@ -294,15 +294,14 @@ impl SoundFxApp {
             .and_then(|value| Self::parse_key_name(&value));
         let startup_sound_name = storage.load_startup_sound_name().ok().flatten();
         let exit_sound_name = storage.load_exit_sound_name().ok().flatten();
-        let startup_transition_duration_sec = Self::custom_transition_duration_secs(
+        let resolved_startup_sound = storage.resolved_startup_sound_path().ok().flatten();
+        let startup_transition_duration_sec = Self::custom_transition_duration_secs_opt(
             &storage,
-            &storage.startup_sound_path(),
+            resolved_startup_sound.as_deref(),
             DEFAULT_INTRO_DURATION_SEC,
         );
-        let startup_transition_sound = Self::load_transition_sound_visual(
-            &storage,
-            storage.resolved_startup_sound_path().ok().flatten(),
-        );
+        let startup_transition_sound =
+            Self::load_transition_sound_visual(&storage, resolved_startup_sound);
 
         Self {
             storage,
@@ -453,6 +452,17 @@ impl SoundFxApp {
             .max(0.05)
     }
 
+    fn custom_transition_duration_secs_opt(
+        storage: &Storage,
+        sound_path: Option<&Path>,
+        fallback_secs: f32,
+    ) -> f32 {
+        match sound_path {
+            Some(path) => Self::custom_transition_duration_secs(storage, path, fallback_secs),
+            None => fallback_secs,
+        }
+    }
+
     fn load_transition_sound_visual(
         storage: &Storage,
         sound_path: Option<PathBuf>,
@@ -491,9 +501,9 @@ impl SoundFxApp {
         self.startup.phase = TransitionPhase::Outro;
         self.startup.started_at = None;
         self.startup.live_started_at = None;
-        self.startup.duration_sec = Self::custom_transition_duration_secs(
+        self.startup.duration_sec = Self::custom_transition_duration_secs_opt(
             &self.storage,
-            &self.storage.exit_sound_path(),
+            exit_sound_path.as_deref(),
             DEFAULT_OUTRO_DURATION_SEC,
         );
         self.startup.sound_waveform = exit_transition_sound.0;
@@ -3528,6 +3538,8 @@ impl SoundFxApp {
         let mut save_exit = false;
         let mut clear_startup = false;
         let mut clear_exit = false;
+        let mut reset_startup = false;
+        let mut reset_exit = false;
 
         egui::Window::new("")
             .id(egui::Id::new("settings-panel"))
@@ -3571,6 +3583,7 @@ impl SoundFxApp {
                     "settings-startup-combo",
                     &mut save_startup,
                     &mut clear_startup,
+                    &mut reset_startup,
                 );
 
                 ui.add_space(14.0);
@@ -3583,6 +3596,7 @@ impl SoundFxApp {
                     "settings-exit-combo",
                     &mut save_exit,
                     &mut clear_exit,
+                    &mut reset_exit,
                 );
             });
 
@@ -3630,6 +3644,45 @@ impl SoundFxApp {
                 Err(error) => self.set_error_status(error),
             }
         }
+
+        if reset_startup {
+            match self.storage.reset_startup_sound() {
+                Ok(()) => {
+                    let resolved = self.storage.resolved_startup_sound_path().ok().flatten();
+                    self.startup_sound_name = self.storage.load_startup_sound_name().ok().flatten();
+                    let visual =
+                        Self::load_transition_sound_visual(&self.storage, resolved.clone());
+                    self.startup.sound_waveform = visual.0;
+                    self.startup.sound_duration_sec = visual.1;
+                    self.startup.duration_sec = Self::custom_transition_duration_secs_opt(
+                        &self.storage,
+                        resolved.as_deref(),
+                        DEFAULT_INTRO_DURATION_SEC,
+                    );
+                    self.clear_status();
+                }
+                Err(error) => self.set_error_status(error),
+            }
+        }
+
+        if reset_exit {
+            match self.storage.reset_exit_sound() {
+                Ok(()) => {
+                    let resolved = self.storage.resolved_exit_sound_path().ok().flatten();
+                    self.exit_sound_name = self.storage.load_exit_sound_name().ok().flatten();
+                    let duration = Self::custom_transition_duration_secs_opt(
+                        &self.storage,
+                        resolved.as_deref(),
+                        DEFAULT_OUTRO_DURATION_SEC,
+                    );
+                    if self.startup.phase == TransitionPhase::Outro {
+                        self.startup.duration_sec = duration;
+                    }
+                    self.clear_status();
+                }
+                Err(error) => self.set_error_status(error),
+            }
+        }
     }
 
     fn draw_settings_sound_row(
@@ -3641,6 +3694,7 @@ impl SoundFxApp {
         combo_id: &'static str,
         save_requested: &mut bool,
         clear_requested: &mut bool,
+        reset_requested: &mut bool,
     ) {
         Frame::new()
             .fill(Self::surface_fill())
@@ -3736,6 +3790,14 @@ impl SoundFxApp {
                     Self::decorate_button_response(ui, &clear);
                     if clear.clicked() {
                         *clear_requested = true;
+                    }
+                    let reset = ui.add_sized(
+                        [92.0, 34.0],
+                        Self::action_button(RichText::new("Reset").size(13.0), false, false),
+                    );
+                    Self::decorate_button_response(ui, &reset);
+                    if reset.clicked() {
+                        *reset_requested = true;
                     }
                 });
             });
@@ -7318,6 +7380,7 @@ impl SoundFxApp {
                     Self::transition_wave_bars(&self.startup.sound_waveform, audio_progress, 11);
                 let center = rect.center();
                 let intro_monochrome = self.dark_theme && phase == TransitionPhase::Intro;
+                let intro_light_fade = !self.dark_theme && phase == TransitionPhase::Intro;
                 let (rose_ice, berry, magenta, plum, deep_plum, star_rgb, star_alpha_scale) =
                     if intro_monochrome {
                         (
@@ -7373,11 +7436,14 @@ impl SoundFxApp {
                     TransitionPhase::Live => 1.0,
                 };
                 let aura = ((1.0 - t) * (0.75 + audio_level * 0.5)).clamp(0.0, 1.0);
-                let overlay = match phase {
+                let mut overlay = match phase {
                     TransitionPhase::Intro => (1.0 - t * 0.7).clamp(0.0, 1.0),
                     TransitionPhase::Outro => Self::ease_in_out_cubic(progress),
                     TransitionPhase::Live => 0.0,
                 };
+                if intro_light_fade {
+                    overlay = 0.0;
+                }
                 let intro_black_fade = if intro_monochrome {
                     Self::ease_in_out_cubic(((progress - 0.58) / 0.28).clamp(0.0, 1.0))
                 } else {
@@ -7396,7 +7462,12 @@ impl SoundFxApp {
                 } else {
                     ornament_alpha * (1.0 - square_morph).powf(1.7)
                 };
-                let card_fill = Self::with_alpha(
+                let content_alpha = if intro_light_fade {
+                    1.0
+                } else {
+                    ornament_alpha
+                };
+                let mut card_fill = Self::with_alpha(
                     Self::lerp_color(
                         if intro_monochrome {
                             Self::lerp_color(
@@ -7424,7 +7495,7 @@ impl SoundFxApp {
                     ),
                     layer_alpha,
                 );
-                let card_stroke = Self::with_alpha(
+                let mut card_stroke = Self::with_alpha(
                     Self::lerp_color(
                         if intro_monochrome {
                             Self::lerp_color(
@@ -7452,7 +7523,7 @@ impl SoundFxApp {
                     ),
                     layer_alpha,
                 );
-                let glaze_fill = Self::with_alpha(
+                let mut glaze_fill = Self::with_alpha(
                     Self::lerp_color(
                         if intro_monochrome {
                             Color32::TRANSPARENT
@@ -7476,6 +7547,11 @@ impl SoundFxApp {
                     ),
                     layer_alpha * ornament_alpha,
                 );
+                if intro_light_fade {
+                    card_fill = Self::with_alpha(card_fill, 0.0);
+                    glaze_fill = Self::with_alpha(glaze_fill, 0.0);
+                    card_stroke = Self::with_alpha(card_stroke, 0.35);
+                }
                 let wave_color = Self::with_alpha(
                     if self.dark_theme {
                         Color32::from_rgba_premultiplied(255, 248, 252, (118.0 + t * 120.0) as u8)
@@ -7487,7 +7563,7 @@ impl SoundFxApp {
                             (92.0 + t * 132.0) as u8,
                         )
                     },
-                    layer_alpha * ornament_alpha,
+                    layer_alpha * content_alpha,
                 );
                 let ribbon_color = Self::with_alpha(
                     if self.dark_theme {
@@ -7500,7 +7576,7 @@ impl SoundFxApp {
                             (118.0 + t * 124.0) as u8,
                         )
                     },
-                    layer_alpha * ornament_alpha,
+                    layer_alpha * content_alpha,
                 );
                 let note_base = if intro_monochrome {
                     Color32::from_rgb(246, 243, 248)
@@ -7579,144 +7655,148 @@ impl SoundFxApp {
                     );
                 }
 
-                let aura_layers = [
-                    (
-                        Pos2::new(center.x, center.y + base * 0.02),
-                        base * 0.23,
-                        base * 0.18,
-                        Color32::from_rgba_premultiplied(
-                            deep_plum.r(),
-                            deep_plum.g(),
-                            deep_plum.b(),
-                            (74.0 * overlay) as u8,
+                if !intro_light_fade {
+                    let aura_layers = [
+                        (
+                            Pos2::new(center.x, center.y + base * 0.02),
+                            base * 0.23,
+                            base * 0.18,
+                            Color32::from_rgba_premultiplied(
+                                deep_plum.r(),
+                                deep_plum.g(),
+                                deep_plum.b(),
+                                (74.0 * overlay) as u8,
+                            ),
+                            Color32::from_rgba_premultiplied(
+                                plum.r(),
+                                plum.g(),
+                                plum.b(),
+                                (52.0 + aura * 72.0) as u8,
+                            ),
                         ),
-                        Color32::from_rgba_premultiplied(
-                            plum.r(),
-                            plum.g(),
-                            plum.b(),
-                            (52.0 + aura * 72.0) as u8,
+                        (
+                            Pos2::new(center.x, center.y + base * 0.018),
+                            base * 0.31,
+                            base * 0.24,
+                            Color32::from_rgba_premultiplied(
+                                plum.r(),
+                                plum.g(),
+                                plum.b(),
+                                (58.0 * overlay) as u8,
+                            ),
+                            Color32::from_rgba_premultiplied(
+                                magenta.r(),
+                                magenta.g(),
+                                magenta.b(),
+                                (58.0 + aura * 82.0) as u8,
+                            ),
                         ),
-                    ),
-                    (
-                        Pos2::new(center.x, center.y + base * 0.018),
-                        base * 0.31,
-                        base * 0.24,
-                        Color32::from_rgba_premultiplied(
-                            plum.r(),
-                            plum.g(),
-                            plum.b(),
-                            (58.0 * overlay) as u8,
-                        ),
-                        Color32::from_rgba_premultiplied(
-                            magenta.r(),
-                            magenta.g(),
-                            magenta.b(),
-                            (58.0 + aura * 82.0) as u8,
-                        ),
-                    ),
-                    (
-                        Pos2::new(center.x, center.y + base * 0.016),
-                        base * 0.39,
-                        base * 0.3,
-                        Color32::from_rgba_premultiplied(
-                            magenta.r(),
-                            magenta.g(),
-                            magenta.b(),
-                            (42.0 * overlay) as u8,
-                        ),
-                        Color32::from_rgba_premultiplied(
-                            berry.r(),
-                            berry.g(),
-                            berry.b(),
-                            (50.0 + aura * 96.0) as u8,
-                        ),
-                    ),
-                    (
-                        Pos2::new(center.x, center.y + base * 0.022),
-                        base * 0.47,
-                        base * 0.35,
-                        Color32::from_rgba_premultiplied(
-                            berry.r(),
-                            berry.g(),
-                            berry.b(),
-                            (28.0 * overlay) as u8,
-                        ),
-                        Color32::from_rgba_premultiplied(
-                            rose_ice.r(),
-                            rose_ice.g(),
-                            rose_ice.b(),
-                            (46.0 + aura * 88.0) as u8,
-                        ),
-                    ),
-                ];
-                for (layer_index, (layer_center, radius_x, radius_y, fill, stroke)) in
-                    aura_layers.into_iter().enumerate()
-                {
-                    let stage = target_rect.shrink(layer_index as f32 * 12.0);
-                    let points = Self::morph_squircle_to_rect(
-                        layer_center,
-                        radius_x,
-                        radius_y,
-                        2.6 + layer_index as f32 * 0.18,
-                        (0.18 - layer_index as f32 * 0.02).max(0.08),
-                        time + layer_index as f32 * 0.16,
-                        stage,
-                        square_morph,
-                    );
-                    painter.add(egui::Shape::convex_polygon(
-                        points,
-                        Self::with_alpha(fill, layer_alpha * ornament_alpha),
-                        Stroke::new(
-                            (1.8 - layer_index as f32 * 0.24) * (1.0 - square_morph * 0.3),
-                            Self::with_alpha(stroke, layer_alpha * ornament_alpha),
-                        ),
-                    ));
-                }
-
-                for (radius, alpha) in [
-                    (base * 0.48, 28.0),
-                    (base * 0.38, 42.0),
-                    (base * 0.28, 68.0),
-                    (base * 0.2, 96.0),
-                ] {
-                    painter.circle_filled(
-                        center,
-                        egui::lerp((radius * 0.75)..=radius, 1.0 - aura * 0.22),
-                        Self::with_alpha(
+                        (
+                            Pos2::new(center.x, center.y + base * 0.016),
+                            base * 0.39,
+                            base * 0.3,
+                            Color32::from_rgba_premultiplied(
+                                magenta.r(),
+                                magenta.g(),
+                                magenta.b(),
+                                (42.0 * overlay) as u8,
+                            ),
                             Color32::from_rgba_premultiplied(
                                 berry.r(),
                                 berry.g(),
                                 berry.b(),
-                                (alpha * (0.2 + aura * 0.8)) as u8,
+                                (50.0 + aura * 96.0) as u8,
                             ),
-                            layer_alpha * ornament_alpha,
                         ),
-                    );
+                        (
+                            Pos2::new(center.x, center.y + base * 0.022),
+                            base * 0.47,
+                            base * 0.35,
+                            Color32::from_rgba_premultiplied(
+                                berry.r(),
+                                berry.g(),
+                                berry.b(),
+                                (28.0 * overlay) as u8,
+                            ),
+                            Color32::from_rgba_premultiplied(
+                                rose_ice.r(),
+                                rose_ice.g(),
+                                rose_ice.b(),
+                                (46.0 + aura * 88.0) as u8,
+                            ),
+                        ),
+                    ];
+                    for (layer_index, (layer_center, radius_x, radius_y, fill, stroke)) in
+                        aura_layers.into_iter().enumerate()
+                    {
+                        let stage = target_rect.shrink(layer_index as f32 * 12.0);
+                        let points = Self::morph_squircle_to_rect(
+                            layer_center,
+                            radius_x,
+                            radius_y,
+                            2.6 + layer_index as f32 * 0.18,
+                            (0.18 - layer_index as f32 * 0.02).max(0.08),
+                            time + layer_index as f32 * 0.16,
+                            stage,
+                            square_morph,
+                        );
+                        painter.add(egui::Shape::convex_polygon(
+                            points,
+                            Self::with_alpha(fill, layer_alpha * ornament_alpha),
+                            Stroke::new(
+                                (1.8 - layer_index as f32 * 0.24) * (1.0 - square_morph * 0.3),
+                                Self::with_alpha(stroke, layer_alpha * ornament_alpha),
+                            ),
+                        ));
+                    }
+
+                    for (radius, alpha) in [
+                        (base * 0.48, 28.0),
+                        (base * 0.38, 42.0),
+                        (base * 0.28, 68.0),
+                        (base * 0.2, 96.0),
+                    ] {
+                        painter.circle_filled(
+                            center,
+                            egui::lerp((radius * 0.75)..=radius, 1.0 - aura * 0.22),
+                            Self::with_alpha(
+                                Color32::from_rgba_premultiplied(
+                                    berry.r(),
+                                    berry.g(),
+                                    berry.b(),
+                                    (alpha * (0.2 + aura * 0.8)) as u8,
+                                ),
+                                layer_alpha * ornament_alpha,
+                            ),
+                        );
+                    }
                 }
 
-                let shadow_points = Self::morph_squircle_to_rect(
-                    Pos2::new(center.x, center.y + 14.0 + aura * 12.0),
-                    half_w * 1.02,
-                    half_h * 1.02,
-                    exponent,
-                    wobble * 0.55,
-                    time - 0.35,
-                    target_rect.expand(8.0),
-                    square_morph,
-                );
-                painter.add(egui::Shape::convex_polygon(
-                    shadow_points,
-                    Self::with_alpha(
-                        Color32::from_rgba_premultiplied(
-                            deep_plum.r(),
-                            deep_plum.g(),
-                            deep_plum.b(),
-                            ((36.0 + t * 42.0) * (1.0 - square_morph * 0.82)) as u8,
+                if !intro_light_fade {
+                    let shadow_points = Self::morph_squircle_to_rect(
+                        Pos2::new(center.x, center.y + 14.0 + aura * 12.0),
+                        half_w * 1.02,
+                        half_h * 1.02,
+                        exponent,
+                        wobble * 0.55,
+                        time - 0.35,
+                        target_rect.expand(8.0),
+                        square_morph,
+                    );
+                    painter.add(egui::Shape::convex_polygon(
+                        shadow_points,
+                        Self::with_alpha(
+                            Color32::from_rgba_premultiplied(
+                                deep_plum.r(),
+                                deep_plum.g(),
+                                deep_plum.b(),
+                                ((36.0 + t * 42.0) * (1.0 - square_morph * 0.82)) as u8,
+                            ),
+                            layer_alpha,
                         ),
-                        layer_alpha,
-                    ),
-                    Stroke::NONE,
-                ));
+                        Stroke::NONE,
+                    ));
+                }
 
                 let card_points = Self::morph_squircle_to_rect(
                     center,
@@ -7856,7 +7936,7 @@ impl SoundFxApp {
                             rose_ice.b(),
                             (34.0 + t * 38.0) as u8,
                         ),
-                        layer_alpha * ornament_alpha,
+                        layer_alpha * content_alpha,
                     ),
                 );
 
@@ -7879,7 +7959,7 @@ impl SoundFxApp {
                                 note_base.b(),
                                 note_alpha,
                             ),
-                            layer_alpha * ornament_alpha,
+                            layer_alpha * content_alpha,
                         )
                     } else {
                         Self::with_alpha(
@@ -7889,7 +7969,7 @@ impl SoundFxApp {
                                 note_alt.b(),
                                 note_alpha,
                             ),
-                            layer_alpha * ornament_alpha,
+                            layer_alpha * content_alpha,
                         )
                     };
                     let glow_alpha = if self.dark_theme {
@@ -7910,7 +7990,7 @@ impl SoundFxApp {
                                 note_glow_rgb.2,
                                 glow_alpha,
                             ),
-                            layer_alpha * ornament_alpha,
+                            layer_alpha * content_alpha,
                         ),
                     );
                 }
@@ -8642,7 +8722,11 @@ impl eframe::App for SoundFxApp {
         }
 
         let live_ui_reveal = self.live_ui_reveal_progress(ctx);
-        let live_ui_overlay_alpha = 1.0 - live_ui_reveal;
+        let live_ui_overlay_alpha = if self.dark_theme {
+            1.0 - live_ui_reveal
+        } else {
+            0.0
+        };
         if live_ui_overlay_alpha > 0.0 {
             ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
         }

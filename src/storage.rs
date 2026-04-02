@@ -416,6 +416,28 @@ impl Storage {
         self.save_preferences(&preferences)
     }
 
+    pub fn reset_startup_sound(&self) -> Result<()> {
+        let path = self.startup_sound_path();
+        if path.exists() {
+            fs::remove_file(path).context("unable to remove startup sound override")?;
+        }
+        let mut preferences = self.load_preferences()?;
+        preferences.startup_sound_name = None;
+        preferences.startup_sound_cleared = Some(false);
+        self.save_preferences(&preferences)
+    }
+
+    pub fn reset_exit_sound(&self) -> Result<()> {
+        let path = self.exit_sound_path();
+        if path.exists() {
+            fs::remove_file(path).context("unable to remove exit sound override")?;
+        }
+        let mut preferences = self.load_preferences()?;
+        preferences.exit_sound_name = None;
+        preferences.exit_sound_cleared = Some(false);
+        self.save_preferences(&preferences)
+    }
+
     fn load_preferences(&self) -> Result<PreferencesFile> {
         if !self.preferences_path.exists() {
             return Ok(PreferencesFile::default());
