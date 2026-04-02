@@ -8839,22 +8839,30 @@ impl SoundFxApp {
     }
 
     fn search_sound_button(ui: &mut Ui, enabled: bool) -> egui::Response {
-        let desired = vec2(152.0, 36.0);
-        let response = ui.add_enabled_ui(enabled, |ui| {
-            ui.add_sized(
-                desired,
-                Self::action_button(
-                    RichText::new("Search Sound")
-                        .size(13.0)
-                        .color(Color32::WHITE),
-                    false,
-                    true,
-                ),
-            )
-        });
-        let response = response.inner;
-        Self::decorate_button_response(ui, &response);
-        response
+        if enabled {
+            Self::icon_action(ui, [52.0, 42.0], 0xe8b6, false, true)
+        } else {
+            let response = ui.add_enabled(
+                false,
+                Button::new(Self::icon(0xe8b6, 16.0, Color32::WHITE))
+                    .fill(if Self::dark_theme_enabled() {
+                        Color32::from_rgb(29, 25, 35)
+                    } else {
+                        Color32::from_rgb(245, 241, 245)
+                    })
+                    .stroke(Stroke::new(
+                        1.0,
+                        if Self::dark_theme_enabled() {
+                            Color32::from_rgb(76, 63, 83)
+                        } else {
+                            Color32::from_rgb(224, 211, 220)
+                        },
+                    ))
+                    .corner_radius(18.0),
+            );
+            Self::decorate_button_response(ui, &response);
+            response
+        }
     }
 
     fn render_youtube_result_row(ui: &mut Ui, result: &YoutubeSearchResult) -> bool {
