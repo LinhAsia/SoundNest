@@ -231,6 +231,15 @@ struct StartupSplashState {
 }
 
 impl SoundFxApp {
+    fn debug_trace(message: &str) {
+        let line = format!("{message}\n");
+        let _ = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open("debug-trace.log")
+            .and_then(|mut file| std::io::Write::write_all(&mut file, line.as_bytes()));
+    }
+
     pub fn new() -> Self {
         let storage = Storage::new().unwrap_or_else(|error| panic!("Storage init failed: {error}"));
         let mut status = None;
@@ -1381,10 +1390,13 @@ impl SoundFxApp {
             return;
         }
 
+        Self::debug_trace(&format!("handle_dropped_files count {}", dropped.len()));
         let mut paths = Vec::new();
         for path in dropped.into_iter().filter_map(|file| file.path) {
             let normalized = fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+            Self::debug_trace(&format!("dropped {:?}", normalized));
             if self.ignored_drop_path.as_ref() == Some(&normalized) {
+                Self::debug_trace("dropped path matched ignored_drop_path");
                 self.ignored_drop_path = None;
                 continue;
             }
@@ -1465,7 +1477,7 @@ impl SoundFxApp {
     fn pointer_left_app(ctx: &Context) -> bool {
         let app_rect = ctx.screen_rect().expand(4.0);
         ctx.input(|input| {
-            if !input.viewport().focused.unwrap_or(true) || !input.pointer.primary_down() {
+            if !input.pointer.primary_down() {
                 return false;
             }
             match input
@@ -1598,12 +1610,21 @@ impl SoundFxApp {
     }
 
     fn drag_sound_file_out(&mut self, ctx: &Context, sound: &SoundEffect) -> Result<()> {
+        Self::debug_trace(&format!("drag_sound_file_out start {}", sound.id));
         let export_path = self.storage.export_processed_sound(sound)?;
         self.ignored_drop_path =
             Some(fs::canonicalize(&export_path).unwrap_or_else(|_| export_path.clone()));
+        Self::debug_trace(&format!(
+            "drag_sound_file_out export {:?}",
+            self.ignored_drop_path
+        ));
         self.pending_sound_drag = None;
         let result = platform::drag_file_out(&export_path);
         ctx.request_repaint();
+        Self::debug_trace(&format!(
+            "drag_sound_file_out end {:?}",
+            result.as_ref().map(|_| ())
+        ));
         result
     }
 
