@@ -3041,7 +3041,7 @@ impl SoundFxApp {
                         if Self::icon_action(
                             ui,
                             [48.0, 36.0],
-                            0xe050,
+                            0xe30a,
                             self.record_input_source == PitchInputSource::System,
                             self.record_input_source == PitchInputSource::System,
                         )
