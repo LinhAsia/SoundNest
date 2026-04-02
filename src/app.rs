@@ -7946,12 +7946,119 @@ impl SoundFxApp {
 
                 let inner_rect = Rect::from_center_size(
                     center,
-                    vec2(half_w * 1.34, half_h * 1.12).min(target_rect.size() * 0.92),
+                    vec2(half_w * 1.18, half_h * 1.02).min(target_rect.size() * 0.86),
                 );
-                let clip = painter.with_clip_rect(inner_rect.expand2(vec2(10.0, 10.0)));
-                let band_rect = Rect::from_center_size(
-                    Pos2::new(center.x, center.y - half_h * 0.06),
-                    vec2(inner_rect.width() * 0.68, inner_rect.height() * 0.34),
+                let panel_fill = if intro_monochrome {
+                    Color32::from_rgba_premultiplied(34, 30, 40, 210)
+                } else if self.dark_theme {
+                    Color32::from_rgba_premultiplied(27, 22, 33, 224)
+                } else {
+                    Color32::from_rgba_premultiplied(248, 244, 248, 244)
+                };
+                let panel_stroke = if intro_monochrome {
+                    Color32::from_rgba_premultiplied(92, 86, 102, 132)
+                } else if self.dark_theme {
+                    Color32::from_rgba_premultiplied(109, 84, 116, 148)
+                } else if light_transition {
+                    Color32::from_rgba_premultiplied(198, 166, 184, 184)
+                } else {
+                    Color32::from_rgba_premultiplied(223, 198, 213, 176)
+                };
+                let panel_shadow = if intro_monochrome {
+                    Color32::from_rgba_premultiplied(8, 7, 10, 48)
+                } else if self.dark_theme {
+                    Color32::from_rgba_premultiplied(9, 7, 12, 64)
+                } else {
+                    Color32::from_rgba_premultiplied(132, 90, 113, 26)
+                };
+
+                let hero_rect = Rect::from_center_size(
+                    Pos2::new(center.x, center.y - half_h * 0.23),
+                    vec2(inner_rect.width() * 0.68, 44.0 + t * 16.0),
+                );
+                let hero_fill = if intro_monochrome {
+                    Color32::from_rgba_premultiplied(43, 38, 50, 190)
+                } else if self.dark_theme {
+                    Color32::from_rgba_premultiplied(39, 30, 45, 204)
+                } else {
+                    Color32::from_rgba_premultiplied(255, 250, 253, 238)
+                };
+                let detail_fill = if intro_monochrome {
+                    Color32::from_rgba_premultiplied(80, 73, 88, 150)
+                } else if self.dark_theme {
+                    Color32::from_rgba_premultiplied(232, 162, 202, 108)
+                } else if light_transition {
+                    Color32::from_rgba_premultiplied(214, 51, 132, 114)
+                } else {
+                    Color32::from_rgba_premultiplied(229, 85, 149, 96)
+                };
+                let detail_secondary = if intro_monochrome {
+                    Color32::from_rgba_premultiplied(72, 66, 80, 118)
+                } else if self.dark_theme {
+                    Color32::from_rgba_premultiplied(248, 226, 238, 84)
+                } else {
+                    Color32::from_rgba_premultiplied(218, 196, 210, 160)
+                };
+                painter.rect(
+                    hero_rect,
+                    CornerRadius::same(20),
+                    Self::with_alpha(hero_fill, layer_alpha * ornament_alpha.max(0.56)),
+                    Stroke::new(
+                        1.0,
+                        Self::with_alpha(panel_stroke, layer_alpha * ornament_alpha.max(0.5)),
+                    ),
+                    StrokeKind::Outside,
+                );
+                let hero_pill_rect = Rect::from_center_size(
+                    Pos2::new(hero_rect.center().x, hero_rect.center().y - 4.0),
+                    vec2(hero_rect.width() * 0.42, 10.0),
+                );
+                painter.rect_filled(
+                    hero_pill_rect,
+                    6.0,
+                    Self::with_alpha(detail_fill, layer_alpha * ornament_alpha.max(0.66)),
+                );
+                let hero_meta_rect = Rect::from_center_size(
+                    Pos2::new(hero_rect.center().x, hero_rect.center().y + 14.0),
+                    vec2(hero_rect.width() * 0.28, 6.0),
+                );
+                painter.rect_filled(
+                    hero_meta_rect,
+                    4.0,
+                    Self::with_alpha(detail_secondary, layer_alpha * ornament_alpha.max(0.58)),
+                );
+
+                let module_rect = Rect::from_center_size(
+                    Pos2::new(center.x, center.y + half_h * 0.22),
+                    vec2(inner_rect.width() * 0.62, inner_rect.height() * 0.54),
+                );
+                painter.rect(
+                    module_rect.translate(vec2(0.0, 10.0 + aura * 5.0)),
+                    CornerRadius::same(26),
+                    Self::with_alpha(panel_shadow, layer_alpha * ornament_alpha.max(0.54)),
+                    Stroke::NONE,
+                    StrokeKind::Outside,
+                );
+                painter.rect(
+                    module_rect,
+                    CornerRadius::same(26),
+                    Self::with_alpha(panel_fill, layer_alpha * ornament_alpha.max(0.72)),
+                    Stroke::new(
+                        1.0,
+                        Self::with_alpha(panel_stroke, layer_alpha * ornament_alpha.max(0.64)),
+                    ),
+                    StrokeKind::Outside,
+                );
+
+                let module_inner = module_rect.shrink2(vec2(24.0, 20.0));
+                let clip = painter.with_clip_rect(module_inner.expand2(vec2(8.0, 8.0)));
+                let accent_rect = Rect::from_center_size(
+                    Pos2::new(module_rect.center().x, module_rect.top() + 26.0),
+                    vec2(module_rect.width() * 0.56, 14.0 + t * 3.0),
+                );
+                let band_rect = Rect::from_min_max(
+                    Pos2::new(module_inner.left(), module_rect.top() + 56.0),
+                    Pos2::new(module_inner.right(), module_rect.top() + 140.0),
                 );
                 if light_transition {
                     clip.rect_filled(
@@ -7981,9 +8088,9 @@ impl SoundFxApp {
                     clip.rect_filled(wave_rect, 4.0, wave_color);
                 }
 
-                let ribbon_rect = Rect::from_center_size(
-                    Pos2::new(center.x, center.y + half_h * 0.24),
-                    vec2(inner_rect.width() * 0.76, inner_rect.height() * 0.18),
+                let ribbon_rect = Rect::from_min_max(
+                    Pos2::new(module_inner.left(), module_rect.bottom() - 84.0),
+                    Pos2::new(module_inner.right(), module_rect.bottom() - 26.0),
                 );
                 if light_transition {
                     clip.rect_filled(
@@ -8018,11 +8125,6 @@ impl SoundFxApp {
                     line.push(Pos2::new(x, y));
                 }
                 clip.add(egui::Shape::line(line, Stroke::new(4.0, ribbon_color)));
-
-                let accent_rect = Rect::from_center_size(
-                    Pos2::new(center.x, center.y - half_h * 0.34),
-                    vec2(inner_rect.width() * 0.48, 16.0 + t * 6.0),
-                );
                 clip.rect_filled(
                     accent_rect,
                     9.0,
@@ -8043,12 +8145,18 @@ impl SoundFxApp {
 
                 for index in 0..7 {
                     let angle = time * 0.72 + index as f32 * 0.9;
-                    let orbit = egui::lerp((base * 0.32)..=(base * 0.18), t)
-                        + (index % 3) as f32 * 10.0
-                        + audio_level * 12.0;
+                    let orbit = egui::lerp(
+                        (module_rect.width() * 0.28)..=(module_rect.width() * 0.14),
+                        t,
+                    ) + (index % 3) as f32 * 10.0
+                        + audio_level * 8.0;
+                    let note_anchor = Pos2::new(
+                        module_rect.center().x,
+                        module_rect.top() + module_rect.height() * 0.4,
+                    );
                     let note_pos = Pos2::new(
-                        center.x + angle.cos() * orbit,
-                        center.y - half_h * 0.08 + angle.sin() * orbit * 0.72,
+                        note_anchor.x + angle.cos() * orbit,
+                        note_anchor.y + angle.sin() * orbit * 0.62,
                     );
                     let note_scale = 0.64 + (index % 3) as f32 * 0.12 + audio_level * 0.12;
                     let note_alpha = if light_transition {
