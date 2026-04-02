@@ -7381,7 +7381,12 @@ impl SoundFxApp {
                 let center = rect.center();
                 let intro_monochrome = self.dark_theme && phase == TransitionPhase::Intro;
                 let intro_light_fade = !self.dark_theme && phase == TransitionPhase::Intro;
+                let light_outro = !self.dark_theme && phase == TransitionPhase::Outro;
                 let light_intro_base = Color32::from_rgb(238, 236, 241);
+                let light_intro_berry = Color32::from_rgb(225, 209, 220);
+                let light_intro_magenta = Color32::from_rgb(210, 188, 203);
+                let light_intro_plum = Color32::from_rgb(196, 171, 188);
+                let light_intro_deep = Color32::from_rgb(182, 156, 174);
                 let (rose_ice, berry, magenta, plum, deep_plum, star_rgb, star_alpha_scale) =
                     if intro_monochrome {
                         (
@@ -7402,6 +7407,16 @@ impl SoundFxApp {
                             Color32::from_rgb(7, 4, 10),
                             (255, 214, 234),
                             0.30,
+                        )
+                    } else if intro_light_fade {
+                        (
+                            light_intro_base,
+                            light_intro_berry,
+                            light_intro_magenta,
+                            light_intro_plum,
+                            light_intro_deep,
+                            (255, 255, 255),
+                            0.65,
                         )
                     } else {
                         (
@@ -7568,7 +7583,9 @@ impl SoundFxApp {
                     );
                 }
                 let wave_color = Self::with_alpha(
-                    if self.dark_theme {
+                    if light_outro {
+                        Color32::from_rgba_premultiplied(214, 51, 132, (148.0 + t * 94.0) as u8)
+                    } else if self.dark_theme {
                         Color32::from_rgba_premultiplied(255, 248, 252, (118.0 + t * 120.0) as u8)
                     } else {
                         Color32::from_rgba_premultiplied(
@@ -7581,7 +7598,9 @@ impl SoundFxApp {
                     layer_alpha * content_alpha,
                 );
                 let ribbon_color = Self::with_alpha(
-                    if self.dark_theme {
+                    if light_outro {
+                        Color32::from_rgba_premultiplied(236, 116, 179, (164.0 + t * 78.0) as u8)
+                    } else if self.dark_theme {
                         Color32::from_rgba_premultiplied(255, 250, 252, (136.0 + t * 108.0) as u8)
                     } else {
                         Color32::from_rgba_premultiplied(
@@ -7699,148 +7718,144 @@ impl SoundFxApp {
                     );
                 }
 
-                if !intro_light_fade {
-                    let aura_layers = [
-                        (
-                            Pos2::new(center.x, center.y + base * 0.02),
-                            base * 0.23,
-                            base * 0.18,
-                            Color32::from_rgba_premultiplied(
-                                deep_plum.r(),
-                                deep_plum.g(),
-                                deep_plum.b(),
-                                (74.0 * overlay) as u8,
-                            ),
-                            Color32::from_rgba_premultiplied(
-                                plum.r(),
-                                plum.g(),
-                                plum.b(),
-                                (52.0 + aura * 72.0) as u8,
-                            ),
+                let aura_layers = [
+                    (
+                        Pos2::new(center.x, center.y + base * 0.02),
+                        base * 0.23,
+                        base * 0.18,
+                        Color32::from_rgba_premultiplied(
+                            deep_plum.r(),
+                            deep_plum.g(),
+                            deep_plum.b(),
+                            (74.0 * overlay) as u8,
                         ),
-                        (
-                            Pos2::new(center.x, center.y + base * 0.018),
-                            base * 0.31,
-                            base * 0.24,
-                            Color32::from_rgba_premultiplied(
-                                plum.r(),
-                                plum.g(),
-                                plum.b(),
-                                (58.0 * overlay) as u8,
-                            ),
-                            Color32::from_rgba_premultiplied(
-                                magenta.r(),
-                                magenta.g(),
-                                magenta.b(),
-                                (58.0 + aura * 82.0) as u8,
-                            ),
+                        Color32::from_rgba_premultiplied(
+                            plum.r(),
+                            plum.g(),
+                            plum.b(),
+                            (52.0 + aura * 72.0) as u8,
                         ),
-                        (
-                            Pos2::new(center.x, center.y + base * 0.016),
-                            base * 0.39,
-                            base * 0.3,
-                            Color32::from_rgba_premultiplied(
-                                magenta.r(),
-                                magenta.g(),
-                                magenta.b(),
-                                (42.0 * overlay) as u8,
-                            ),
-                            Color32::from_rgba_premultiplied(
-                                berry.r(),
-                                berry.g(),
-                                berry.b(),
-                                (50.0 + aura * 96.0) as u8,
-                            ),
+                    ),
+                    (
+                        Pos2::new(center.x, center.y + base * 0.018),
+                        base * 0.31,
+                        base * 0.24,
+                        Color32::from_rgba_premultiplied(
+                            plum.r(),
+                            plum.g(),
+                            plum.b(),
+                            (58.0 * overlay) as u8,
                         ),
-                        (
-                            Pos2::new(center.x, center.y + base * 0.022),
-                            base * 0.47,
-                            base * 0.35,
-                            Color32::from_rgba_premultiplied(
-                                berry.r(),
-                                berry.g(),
-                                berry.b(),
-                                (28.0 * overlay) as u8,
-                            ),
-                            Color32::from_rgba_premultiplied(
-                                rose_ice.r(),
-                                rose_ice.g(),
-                                rose_ice.b(),
-                                (46.0 + aura * 88.0) as u8,
-                            ),
+                        Color32::from_rgba_premultiplied(
+                            magenta.r(),
+                            magenta.g(),
+                            magenta.b(),
+                            (58.0 + aura * 82.0) as u8,
                         ),
-                    ];
-                    for (layer_index, (layer_center, radius_x, radius_y, fill, stroke)) in
-                        aura_layers.into_iter().enumerate()
-                    {
-                        let stage = target_rect.shrink(layer_index as f32 * 12.0);
-                        let points = Self::morph_squircle_to_rect(
-                            layer_center,
-                            radius_x,
-                            radius_y,
-                            2.6 + layer_index as f32 * 0.18,
-                            (0.18 - layer_index as f32 * 0.02).max(0.08),
-                            time + layer_index as f32 * 0.16,
-                            stage,
-                            square_morph,
-                        );
-                        painter.add(egui::Shape::convex_polygon(
-                            points,
-                            Self::with_alpha(fill, layer_alpha * ornament_alpha),
-                            Stroke::new(
-                                (1.8 - layer_index as f32 * 0.24) * (1.0 - square_morph * 0.3),
-                                Self::with_alpha(stroke, layer_alpha * ornament_alpha),
-                            ),
-                        ));
-                    }
-
-                    for (radius, alpha) in [
-                        (base * 0.48, 28.0),
-                        (base * 0.38, 42.0),
-                        (base * 0.28, 68.0),
-                        (base * 0.2, 96.0),
-                    ] {
-                        painter.circle_filled(
-                            center,
-                            egui::lerp((radius * 0.75)..=radius, 1.0 - aura * 0.22),
-                            Self::with_alpha(
-                                Color32::from_rgba_premultiplied(
-                                    berry.r(),
-                                    berry.g(),
-                                    berry.b(),
-                                    (alpha * (0.2 + aura * 0.8)) as u8,
-                                ),
-                                layer_alpha * ornament_alpha,
-                            ),
-                        );
-                    }
-                }
-
-                if !intro_light_fade {
-                    let shadow_points = Self::morph_squircle_to_rect(
-                        Pos2::new(center.x, center.y + 14.0 + aura * 12.0),
-                        half_w * 1.02,
-                        half_h * 1.02,
-                        exponent,
-                        wobble * 0.55,
-                        time - 0.35,
-                        target_rect.expand(8.0),
+                    ),
+                    (
+                        Pos2::new(center.x, center.y + base * 0.016),
+                        base * 0.39,
+                        base * 0.3,
+                        Color32::from_rgba_premultiplied(
+                            magenta.r(),
+                            magenta.g(),
+                            magenta.b(),
+                            (42.0 * overlay) as u8,
+                        ),
+                        Color32::from_rgba_premultiplied(
+                            berry.r(),
+                            berry.g(),
+                            berry.b(),
+                            (50.0 + aura * 96.0) as u8,
+                        ),
+                    ),
+                    (
+                        Pos2::new(center.x, center.y + base * 0.022),
+                        base * 0.47,
+                        base * 0.35,
+                        Color32::from_rgba_premultiplied(
+                            berry.r(),
+                            berry.g(),
+                            berry.b(),
+                            (28.0 * overlay) as u8,
+                        ),
+                        Color32::from_rgba_premultiplied(
+                            rose_ice.r(),
+                            rose_ice.g(),
+                            rose_ice.b(),
+                            (46.0 + aura * 88.0) as u8,
+                        ),
+                    ),
+                ];
+                for (layer_index, (layer_center, radius_x, radius_y, fill, stroke)) in
+                    aura_layers.into_iter().enumerate()
+                {
+                    let stage = target_rect.shrink(layer_index as f32 * 12.0);
+                    let points = Self::morph_squircle_to_rect(
+                        layer_center,
+                        radius_x,
+                        radius_y,
+                        2.6 + layer_index as f32 * 0.18,
+                        (0.18 - layer_index as f32 * 0.02).max(0.08),
+                        time + layer_index as f32 * 0.16,
+                        stage,
                         square_morph,
                     );
                     painter.add(egui::Shape::convex_polygon(
-                        shadow_points,
-                        Self::with_alpha(
-                            Color32::from_rgba_premultiplied(
-                                deep_plum.r(),
-                                deep_plum.g(),
-                                deep_plum.b(),
-                                ((36.0 + t * 42.0) * (1.0 - square_morph * 0.82)) as u8,
-                            ),
-                            layer_alpha,
+                        points,
+                        Self::with_alpha(fill, layer_alpha * ornament_alpha),
+                        Stroke::new(
+                            (1.8 - layer_index as f32 * 0.24) * (1.0 - square_morph * 0.3),
+                            Self::with_alpha(stroke, layer_alpha * ornament_alpha),
                         ),
-                        Stroke::NONE,
                     ));
                 }
+
+                for (radius, alpha) in [
+                    (base * 0.48, 28.0),
+                    (base * 0.38, 42.0),
+                    (base * 0.28, 68.0),
+                    (base * 0.2, 96.0),
+                ] {
+                    painter.circle_filled(
+                        center,
+                        egui::lerp((radius * 0.75)..=radius, 1.0 - aura * 0.22),
+                        Self::with_alpha(
+                            Color32::from_rgba_premultiplied(
+                                berry.r(),
+                                berry.g(),
+                                berry.b(),
+                                (alpha * (0.2 + aura * 0.8)) as u8,
+                            ),
+                            layer_alpha * ornament_alpha,
+                        ),
+                    );
+                }
+
+                let shadow_points = Self::morph_squircle_to_rect(
+                    Pos2::new(center.x, center.y + 14.0 + aura * 12.0),
+                    half_w * 1.02,
+                    half_h * 1.02,
+                    exponent,
+                    wobble * 0.55,
+                    time - 0.35,
+                    target_rect.expand(8.0),
+                    square_morph,
+                );
+                painter.add(egui::Shape::convex_polygon(
+                    shadow_points,
+                    Self::with_alpha(
+                        Color32::from_rgba_premultiplied(
+                            deep_plum.r(),
+                            deep_plum.g(),
+                            deep_plum.b(),
+                            ((36.0 + t * 42.0) * (1.0 - square_morph * 0.82)) as u8,
+                        ),
+                        layer_alpha,
+                    ),
+                    Stroke::NONE,
+                ));
 
                 let card_points = Self::morph_squircle_to_rect(
                     center,
