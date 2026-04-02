@@ -8793,9 +8793,9 @@ impl SoundFxApp {
         let fill = if enabled {
             Color32::from_rgb(214, 51, 132)
         } else if Self::dark_theme_enabled() {
-            Color32::from_rgb(29, 25, 35)
+            Color32::TRANSPARENT
         } else {
-            Color32::from_rgb(245, 241, 245)
+            Color32::TRANSPARENT
         };
         let stroke = if enabled {
             Color32::from_rgb(214, 51, 132)
@@ -8843,11 +8843,7 @@ impl SoundFxApp {
             let response = ui.add_enabled(
                 false,
                 Button::new(Self::icon(0xe8b6, 16.0, Color32::WHITE))
-                    .fill(if Self::dark_theme_enabled() {
-                        Color32::from_rgb(29, 25, 35)
-                    } else {
-                        Color32::from_rgb(245, 241, 245)
-                    })
+                    .fill(Color32::TRANSPARENT)
                     .stroke(Stroke::new(
                         1.0,
                         if Self::dark_theme_enabled() {
