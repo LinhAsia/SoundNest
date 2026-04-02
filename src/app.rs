@@ -1455,14 +1455,18 @@ impl SoundFxApp {
 
     fn pointer_drag_active(ctx: &Context, rect: Rect) -> bool {
         ctx.input(|input| {
+            if !input.viewport().focused.unwrap_or(true) {
+                return false;
+            }
             if !input.pointer.primary_down() || input.pointer.delta().length_sq() <= 4.0 {
                 return false;
             }
+            let app_rect = ctx.screen_rect().expand(4.0);
             input
                 .pointer
                 .interact_pos()
                 .or_else(|| input.pointer.latest_pos())
-                .is_some_and(|pos| rect.contains(pos))
+                .is_some_and(|pos| app_rect.contains(pos) && rect.contains(pos))
         })
     }
 
@@ -5099,6 +5103,8 @@ impl SoundFxApp {
                                     .is_some_and(|pos| tile_rect.contains(pos));
                             let pointer_drag_active =
                                 !modal_open && Self::pointer_drag_active(ui.ctx(), body_rect);
+                            let pointer_primary_down =
+                                !modal_open && ui.ctx().input(|input| input.pointer.primary_down());
                             let hovered = !modal_open
                                 && (pointer_hover
                                     || tile_response.hovered()
@@ -5108,12 +5114,14 @@ impl SoundFxApp {
                                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
                             }
                             if !modal_open
+                                && pointer_primary_down
                                 && (body_response.is_pointer_button_down_on()
                                     || pointer_drag_active)
                             {
                                 self.pending_sound_drag = Some(sound.id);
                             }
                             if !modal_open
+                                && pointer_primary_down
                                 && (body_response.dragged()
                                     || body_response.is_pointer_button_down_on()
                                     || pointer_drag_active)
@@ -5121,6 +5129,7 @@ impl SoundFxApp {
                                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
                             }
                             if !modal_open
+                                && pointer_primary_down
                                 && self.pending_sound_drag == Some(sound.id)
                                 && (body_response.dragged() || pointer_drag_active)
                                 && Self::pointer_left_app(ui.ctx())
@@ -5820,16 +5829,21 @@ impl SoundFxApp {
                         );
                         let pointer_drag_active =
                             Self::pointer_drag_active(ui.ctx(), frame.response.rect);
-                        if response.is_pointer_button_down_on() || pointer_drag_active {
+                        let pointer_primary_down =
+                            ui.ctx().input(|input| input.pointer.primary_down());
+                        if pointer_primary_down
+                            && (response.is_pointer_button_down_on() || pointer_drag_active)
+                        {
                             self.pending_sound_drag = Some(sound.id);
                         }
                         if response.hovered() {
                             ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
                         }
-                        if response.dragged() || pointer_drag_active {
+                        if pointer_primary_down && (response.dragged() || pointer_drag_active) {
                             ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
                         }
-                        if self.pending_sound_drag == Some(sound.id)
+                        if pointer_primary_down
+                            && self.pending_sound_drag == Some(sound.id)
                             && (response.dragged() || pointer_drag_active)
                             && Self::pointer_left_app(ui.ctx())
                         {
