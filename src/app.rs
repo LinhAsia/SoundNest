@@ -6256,7 +6256,8 @@ impl SoundFxApp {
                     let pan_left = ui.input(|input| input.key_down(egui::Key::A));
                     let pan_right = ui.input(|input| input.key_down(egui::Key::D));
                     let keyboard_panning = pan_left ^ pan_right;
-                    let showing_hover_preview = response.hovered()
+                    let timeline_hovered = response.hovered() || pointer_pos.is_some();
+                    let showing_hover_preview = timeline_hovered
                         && !keyboard_panning
                         && !hover_on_trim_handle
                         && !start_response.is_pointer_button_down_on()
@@ -6300,7 +6301,8 @@ impl SoundFxApp {
                         playhead_color,
                     );
 
-                    if keyboard_panning && !ui.ctx().wants_keyboard_input() {
+                    if timeline_hovered && keyboard_panning {
+                        ui.ctx().memory_mut(|memory| memory.stop_text_input());
                         let pan_speed = (viewport_rect.width() * 2.4).max(420.0);
                         let pan_step =
                             pan_speed * ui.input(|input| input.stable_dt).max(1.0 / 240.0);
