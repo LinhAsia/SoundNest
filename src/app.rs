@@ -6300,6 +6300,25 @@ impl SoundFxApp {
                         playhead_color,
                     );
 
+                    if keyboard_panning && !ui.ctx().wants_keyboard_input() {
+                        let pan_speed = (viewport_rect.width() * 2.4).max(420.0);
+                        let pan_step =
+                            pan_speed * ui.input(|input| input.stable_dt).max(1.0 / 240.0);
+                        let max_offset = (rect.width() - viewport_rect.width()).max(0.0);
+                        let delta = match (pan_left, pan_right) {
+                            (true, false) => -pan_step,
+                            (false, true) => pan_step,
+                            _ => 0.0,
+                        };
+                        let current_offset = pending_zoom_scroll_offset
+                            .unwrap_or_else(|| (viewport_rect.left() - rect.left()).max(0.0));
+                        let next_offset = (current_offset + delta).clamp(0.0, max_offset);
+                        ui.ctx().data_mut(|data| {
+                            data.insert_temp(zoom_scroll_offset_id, next_offset);
+                        });
+                        ui.ctx().request_repaint();
+                    }
+
                     if response.hovered() && !ui.ctx().wants_keyboard_input() {
                         let zoom_delta = ui.input(|input| {
                             if input.modifiers.ctrl {
@@ -6338,24 +6357,6 @@ impl SoundFxApp {
                         let move_right = ui.input_mut(|input| {
                             input.consume_key(egui::Modifiers::NONE, egui::Key::W)
                         });
-
-                        if pan_left || pan_right {
-                            let pan_speed = (viewport_rect.width() * 2.4).max(420.0);
-                            let pan_step =
-                                pan_speed * ui.input(|input| input.stable_dt).max(1.0 / 240.0);
-                            let max_offset = (rect.width() - viewport_rect.width()).max(0.0);
-                            let delta = match (pan_left, pan_right) {
-                                (true, false) => -pan_step,
-                                (false, true) => pan_step,
-                                _ => 0.0,
-                            };
-                            let current_offset = (viewport_rect.left() - rect.left()).max(0.0);
-                            let next_offset = (current_offset + delta).clamp(0.0, max_offset);
-                            ui.ctx().data_mut(|data| {
-                                data.insert_temp(zoom_scroll_offset_id, next_offset);
-                            });
-                            ui.ctx().request_repaint();
-                        }
 
                         if let Some(pointer_time) = pointer_time {
                             if move_left {
