@@ -5,6 +5,7 @@ use std::fs::File;
 use std::io::BufReader;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use uuid::Uuid;
 
 const POP_FADE_MS: f32 = 18.0;
@@ -13,7 +14,54 @@ struct CachedAudio {
     path: PathBuf,
     channels: u16,
     sample_rate: u32,
-    samples: Vec<f32>,
+    samples: Arc<[f32]>,
+}
+
+struct SharedSamplesSource {
+    samples: Arc<[f32]>,
+    index: usize,
+    end: usize,
+    channels: u16,
+    sample_rate: u32,
+}
+
+impl Iterator for SharedSamplesSource {
+    type Item = f32;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index >= self.end {
+            return None;
+        }
+        let sample = self.samples.get(self.index).copied();
+        self.index = self.index.saturating_add(1);
+        sample
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.end.saturating_sub(self.index);
+        (remaining, Some(remaining))
+    }
+}
+
+impl Source for SharedSamplesSource {
+    fn current_frame_len(&self) -> Option<usize> {
+        Some(self.end.saturating_sub(self.index) / self.channels.max(1) as usize)
+    }
+
+    fn channels(&self) -> u16 {
+        self.channels
+    }
+
+    fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+
+    fn total_duration(&self) -> Option<std::time::Duration> {
+        let frames = self.end.saturating_sub(self.index) / self.channels.max(1) as usize;
+        Some(std::time::Duration::from_secs_f32(
+            frames as f32 / self.sample_rate.max(1) as f32,
+        ))
+    }
 }
 
 pub struct AudioEngine {
@@ -60,23 +108,36 @@ impl AudioEngine {
     ) -> Result<()> {
         self.stop();
 
-        let (channels, sample_rate, trimmed_samples) =
-            self.load_trimmed_samples(sound, asset_path)?;
+        self.ensure_cached_audio(asset_path)?;
+        let cached = self
+            .cached_audio
+            .as_ref()
+            .expect("cached audio should exist after ensure_cached_audio");
+        let channels = cached.channels;
+        let sample_rate = cached.sample_rate;
+        let (trim_start_sample, trim_end_sample) =
+            trim_sample_range(sound, channels, sample_rate, cached.samples.len())?;
         let speed = sound.speed.clamp(0.25, 2.0);
-        let total_duration_secs =
-            trimmed_samples.len() as f32 / channels.max(1) as f32 / sample_rate.max(1) as f32;
-        let total_frames = trimmed_samples.len() / channels as usize;
+        let total_duration_secs = (trim_end_sample - trim_start_sample) as f32
+            / channels.max(1) as f32
+            / sample_rate.max(1) as f32;
+        let total_frames = (trim_end_sample - trim_start_sample) / channels as usize;
         let start_offset_secs =
             (start_position_secs - sound.trim_start_secs).clamp(0.0, total_duration_secs.max(0.0));
         let start_frame = ((start_offset_secs * sample_rate as f32).floor() as usize)
             .min(total_frames.saturating_sub(1));
         let start_offset_secs = start_frame as f32 / sample_rate as f32;
-        let start_sample = start_frame * channels as usize;
-        let remaining_samples = trimmed_samples[start_sample..].to_vec();
+        let start_sample = trim_start_sample + start_frame * channels as usize;
 
-        let preview = SamplesBuffer::new(channels, sample_rate, remaining_samples)
-            .speed(speed)
-            .amplify(sound.volume.max(0.0));
+        let preview = SharedSamplesSource {
+            samples: Arc::clone(&cached.samples),
+            index: start_sample,
+            end: trim_end_sample,
+            channels,
+            sample_rate,
+        }
+        .speed(speed)
+        .amplify(sound.volume.max(0.0));
 
         let sink = Sink::try_new(&self.handle).context("unable to create audio sink")?;
         sink.append(preview);
@@ -106,23 +167,26 @@ impl AudioEngine {
             .expect("cached audio should exist after ensure_cached_audio");
         let channels = cached.channels;
         let sample_rate = cached.sample_rate;
-        let samples = &cached.samples;
-        if samples.is_empty() {
+        if cached.samples.is_empty() {
             bail!("audio file is empty");
         }
 
         let total_duration_secs =
-            samples.len() as f32 / channels.max(1) as f32 / sample_rate.max(1) as f32;
-        let total_frames = samples.len() / channels as usize;
+            cached.samples.len() as f32 / channels.max(1) as f32 / sample_rate.max(1) as f32;
+        let total_frames = cached.samples.len() / channels as usize;
         let start_offset_secs = start_position_secs.clamp(0.0, total_duration_secs.max(0.0));
         let start_frame = ((start_offset_secs * sample_rate as f32).floor() as usize)
             .min(total_frames.saturating_sub(1));
         let start_offset_secs = start_frame as f32 / sample_rate as f32;
         let start_sample = start_frame * channels as usize;
-        let mut remaining_samples = samples[start_sample..].to_vec();
-        soften_sample_edges(&mut remaining_samples, channels, sample_rate, POP_FADE_MS);
 
-        let preview = SamplesBuffer::new(channels, sample_rate, remaining_samples);
+        let preview = SharedSamplesSource {
+            samples: Arc::clone(&cached.samples),
+            index: start_sample,
+            end: cached.samples.len(),
+            channels,
+            sample_rate,
+        };
         let sink = Sink::try_new(&self.handle).context("unable to create audio sink")?;
         sink.append(preview);
         sink.play();
@@ -214,23 +278,10 @@ impl AudioEngine {
                 path: asset_path.to_path_buf(),
                 channels,
                 sample_rate,
-                samples,
+                samples: Arc::<[f32]>::from(samples),
             });
         }
         Ok(())
-    }
-
-    fn load_trimmed_samples(
-        &mut self,
-        sound: &SoundEffect,
-        asset_path: &Path,
-    ) -> Result<(u16, u32, Vec<f32>)> {
-        self.ensure_cached_audio(asset_path)?;
-        let cached = self
-            .cached_audio
-            .as_ref()
-            .expect("cached audio should exist after ensure_cached_audio");
-        trim_samples(sound, cached.channels, cached.sample_rate, &cached.samples)
     }
 }
 
@@ -245,17 +296,17 @@ pub fn play_file_blocking(asset_path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn trim_samples(
+fn trim_sample_range(
     sound: &SoundEffect,
     channels: u16,
     sample_rate: u32,
-    samples: &[f32],
-) -> Result<(u16, u32, Vec<f32>)> {
-    if samples.is_empty() {
+    sample_len: usize,
+) -> Result<(usize, usize)> {
+    if sample_len == 0 {
         bail!("audio file is empty");
     }
 
-    let total_frames = samples.len() / channels as usize;
+    let total_frames = sample_len / channels as usize;
     let actual_duration = total_frames as f32 / sample_rate as f32;
     let trim_start = sound.trim_start_secs.clamp(0.0, actual_duration);
     let trim_end = if sound.trim_end_secs >= sound.safe_duration() - 0.02 {
@@ -272,13 +323,9 @@ fn trim_samples(
             .max(start_frame + 1)
     };
     let start_sample = start_frame * channels as usize;
-    let end_sample = (end_frame * channels as usize).min(samples.len());
+    let end_sample = (end_frame * channels as usize).min(sample_len);
 
-    Ok((
-        channels,
-        sample_rate,
-        samples[start_sample..end_sample].to_vec(),
-    ))
+    Ok((start_sample, end_sample))
 }
 
 fn decode_audio_file(asset_path: &Path) -> Result<(u16, u32, Vec<f32>)> {
