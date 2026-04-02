@@ -3746,6 +3746,29 @@ impl SoundFxApp {
                                 visuals.selection.stroke.color = Color32::WHITE;
                                 visuals.override_text_color =
                                     Some(Color32::from_rgb(246, 233, 241));
+                            } else {
+                                let visuals = &mut ui.style_mut().visuals;
+                                visuals.extreme_bg_color = Color32::from_rgb(255, 251, 254);
+                                visuals.faint_bg_color = Color32::from_rgb(247, 240, 246);
+                                visuals.widgets.inactive.bg_fill = Color32::from_rgb(255, 251, 254);
+                                visuals.widgets.inactive.weak_bg_fill =
+                                    Color32::from_rgb(255, 251, 254);
+                                visuals.widgets.inactive.bg_stroke.color =
+                                    Color32::from_rgb(227, 214, 223);
+                                visuals.widgets.hovered.bg_fill = Color32::from_rgb(255, 244, 250);
+                                visuals.widgets.hovered.weak_bg_fill =
+                                    Color32::from_rgb(255, 244, 250);
+                                visuals.widgets.hovered.bg_stroke.color =
+                                    Color32::from_rgb(230, 94, 150);
+                                visuals.widgets.active.bg_fill = Color32::from_rgb(255, 238, 247);
+                                visuals.widgets.active.weak_bg_fill =
+                                    Color32::from_rgb(255, 238, 247);
+                                visuals.widgets.active.bg_stroke.color =
+                                    Color32::from_rgb(230, 94, 150);
+                                visuals.selection.bg_fill =
+                                    Color32::from_rgba_premultiplied(227, 82, 149, 48);
+                                visuals.selection.stroke.color = Color32::from_rgb(79, 58, 72);
+                                visuals.override_text_color = Some(Color32::from_rgb(52, 44, 51));
                             }
 
                             ComboBox::from_id_salt(combo_id)
