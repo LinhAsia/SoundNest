@@ -6989,8 +6989,9 @@ impl SoundFxApp {
 
                 ui.add_space(12.0);
                 ui.horizontal(|ui| {
+                    let button_group_width = 236.0;
                     let response = ui.add_sized(
-                        [ui.available_width() - 388.0, 42.0],
+                        [(ui.available_width() - button_group_width).max(180.0), 42.0],
                         TextEdit::singleline(&mut self.myinstants_query)
                             .hint_text("sound effect")
                             .margin(Vec2::new(14.0, 12.0)),
@@ -7000,33 +7001,35 @@ impl SoundFxApp {
                     {
                         search_request = true;
                     }
-                    if Self::search_sound_button(
-                        ui,
-                        !snapshot.searching
-                            && !snapshot.downloading
-                            && !self.myinstants_query.trim().is_empty(),
-                    )
-                    .clicked()
-                    {
-                        search_request = true;
-                    }
-                    ui.label(
-                        RichText::new("OR")
-                            .size(12.5)
-                            .color(Self::muted_text_color())
-                            .strong(),
-                    );
-                    let youtube_button = Self::youtube_search_button(
-                        ui,
-                        !snapshot.searching
-                            && !snapshot.downloading
-                            && !youtube_snapshot.running
-                            && !youtube_snapshot.searching
-                            && !self.myinstants_query.trim().is_empty(),
-                    );
-                    if youtube_button.clicked() {
-                        youtube_search_request = true;
-                    }
+                    ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                        let youtube_button = Self::youtube_search_button(
+                            ui,
+                            !snapshot.searching
+                                && !snapshot.downloading
+                                && !youtube_snapshot.running
+                                && !youtube_snapshot.searching
+                                && !self.myinstants_query.trim().is_empty(),
+                        );
+                        if youtube_button.clicked() {
+                            youtube_search_request = true;
+                        }
+                        ui.label(
+                            RichText::new("OR")
+                                .size(12.5)
+                                .color(Self::muted_text_color())
+                                .strong(),
+                        );
+                        if Self::search_sound_button(
+                            ui,
+                            !snapshot.searching
+                                && !snapshot.downloading
+                                && !self.myinstants_query.trim().is_empty(),
+                        )
+                        .clicked()
+                        {
+                            search_request = true;
+                        }
+                    });
                 });
 
                 ui.add_space(14.0);
