@@ -7382,14 +7382,14 @@ impl SoundFxApp {
                 let intro_monochrome = self.dark_theme && phase == TransitionPhase::Intro;
                 let intro_light_fade = !self.dark_theme && phase == TransitionPhase::Intro;
                 let light_outro = !self.dark_theme && phase == TransitionPhase::Outro;
-                let light_intro_base = Color32::from_rgb(226, 223, 230);
-                let light_intro_berry = Color32::from_rgb(210, 191, 203);
-                let light_intro_magenta = Color32::from_rgb(194, 170, 186);
-                let light_intro_plum = Color32::from_rgb(176, 148, 166);
-                let light_intro_deep = Color32::from_rgb(156, 126, 146);
-                let light_wave_primary = Color32::from_rgb(214, 51, 132);
-                let light_wave_secondary = Color32::from_rgb(236, 116, 179);
-                let light_wave_glow = (255, 214, 234);
+                let light_intro_base = Color32::from_rgb(220, 216, 225);
+                let light_intro_berry = Color32::from_rgb(200, 178, 194);
+                let light_intro_magenta = Color32::from_rgb(183, 149, 170);
+                let light_intro_plum = Color32::from_rgb(160, 124, 147);
+                let light_intro_deep = Color32::from_rgb(136, 100, 124);
+                let light_wave_primary = Color32::from_rgb(220, 74, 151);
+                let light_wave_secondary = Color32::from_rgb(236, 104, 172);
+                let light_wave_glow = (255, 150, 206);
                 let (rose_ice, berry, magenta, plum, deep_plum, star_rgb, star_alpha_scale) =
                     if intro_monochrome {
                         (
@@ -7418,8 +7418,8 @@ impl SoundFxApp {
                             light_intro_magenta,
                             light_intro_plum,
                             light_intro_deep,
-                            (255, 255, 255),
-                            0.65,
+                            (255, 226, 238),
+                            0.72,
                         )
                     } else {
                         (
@@ -7572,16 +7572,16 @@ impl SoundFxApp {
                             light_intro_base.r(),
                             light_intro_base.g(),
                             light_intro_base.b(),
-                            242,
+                            252,
                         ),
                         layer_alpha,
                     );
                     glaze_fill = Self::with_alpha(
-                        Color32::from_rgba_premultiplied(255, 244, 249, 76),
+                        Color32::from_rgba_premultiplied(250, 218, 233, 28),
                         layer_alpha,
                     );
                     card_stroke = Self::with_alpha(
-                        Color32::from_rgba_premultiplied(214, 196, 209, 152),
+                        Color32::from_rgba_premultiplied(184, 149, 170, 208),
                         layer_alpha,
                     );
                 }
@@ -7591,7 +7591,7 @@ impl SoundFxApp {
                             light_wave_primary.r(),
                             light_wave_primary.g(),
                             light_wave_primary.b(),
-                            (148.0 + t * 94.0) as u8,
+                            (228.0 + t * 24.0).round().clamp(0.0, 255.0) as u8,
                         )
                     } else if self.dark_theme {
                         Color32::from_rgba_premultiplied(255, 248, 252, (118.0 + t * 120.0) as u8)
@@ -7611,7 +7611,7 @@ impl SoundFxApp {
                             light_wave_secondary.r(),
                             light_wave_secondary.g(),
                             light_wave_secondary.b(),
-                            (164.0 + t * 78.0) as u8,
+                            (220.0 + t * 28.0).round().clamp(0.0, 255.0) as u8,
                         )
                     } else if self.dark_theme {
                         Color32::from_rgba_premultiplied(255, 250, 252, (136.0 + t * 108.0) as u8)
@@ -7693,7 +7693,7 @@ impl SoundFxApp {
                                 light_intro_base.r(),
                                 light_intro_base.g(),
                                 light_intro_base.b(),
-                                (34.0 + aura * 42.0) as u8,
+                                (54.0 + aura * 58.0).round().clamp(0.0, 255.0) as u8,
                             ),
                             layer_alpha,
                         ),
@@ -7703,10 +7703,10 @@ impl SoundFxApp {
                         base * 0.40,
                         Self::with_alpha(
                             Color32::from_rgba_premultiplied(
-                                248,
-                                220,
-                                234,
-                                (22.0 + aura * 30.0) as u8,
+                                light_wave_secondary.r(),
+                                light_wave_secondary.g(),
+                                light_wave_secondary.b(),
+                                (32.0 + aura * 42.0).round().clamp(0.0, 255.0) as u8,
                             ),
                             layer_alpha * ornament_alpha,
                         ),
@@ -8011,7 +8011,7 @@ impl SoundFxApp {
                                 light_wave_secondary.r(),
                                 light_wave_secondary.g(),
                                 light_wave_secondary.b(),
-                                (112.0 + t * 76.0) as u8,
+                                (196.0 + t * 42.0).round().clamp(0.0, 255.0) as u8,
                             )
                         } else {
                             Color32::from_rgba_premultiplied(
@@ -8035,7 +8035,11 @@ impl SoundFxApp {
                         center.y - half_h * 0.08 + angle.sin() * orbit * 0.72,
                     );
                     let note_scale = 0.64 + (index % 3) as f32 * 0.12 + audio_level * 0.12;
-                    let note_alpha = (160.0 * aura).clamp(0.0, 160.0) as u8;
+                    let note_alpha = if intro_light_fade || light_outro {
+                        (208.0 * aura + 18.0).clamp(0.0, 224.0) as u8
+                    } else {
+                        (160.0 * aura).clamp(0.0, 160.0) as u8
+                    };
                     let note_color = if index % 2 == 0 {
                         Self::with_alpha(
                             Color32::from_rgba_premultiplied(
@@ -8057,7 +8061,9 @@ impl SoundFxApp {
                             layer_alpha * content_alpha,
                         )
                     };
-                    let glow_alpha = if self.dark_theme {
+                    let glow_alpha = if intro_light_fade || light_outro {
+                        (118.0 * aura + 12.0).clamp(0.0, 148.0) as u8
+                    } else if self.dark_theme {
                         (110.0 * aura).clamp(0.0, 148.0) as u8
                     } else {
                         (88.0 * aura).clamp(0.0, 128.0) as u8
