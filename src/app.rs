@@ -6250,17 +6250,12 @@ impl SoundFxApp {
                     } else {
                         Color32::from_rgba_premultiplied(42, 39, 44, 110)
                     };
-                    let hover_on_trim_handle = pointer_pos.is_some_and(|pointer| {
-                        start_handle_rect.expand(8.0).contains(pointer)
-                            || end_handle_rect.expand(8.0).contains(pointer)
-                    });
                     let pan_left = ui.input(|input| input.key_down(egui::Key::A));
                     let pan_right = ui.input(|input| input.key_down(egui::Key::D));
                     let keyboard_panning = pan_left ^ pan_right;
                     let timeline_hovered = response.hovered() || pointer_pos.is_some();
-                    let showing_hover_preview = timeline_hovered
+                    let showing_hover_preview = pointer_pos.is_some()
                         && !keyboard_panning
-                        && !hover_on_trim_handle
                         && !start_response.is_pointer_button_down_on()
                         && !end_response.is_pointer_button_down_on()
                         && !response.dragged();
@@ -6319,7 +6314,7 @@ impl SoundFxApp {
                         ui.ctx().request_repaint();
                     }
 
-                    if response.hovered() && !ui.ctx().wants_keyboard_input() {
+                    if pointer_pos.is_some() && !ui.ctx().wants_keyboard_input() {
                         let zoom_delta = ui.input(|input| {
                             if input.modifiers.ctrl {
                                 input.raw_scroll_delta.y
