@@ -1,5 +1,5 @@
 use crate::audio::AudioEngine;
-use crate::downloader::YoutubeAudioDownloader;
+use crate::downloader::{YoutubeAudioDownloader, YoutubeSearchResult};
 use crate::hotkey::GlobalHotkeyManager;
 use crate::myinstants::{MyinstantsClient, MyinstantsResult};
 use crate::pitch::{
@@ -141,6 +141,7 @@ pub struct SoundFxApp {
     myinstants: MyinstantsClient,
     download_url: String,
     myinstants_query: String,
+    youtube_search_visible_count: usize,
     myinstants_visible_count: usize,
     myinstants_cached_files: HashMap<String, PathBuf>,
     myinstants_preview_files: HashMap<String, PathBuf>,
@@ -313,6 +314,7 @@ impl SoundFxApp {
             myinstants,
             download_url: String::new(),
             myinstants_query: String::new(),
+            youtube_search_visible_count: 8,
             myinstants_visible_count: 10,
             myinstants_cached_files: HashMap::new(),
             myinstants_preview_files: HashMap::new(),
@@ -6717,14 +6719,18 @@ impl SoundFxApp {
         }
 
         let snapshot = self.downloader.snapshot();
+        let youtube_results = snapshot.youtube_results.clone();
         let mut open_panel = self.show_download_panel;
         let mut should_start_download = false;
+        let mut should_search_youtube = false;
         let mut add_to_library = false;
         let mut open_file = false;
         let mut open_folder = false;
         let mut clear_result = false;
+        let mut clear_youtube_results = false;
         let mut minimize_request = false;
         let mut close_request = false;
+        let mut youtube_download_request: Option<String> = None;
 
         egui::Window::new("")
             .id(egui::Id::new("youtube-audio-download"))
@@ -6732,7 +6738,7 @@ impl SoundFxApp {
             .title_bar(false)
             .resizable(false)
             .collapsible(false)
-            .fixed_size(vec2(520.0, 260.0))
+            .fixed_size(vec2(720.0, 640.0))
             .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
             .open(&mut open_panel)
             .frame(
@@ -6769,15 +6775,16 @@ impl SoundFxApp {
 
                 ui.horizontal(|ui| {
                     let response = ui.add_sized(
-                        [ui.available_width() - 32.0, 42.0],
+                        [ui.available_width() - 34.0, 42.0],
                         TextEdit::singleline(&mut self.download_url)
-                            .hint_text("https://youtube.com/watch?v=... or soundcloud / tiktok / facebook")
+                            .hint_text("Paste URL to download directly, or type keywords then use YouTube Search")
                             .desired_width(f32::INFINITY)
                             .margin(Vec2::new(14.0, 12.0)),
                     );
                     if response.lost_focus()
                         && ui.input(|input| input.key_pressed(egui::Key::Enter))
                         && !snapshot.running
+                        && !snapshot.searching
                     {
                         should_start_download = true;
                     }
@@ -6813,7 +6820,7 @@ impl SoundFxApp {
 
                 ui.horizontal(|ui| {
                     let start_button = ui.add_enabled(
-                        !snapshot.running && !self.download_url.trim().is_empty(),
+                        !snapshot.running && !snapshot.searching && !self.download_url.trim().is_empty(),
                         Button::new(Self::icon(0xe2c4, 16.0, Color32::WHITE))
                             .fill(Color32::from_rgb(214, 51, 132))
                             .stroke(Stroke::NONE)
@@ -6824,7 +6831,15 @@ impl SoundFxApp {
                         should_start_download = true;
                     }
 
-                    if snapshot.running {
+                    let youtube_button = Self::youtube_search_button(
+                        ui,
+                        !snapshot.running && !snapshot.searching && !self.download_url.trim().is_empty(),
+                    );
+                    if youtube_button.clicked() {
+                        should_search_youtube = true;
+                    }
+
+                    if snapshot.running || snapshot.searching {
                         ui.label(
                             RichText::new(snapshot.stage.clone())
                                 .size(13.0)
@@ -6849,6 +6864,38 @@ impl SoundFxApp {
                             .size(13.0)
                             .color(Color32::from_rgb(171, 54, 91)),
                     );
+                }
+
+                if !youtube_results.is_empty() {
+                    ui.add_space(14.0);
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new("YouTube Results")
+                                .size(14.0)
+                                .color(Self::strong_text_color())
+                                .strong(),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                            if Self::icon_action(ui, [42.0, 32.0], 0xe14c, false, false).clicked() {
+                                clear_youtube_results = true;
+                            }
+                        });
+                    });
+                    ui.add_space(8.0);
+                    ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .max_height(260.0)
+                        .show(ui, |ui| {
+                            for result in youtube_results
+                                .iter()
+                                .take(self.youtube_search_visible_count)
+                            {
+                                if Self::render_youtube_result_row(ui, result) {
+                                    youtube_download_request = Some(result.webpage_url.clone());
+                                }
+                                ui.add_space(8.0);
+                            }
+                        });
                 }
 
                 if let Some(path) = &snapshot.last_file {
@@ -6909,6 +6956,24 @@ impl SoundFxApp {
             }
         }
 
+        if should_search_youtube {
+            match self
+                .downloader
+                .start_youtube_search(self.download_url.trim().to_owned())
+            {
+                Ok(()) => self.clear_status(),
+                Err(error) => self.set_error_status(error),
+            }
+        }
+
+        if let Some(url) = youtube_download_request {
+            self.download_url = url.clone();
+            match self.downloader.start_audio_download(url) {
+                Ok(()) => self.clear_status(),
+                Err(error) => self.set_error_status(error),
+            }
+        }
+
         if let Some(path) = snapshot.last_file.clone() {
             if add_to_library {
                 self.import_paths(vec![path.clone()]);
@@ -6928,6 +6993,9 @@ impl SoundFxApp {
 
         if clear_result {
             self.downloader.clear_result();
+        }
+        if clear_youtube_results {
+            self.downloader.clear_youtube_results();
         }
     }
 
@@ -8686,6 +8754,147 @@ impl SoundFxApp {
                 Self::decorate_button_response(ui, &response);
             }
         });
+    }
+
+    fn youtube_search_button(ui: &mut Ui, enabled: bool) -> egui::Response {
+        let desired = vec2(166.0, 36.0);
+        let sense = if enabled {
+            Sense::click()
+        } else {
+            Sense::hover()
+        };
+        let (rect, response) = ui.allocate_exact_size(desired, sense);
+        let fill = if enabled {
+            if Self::dark_theme_enabled() {
+                Color32::from_rgb(35, 29, 41)
+            } else {
+                Color32::from_rgb(255, 251, 254)
+            }
+        } else if Self::dark_theme_enabled() {
+            Color32::from_rgb(29, 25, 35)
+        } else {
+            Color32::from_rgb(245, 241, 245)
+        };
+        let stroke = if enabled {
+            Color32::from_rgb(229, 85, 149)
+        } else if Self::dark_theme_enabled() {
+            Color32::from_rgb(76, 63, 83)
+        } else {
+            Color32::from_rgb(224, 211, 220)
+        };
+        ui.painter().rect(
+            rect,
+            CornerRadius::same(18),
+            fill,
+            Stroke::new(1.0, stroke),
+            StrokeKind::Outside,
+        );
+        let badge = DownloadSiteBadge {
+            name: "YouTube",
+            kind: DownloadSiteKind::Youtube,
+            color: Color32::from_rgb(255, 77, 141),
+        };
+        let icon_rect = Rect::from_center_size(
+            Pos2::new(rect.left() + 22.0, rect.center().y),
+            vec2(20.0, 20.0),
+        );
+        Self::paint_download_site_icon(ui.painter(), icon_rect, badge);
+        ui.painter().text(
+            Pos2::new(rect.left() + 40.0, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            "Search YouTube",
+            egui::FontId::proportional(13.0),
+            if enabled {
+                Self::strong_text_color()
+            } else {
+                Self::muted_text_color()
+            },
+        );
+        Self::decorate_button_response(ui, &response);
+        response
+    }
+
+    fn render_youtube_result_row(ui: &mut Ui, result: &YoutubeSearchResult) -> bool {
+        let mut download_clicked = false;
+        Frame::new()
+            .fill(Self::surface_fill())
+            .stroke(Stroke::new(1.0, Self::border_color()))
+            .corner_radius(22.0)
+            .inner_margin(Margin::same(14))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    let badge = DownloadSiteBadge {
+                        name: "YouTube",
+                        kind: DownloadSiteKind::Youtube,
+                        color: Color32::from_rgb(255, 77, 141),
+                    };
+                    let (icon_rect, _) = ui.allocate_exact_size(vec2(24.0, 24.0), Sense::hover());
+                    Self::paint_download_site_icon(ui.painter(), icon_rect, badge);
+                    ui.add_space(8.0);
+                    ui.vertical(|ui| {
+                        ui.add_sized(
+                            [ui.available_width().min(380.0), 18.0],
+                            egui::Label::new(
+                                RichText::new(&result.title)
+                                    .size(13.5)
+                                    .color(Self::strong_text_color())
+                                    .strong(),
+                            )
+                            .truncate(),
+                        );
+                        let mut parts = Vec::new();
+                        if let Some(duration) = result.duration {
+                            parts.push(format_time(duration as f32));
+                        }
+                        if let Some(uploader) = &result.uploader
+                            && !uploader.trim().is_empty()
+                        {
+                            parts.push(Self::truncate_middle_ascii(uploader, 28));
+                        }
+                        if let Some(view_count) = result.view_count {
+                            parts.push(Self::format_compact_count(view_count));
+                        }
+                        if !result.id.trim().is_empty() {
+                            parts.push(format!("ID {}", result.id));
+                        }
+                        if parts.is_empty() {
+                            parts.push("YouTube".to_owned());
+                        }
+                        ui.label(
+                            RichText::new(parts.join("  •  "))
+                                .size(12.0)
+                                .color(Self::muted_text_color()),
+                        );
+                    });
+                    ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                        let response = ui.add_sized(
+                            [104.0, 34.0],
+                            Self::action_button(
+                                RichText::new("Download").size(13.0).color(Color32::WHITE),
+                                false,
+                                true,
+                            ),
+                        );
+                        Self::decorate_button_response(ui, &response);
+                        if response.clicked() {
+                            download_clicked = true;
+                        }
+                    });
+                });
+            });
+        download_clicked
+    }
+
+    fn format_compact_count(value: u64) -> String {
+        if value >= 1_000_000_000 {
+            format!("{:.1}B views", value as f64 / 1_000_000_000.0)
+        } else if value >= 1_000_000 {
+            format!("{:.1}M views", value as f64 / 1_000_000.0)
+        } else if value >= 1_000 {
+            format!("{:.1}K views", value as f64 / 1_000.0)
+        } else {
+            format!("{value} views")
+        }
     }
 
     fn paint_download_site_icon(painter: &egui::Painter, rect: Rect, badge: DownloadSiteBadge) {

@@ -26,12 +26,24 @@ const FFMPEG_MARKER_FILE: &str = "ffmpeg_static.ok";
 #[derive(Clone, Default)]
 pub struct DownloadSnapshot {
     pub running: bool,
+    pub searching: bool,
     pub stage: String,
     pub progress: Option<f32>,
     pub last_file: Option<PathBuf>,
     pub error: Option<String>,
     pub can_add_to_library: bool,
     pub added_to_library: bool,
+    pub youtube_results: Vec<YoutubeSearchResult>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct YoutubeSearchResult {
+    pub id: String,
+    pub title: String,
+    pub webpage_url: String,
+    pub uploader: Option<String>,
+    pub duration: Option<u64>,
+    pub view_count: Option<u64>,
 }
 
 pub struct YoutubeAudioDownloader {
@@ -64,13 +76,73 @@ impl YoutubeAudioDownloader {
         if state.running {
             return;
         }
-        *state = DownloadSnapshot::default();
+        state.stage.clear();
+        state.progress = None;
+        state.last_file = None;
+        state.error = None;
+        state.can_add_to_library = false;
+        state.added_to_library = false;
     }
 
     pub fn mark_added_to_library(&self) {
         let mut state = self.state.lock().unwrap();
         state.added_to_library = true;
         state.can_add_to_library = false;
+    }
+
+    pub fn clear_youtube_results(&self) {
+        let mut state = self.state.lock().unwrap();
+        if state.searching {
+            return;
+        }
+        state.youtube_results.clear();
+        if !state.running {
+            state.error = None;
+            state.stage.clear();
+        }
+    }
+
+    pub fn start_youtube_search(&self, query: String) -> Result<()> {
+        let query = query.trim().to_owned();
+        if query.is_empty() {
+            bail!("Search is empty");
+        }
+
+        {
+            let mut state = self.state.lock().unwrap();
+            if state.running || state.searching {
+                bail!("Downloader is busy");
+            }
+            state.searching = true;
+            state.stage = "Search YouTube".to_owned();
+            state.progress = None;
+            state.error = None;
+            state.youtube_results.clear();
+        }
+
+        let bin_dir = self.bin_dir.clone();
+        let state = self.state.clone();
+        thread::spawn(move || {
+            let result =
+                run_youtube_search_job(&state, &bin_dir, &query).map_err(|e| e.to_string());
+            let mut snapshot = state.lock().unwrap();
+            snapshot.searching = false;
+            snapshot.progress = None;
+            match result {
+                Ok(results) => {
+                    snapshot.stage = "YouTube ready".to_owned();
+                    snapshot.error = None;
+                    snapshot.youtube_results = results;
+                }
+                Err(error) => {
+                    snapshot.stage = "Error".to_owned();
+                    snapshot.error = Some(error);
+                    snapshot.youtube_results.clear();
+                }
+            }
+        });
+
+        Ok(())
     }
 
     pub fn start_audio_download(&self, url: String) -> Result<()> {
@@ -81,18 +153,16 @@ impl YoutubeAudioDownloader {
 
         {
             let mut state = self.state.lock().unwrap();
-            if state.running {
-                bail!("Download already running");
+            if state.running || state.searching {
+                bail!("Downloader is busy");
             }
-            *state = DownloadSnapshot {
-                running: true,
-                stage: "Prepare".to_owned(),
-                progress: None,
-                last_file: None,
-                error: None,
-                can_add_to_library: false,
-                added_to_library: false,
-            };
+            state.running = true;
+            state.stage = "Prepare".to_owned();
+            state.progress = None;
+            state.last_file = None;
+            state.error = None;
+            state.can_add_to_library = false;
+            state.added_to_library = false;
         }
 
         let bin_dir = self.bin_dir.clone();
@@ -140,6 +210,19 @@ impl YoutubeAudioDownloader {
         ensure_ffmpeg_installed(&self.state, &self.bin_dir)?;
         Ok(self.bin_dir.join("ffmpeg.exe"))
     }
+}
+
+fn run_youtube_search_job(
+    state: &Arc<Mutex<DownloadSnapshot>>,
+    bin_dir: &Path,
+    query: &str,
+) -> Result<Vec<YoutubeSearchResult>> {
+    update_state(state, "yt-dlp", Some(0.0), None);
+    ensure_ytdlp_installed(state, bin_dir)?;
+    update_state(state, "Search YouTube", None, None);
+
+    let ytdlp_exe = bin_dir.join("yt-dlp.exe");
+    search_youtube(&ytdlp_exe, query)
 }
 
 fn run_download_job(
@@ -235,6 +318,86 @@ fn run_ytdlp_download_attempt(
 
     let newest = newest_audio_file(download_dir)?;
     Ok(newest)
+}
+
+fn search_youtube(ytdlp_exe: &Path, query: &str) -> Result<Vec<YoutubeSearchResult>> {
+    #[derive(Deserialize)]
+    struct SearchPayload {
+        entries: Vec<SearchEntry>,
+    }
+
+    #[derive(Deserialize)]
+    struct SearchEntry {
+        id: Option<String>,
+        title: Option<String>,
+        webpage_url: Option<String>,
+        original_url: Option<String>,
+        uploader: Option<String>,
+        channel: Option<String>,
+        duration: Option<u64>,
+        view_count: Option<u64>,
+    }
+
+    let mut cmd = Command::new(ytdlp_exe);
+    cmd.args([
+        "--dump-single-json",
+        "--skip-download",
+        "--no-warnings",
+        "--no-call-home",
+        "--playlist-end",
+        "12",
+        &format!("ytsearch12:{query}"),
+    ]);
+    #[cfg(windows)]
+    cmd.creation_flags(0x08000000);
+
+    let output = cmd
+        .output()
+        .with_context(|| format!("failed to launch {}", ytdlp_exe.display()))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+        let detail = if !stderr.is_empty() { stderr } else { stdout };
+        bail!(
+            "{}",
+            if detail.is_empty() {
+                format!("YouTube search failed: {}", output.status)
+            } else {
+                detail
+            }
+        );
+    }
+
+    let payload: SearchPayload = serde_json::from_slice(&output.stdout)
+        .context("invalid YouTube search metadata from yt-dlp")?;
+
+    let mut results = Vec::new();
+    for entry in payload.entries {
+        let id = entry.id.unwrap_or_default();
+        let title = entry.title.unwrap_or_default();
+        if id.trim().is_empty() || title.trim().is_empty() {
+            continue;
+        }
+        let webpage_url = entry
+            .webpage_url
+            .or(entry.original_url)
+            .unwrap_or_else(|| format!("https://www.youtube.com/watch?v={id}"));
+        results.push(YoutubeSearchResult {
+            id,
+            title,
+            webpage_url,
+            uploader: entry.uploader.or(entry.channel),
+            duration: entry.duration,
+            view_count: entry.view_count,
+        });
+    }
+
+    if results.is_empty() {
+        bail!("No YouTube videos found");
+    }
+
+    Ok(results)
 }
 
 fn ensure_ytdlp_installed(state: &Arc<Mutex<DownloadSnapshot>>, bin_dir: &Path) -> Result<()> {
