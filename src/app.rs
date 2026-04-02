@@ -7577,7 +7577,7 @@ impl SoundFxApp {
                         layer_alpha,
                     );
                     glaze_fill = Self::with_alpha(
-                        Color32::from_rgba_premultiplied(255, 255, 255, 118),
+                        Color32::from_rgba_premultiplied(255, 244, 249, 76),
                         layer_alpha,
                     );
                     card_stroke = Self::with_alpha(
@@ -7703,9 +7703,9 @@ impl SoundFxApp {
                         base * 0.40,
                         Self::with_alpha(
                             Color32::from_rgba_premultiplied(
-                                255,
-                                250,
-                                252,
+                                248,
+                                220,
+                                234,
                                 (22.0 + aura * 30.0) as u8,
                             ),
                             layer_alpha * ornament_alpha,
@@ -8006,12 +8006,21 @@ impl SoundFxApp {
                     accent_rect,
                     9.0,
                     Self::with_alpha(
-                        Color32::from_rgba_premultiplied(
-                            rose_ice.r(),
-                            rose_ice.g(),
-                            rose_ice.b(),
-                            (34.0 + t * 38.0) as u8,
-                        ),
+                        if intro_light_fade || light_outro {
+                            Color32::from_rgba_premultiplied(
+                                light_wave_secondary.r(),
+                                light_wave_secondary.g(),
+                                light_wave_secondary.b(),
+                                (112.0 + t * 76.0) as u8,
+                            )
+                        } else {
+                            Color32::from_rgba_premultiplied(
+                                rose_ice.r(),
+                                rose_ice.g(),
+                                rose_ice.b(),
+                                (34.0 + t * 38.0) as u8,
+                            )
+                        },
                         layer_alpha * content_alpha,
                     ),
                 );
