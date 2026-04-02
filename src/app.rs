@@ -2997,6 +2997,19 @@ impl SoundFxApp {
                 ui.add_space(12.0);
                 ui.add_enabled_ui(!snapshot.running, |ui| {
                     ui.horizontal(|ui| {
+                        let keyboard_response = ui.add_sized(
+                            [42.0, 36.0],
+                            Self::action_button(
+                                Self::icon(0xe312, 18.0, Self::strong_text_color()),
+                                self.capture_record_hotkey,
+                                self.capture_record_hotkey,
+                            ),
+                        );
+                        Self::decorate_button_response(ui, &keyboard_response);
+                        if keyboard_response.clicked() {
+                            self.capture_record_hotkey = true;
+                        }
+
                         let hotkey_label = if self.capture_record_hotkey {
                             "Press key"
                         } else {
@@ -3005,7 +3018,7 @@ impl SoundFxApp {
                                 .unwrap_or("Key")
                         };
                         let hotkey_response = ui.add_sized(
-                            [132.0, 36.0],
+                            [118.0, 36.0],
                             Self::action_button(
                                 RichText::new(hotkey_label).size(13.0),
                                 self.capture_record_hotkey,
@@ -3025,29 +3038,27 @@ impl SoundFxApp {
                 ui.add_space(12.0);
                 ui.add_enabled_ui(!snapshot.running, |ui| {
                     ui.horizontal(|ui| {
-                        let system = ui.add_sized(
-                            [84.0, 36.0],
-                            Self::action_button(
-                                RichText::new("SYS").size(13.0),
-                                self.record_input_source == PitchInputSource::System,
-                                self.record_input_source == PitchInputSource::System,
-                            ),
-                        );
-                        Self::decorate_button_response(ui, &system);
-                        if system.clicked() {
+                        if Self::icon_action(
+                            ui,
+                            [48.0, 36.0],
+                            0xe050,
+                            self.record_input_source == PitchInputSource::System,
+                            self.record_input_source == PitchInputSource::System,
+                        )
+                        .clicked()
+                        {
                             self.record_input_source = PitchInputSource::System;
                         }
 
-                        let mic = ui.add_sized(
-                            [84.0, 36.0],
-                            Self::action_button(
-                                RichText::new("MIC").size(13.0),
-                                self.record_input_source == PitchInputSource::Microphone,
-                                self.record_input_source == PitchInputSource::Microphone,
-                            ),
-                        );
-                        Self::decorate_button_response(ui, &mic);
-                        if mic.clicked() {
+                        if Self::icon_action(
+                            ui,
+                            [48.0, 36.0],
+                            0xe061,
+                            self.record_input_source == PitchInputSource::Microphone,
+                            self.record_input_source == PitchInputSource::Microphone,
+                        )
+                        .clicked()
+                        {
                             self.record_input_source = PitchInputSource::Microphone;
                             if self.record_capture_devices.is_empty() {
                                 refresh_inputs = true;
@@ -3107,18 +3118,7 @@ impl SoundFxApp {
                     .show(ui, |ui| {
                         ui.set_height(172.0);
                         ui.vertical_centered(|ui| {
-                            ui.add_space(6.0);
-                            let pulse = 10.0 + snapshot.level * 16.0;
-                            ui.painter().circle_filled(
-                                Pos2::new(ui.max_rect().center().x, ui.min_rect().top() + 30.0),
-                                pulse,
-                                if snapshot.running {
-                                    Color32::from_rgb(214, 51, 132)
-                                } else {
-                                    Color32::from_rgba_premultiplied(214, 51, 132, 80)
-                                },
-                            );
-                            ui.add_space(34.0);
+                            ui.add_space(16.0);
                             Self::draw_record_wave_strip(ui, &snapshot.waveform);
                             ui.add_space(10.0);
                             ui.label(
