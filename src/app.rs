@@ -1603,6 +1603,7 @@ impl SoundFxApp {
         self.ignored_drop_path =
             Some(fs::canonicalize(&export_path).unwrap_or_else(|_| export_path.clone()));
         self.pending_sound_drag = None;
+        ctx.memory_mut(|memory| memory.stop_text_input());
         let result = platform::drag_file_out(&export_path);
         ctx.request_repaint();
         self.reset_cursor_icon_next_frame = true;
@@ -4178,29 +4179,27 @@ impl SoundFxApp {
                 ui.add_space(8.0);
                 ui.add_enabled_ui(!snapshot.running, |ui| {
                     ui.horizontal(|ui| {
-                        let system = ui.add_sized(
-                            [72.0, 34.0],
-                            Self::action_button(
-                                RichText::new("SYS").size(13.0),
-                                self.pitch_input_source == PitchInputSource::System,
-                                self.pitch_input_source == PitchInputSource::System,
-                            ),
-                        );
-                        Self::decorate_button_response(ui, &system);
-                        if system.clicked() {
+                        if Self::icon_action(
+                            ui,
+                            [48.0, 34.0],
+                            0xe30a,
+                            self.pitch_input_source == PitchInputSource::System,
+                            self.pitch_input_source == PitchInputSource::System,
+                        )
+                        .clicked()
+                        {
                             self.pitch_input_source = PitchInputSource::System;
                         }
 
-                        let mic = ui.add_sized(
-                            [72.0, 34.0],
-                            Self::action_button(
-                                RichText::new("MIC").size(13.0),
-                                self.pitch_input_source == PitchInputSource::Microphone,
-                                self.pitch_input_source == PitchInputSource::Microphone,
-                            ),
-                        );
-                        Self::decorate_button_response(ui, &mic);
-                        if mic.clicked() {
+                        if Self::icon_action(
+                            ui,
+                            [48.0, 34.0],
+                            0xe029,
+                            self.pitch_input_source == PitchInputSource::Microphone,
+                            self.pitch_input_source == PitchInputSource::Microphone,
+                        )
+                        .clicked()
+                        {
                             self.pitch_input_source = PitchInputSource::Microphone;
                             if self.pitch_capture_devices.is_empty() {
                                 refresh_inputs = true;
@@ -9168,6 +9167,7 @@ impl eframe::App for SoundFxApp {
     fn update(&mut self, ctx: &Context, frame: &mut eframe::Frame) {
         Self::apply_theme(ctx, self.dark_theme);
         ctx.set_cursor_icon(egui::CursorIcon::Default);
+        let viewport_focused = ctx.input(|input| input.viewport().focused.unwrap_or(true));
         self.center_window_if_needed(ctx);
         self.intercept_close_request(ctx);
         self.poll_myinstants_waveform_jobs();
@@ -9175,7 +9175,11 @@ impl eframe::App for SoundFxApp {
             ctx.set_cursor_icon(egui::CursorIcon::Default);
             self.reset_cursor_icon_next_frame = false;
         }
-        if !ctx.input(|input| input.pointer.primary_down()) {
+        if !viewport_focused {
+            self.pending_sound_drag = None;
+            ctx.memory_mut(|memory| memory.stop_text_input());
+            self.reset_cursor_icon_next_frame = true;
+        } else if !ctx.input(|input| input.pointer.primary_down()) {
             self.pending_sound_drag = None;
         }
 
