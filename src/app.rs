@@ -7568,7 +7568,7 @@ impl SoundFxApp {
                 );
                 if intro_light_fade {
                     card_fill = Self::with_alpha(
-                        Color32::from_rgba_premultiplied(
+                        Color32::from_rgba_unmultiplied(
                             light_intro_base.r(),
                             light_intro_base.g(),
                             light_intro_base.b(),
@@ -7577,17 +7577,17 @@ impl SoundFxApp {
                         layer_alpha,
                     );
                     glaze_fill = Self::with_alpha(
-                        Color32::from_rgba_premultiplied(245, 205, 225, 20),
+                        Color32::from_rgba_unmultiplied(245, 205, 225, 20),
                         layer_alpha,
                     );
                     card_stroke = Self::with_alpha(
-                        Color32::from_rgba_premultiplied(184, 149, 170, 208),
+                        Color32::from_rgba_unmultiplied(184, 149, 170, 208),
                         layer_alpha,
                     );
                 }
                 let wave_color = Self::with_alpha(
                     if light_outro || intro_light_fade {
-                        Color32::from_rgba_premultiplied(
+                        Color32::from_rgba_unmultiplied(
                             light_wave_primary.r(),
                             light_wave_primary.g(),
                             light_wave_primary.b(),
@@ -7607,7 +7607,7 @@ impl SoundFxApp {
                 );
                 let ribbon_color = Self::with_alpha(
                     if light_outro || intro_light_fade {
-                        Color32::from_rgba_premultiplied(
+                        Color32::from_rgba_unmultiplied(
                             light_wave_secondary.r(),
                             light_wave_secondary.g(),
                             light_wave_secondary.b(),
@@ -7689,7 +7689,7 @@ impl SoundFxApp {
                         center,
                         base * 0.52,
                         Self::with_alpha(
-                            Color32::from_rgba_premultiplied(
+                            Color32::from_rgba_unmultiplied(
                                 light_intro_base.r(),
                                 light_intro_base.g(),
                                 light_intro_base.b(),
@@ -7702,7 +7702,7 @@ impl SoundFxApp {
                         Pos2::new(center.x, center.y + base * 0.02),
                         base * 0.40,
                         Self::with_alpha(
-                            Color32::from_rgba_premultiplied(
+                            Color32::from_rgba_unmultiplied(
                                 light_wave_secondary.r(),
                                 light_wave_secondary.g(),
                                 light_wave_secondary.b(),
@@ -7967,7 +7967,7 @@ impl SoundFxApp {
                         band_rect.expand2(vec2(18.0, 14.0)),
                         18.0,
                         Self::with_alpha(
-                            Color32::from_rgba_premultiplied(
+                            Color32::from_rgba_unmultiplied(
                                 light_wave_secondary.r(),
                                 light_wave_secondary.g(),
                                 light_wave_secondary.b(),
@@ -7999,7 +7999,7 @@ impl SoundFxApp {
                         ribbon_rect.expand2(vec2(22.0, 16.0)),
                         20.0,
                         Self::with_alpha(
-                            Color32::from_rgba_premultiplied(
+                            Color32::from_rgba_unmultiplied(
                                 light_wave_primary.r(),
                                 light_wave_primary.g(),
                                 light_wave_primary.b(),
@@ -8037,7 +8037,7 @@ impl SoundFxApp {
                     9.0,
                     Self::with_alpha(
                         if intro_light_fade || light_outro {
-                            Color32::from_rgba_premultiplied(
+                            Color32::from_rgba_unmultiplied(
                                 light_wave_secondary.r(),
                                 light_wave_secondary.g(),
                                 light_wave_secondary.b(),
@@ -8071,25 +8071,49 @@ impl SoundFxApp {
                         (160.0 * aura).clamp(0.0, 160.0) as u8
                     };
                     let note_color = if index % 2 == 0 {
-                        Self::with_alpha(
-                            Color32::from_rgba_premultiplied(
-                                note_base.r(),
-                                note_base.g(),
-                                note_base.b(),
-                                note_alpha,
-                            ),
-                            layer_alpha * content_alpha,
-                        )
+                        if intro_light_fade || light_outro {
+                            Self::with_alpha(
+                                Color32::from_rgba_unmultiplied(
+                                    note_base.r(),
+                                    note_base.g(),
+                                    note_base.b(),
+                                    note_alpha,
+                                ),
+                                layer_alpha * content_alpha,
+                            )
+                        } else {
+                            Self::with_alpha(
+                                Color32::from_rgba_premultiplied(
+                                    note_base.r(),
+                                    note_base.g(),
+                                    note_base.b(),
+                                    note_alpha,
+                                ),
+                                layer_alpha * content_alpha,
+                            )
+                        }
                     } else {
-                        Self::with_alpha(
-                            Color32::from_rgba_premultiplied(
-                                note_alt.r(),
-                                note_alt.g(),
-                                note_alt.b(),
-                                note_alpha,
-                            ),
-                            layer_alpha * content_alpha,
-                        )
+                        if intro_light_fade || light_outro {
+                            Self::with_alpha(
+                                Color32::from_rgba_unmultiplied(
+                                    note_alt.r(),
+                                    note_alt.g(),
+                                    note_alt.b(),
+                                    note_alpha,
+                                ),
+                                layer_alpha * content_alpha,
+                            )
+                        } else {
+                            Self::with_alpha(
+                                Color32::from_rgba_premultiplied(
+                                    note_alt.r(),
+                                    note_alt.g(),
+                                    note_alt.b(),
+                                    note_alpha,
+                                ),
+                                layer_alpha * content_alpha,
+                            )
+                        }
                     };
                     let glow_alpha = if intro_light_fade || light_outro {
                         (78.0 + aura * 64.0).clamp(0.0, 156.0) as u8
@@ -8104,15 +8128,27 @@ impl SoundFxApp {
                         note_scale,
                         angle.sin() * 0.18,
                         note_color,
-                        Self::with_alpha(
-                            Color32::from_rgba_premultiplied(
-                                note_glow_rgb.0,
-                                note_glow_rgb.1,
-                                note_glow_rgb.2,
-                                glow_alpha,
-                            ),
-                            layer_alpha * content_alpha,
-                        ),
+                        if intro_light_fade || light_outro {
+                            Self::with_alpha(
+                                Color32::from_rgba_unmultiplied(
+                                    note_glow_rgb.0,
+                                    note_glow_rgb.1,
+                                    note_glow_rgb.2,
+                                    glow_alpha,
+                                ),
+                                layer_alpha * content_alpha,
+                            )
+                        } else {
+                            Self::with_alpha(
+                                Color32::from_rgba_premultiplied(
+                                    note_glow_rgb.0,
+                                    note_glow_rgb.1,
+                                    note_glow_rgb.2,
+                                    glow_alpha,
+                                ),
+                                layer_alpha * content_alpha,
+                            )
+                        },
                     );
                 }
             });
