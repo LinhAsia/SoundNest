@@ -6112,9 +6112,10 @@ impl SoundFxApp {
 
         let viewport_width = ui.available_width().max(320.0);
         let zoom_scroll_offset_id = egui::Id::new((sound.id, "trim-zoom-offset"));
-        let pending_zoom_scroll_offset = ui
+        let stored_zoom_scroll_offset = ui
             .ctx()
             .data(|data| data.get_temp::<f32>(zoom_scroll_offset_id));
+        let mut next_scroll_offset = stored_zoom_scroll_offset;
         let timeline_size = vec2((viewport_width * *zoom).max(viewport_width), 160.0);
         let dark_theme = Self::dark_theme_enabled();
         let mut changed = false;
@@ -6127,7 +6128,7 @@ impl SoundFxApp {
                 let mut scroll_area = ScrollArea::horizontal()
                     .id_salt((sound.id, "trim-timeline-scroll"))
                     .auto_shrink([false, false]);
-                if let Some(offset) = pending_zoom_scroll_offset {
+                if let Some(offset) = stored_zoom_scroll_offset {
                     scroll_area = scroll_area.horizontal_scroll_offset(offset);
                 }
                 scroll_area.show(ui, |ui| {
@@ -6312,12 +6313,9 @@ impl SoundFxApp {
                             (false, true) => pan_step,
                             _ => 0.0,
                         };
-                        let current_offset = pending_zoom_scroll_offset
+                        let current_offset = next_scroll_offset
                             .unwrap_or_else(|| (viewport_rect.left() - rect.left()).max(0.0));
-                        let next_offset = (current_offset + delta).clamp(0.0, max_offset);
-                        ui.ctx().data_mut(|data| {
-                            data.insert_temp(zoom_scroll_offset_id, next_offset);
-                        });
+                        next_scroll_offset = Some((current_offset + delta).clamp(0.0, max_offset));
                         ui.ctx().request_repaint();
                     }
 
@@ -6345,11 +6343,9 @@ impl SoundFxApp {
                             let next_anchor_content_x =
                                 (anchor_content_x / rect.width().max(1.0)) * next_timeline_width;
                             let max_offset = (next_timeline_width - viewport_width).max(0.0);
-                            let next_offset =
-                                (next_anchor_content_x - anchor_viewport_x).clamp(0.0, max_offset);
-                            ui.ctx().data_mut(|data| {
-                                data.insert_temp(zoom_scroll_offset_id, next_offset);
-                            });
+                            next_scroll_offset = Some(
+                                (next_anchor_content_x - anchor_viewport_x).clamp(0.0, max_offset),
+                            );
                             ui.ctx().request_repaint();
                         }
 
@@ -6440,10 +6436,15 @@ impl SoundFxApp {
                             seek_requested = true;
                         }
                     }
+
+                    if next_scroll_offset.is_none() {
+                        next_scroll_offset = Some((viewport_rect.left() - rect.left()).max(0.0));
+                    }
                 });
-                if pending_zoom_scroll_offset.is_some() {
-                    ui.ctx()
-                        .data_mut(|data| data.remove::<f32>(zoom_scroll_offset_id));
+                if let Some(offset) = next_scroll_offset {
+                    ui.ctx().data_mut(|data| {
+                        data.insert_temp(zoom_scroll_offset_id, offset);
+                    });
                 }
             },
         );
