@@ -7382,11 +7382,14 @@ impl SoundFxApp {
                 let intro_monochrome = self.dark_theme && phase == TransitionPhase::Intro;
                 let intro_light_fade = !self.dark_theme && phase == TransitionPhase::Intro;
                 let light_outro = !self.dark_theme && phase == TransitionPhase::Outro;
-                let light_intro_base = Color32::from_rgb(238, 236, 241);
-                let light_intro_berry = Color32::from_rgb(225, 209, 220);
-                let light_intro_magenta = Color32::from_rgb(210, 188, 203);
-                let light_intro_plum = Color32::from_rgb(196, 171, 188);
-                let light_intro_deep = Color32::from_rgb(182, 156, 174);
+                let light_intro_base = Color32::from_rgb(226, 223, 230);
+                let light_intro_berry = Color32::from_rgb(210, 191, 203);
+                let light_intro_magenta = Color32::from_rgb(194, 170, 186);
+                let light_intro_plum = Color32::from_rgb(176, 148, 166);
+                let light_intro_deep = Color32::from_rgb(156, 126, 146);
+                let light_wave_primary = Color32::from_rgb(214, 51, 132);
+                let light_wave_secondary = Color32::from_rgb(236, 116, 179);
+                let light_wave_glow = (255, 214, 234);
                 let (rose_ice, berry, magenta, plum, deep_plum, star_rgb, star_alpha_scale) =
                     if intro_monochrome {
                         (
@@ -7583,8 +7586,13 @@ impl SoundFxApp {
                     );
                 }
                 let wave_color = Self::with_alpha(
-                    if light_outro {
-                        Color32::from_rgba_premultiplied(214, 51, 132, (148.0 + t * 94.0) as u8)
+                    if light_outro || intro_light_fade {
+                        Color32::from_rgba_premultiplied(
+                            light_wave_primary.r(),
+                            light_wave_primary.g(),
+                            light_wave_primary.b(),
+                            (148.0 + t * 94.0) as u8,
+                        )
                     } else if self.dark_theme {
                         Color32::from_rgba_premultiplied(255, 248, 252, (118.0 + t * 120.0) as u8)
                     } else {
@@ -7598,8 +7606,13 @@ impl SoundFxApp {
                     layer_alpha * content_alpha,
                 );
                 let ribbon_color = Self::with_alpha(
-                    if light_outro {
-                        Color32::from_rgba_premultiplied(236, 116, 179, (164.0 + t * 78.0) as u8)
+                    if light_outro || intro_light_fade {
+                        Color32::from_rgba_premultiplied(
+                            light_wave_secondary.r(),
+                            light_wave_secondary.g(),
+                            light_wave_secondary.b(),
+                            (164.0 + t * 78.0) as u8,
+                        )
                     } else if self.dark_theme {
                         Color32::from_rgba_premultiplied(255, 250, 252, (136.0 + t * 108.0) as u8)
                     } else {
@@ -7616,6 +7629,8 @@ impl SoundFxApp {
                     Color32::from_rgb(246, 243, 248)
                 } else if self.dark_theme {
                     Color32::from_rgb(246, 124, 181)
+                } else if intro_light_fade || light_outro {
+                    light_wave_primary
                 } else {
                     Color32::from_rgb(214, 51, 132)
                 };
@@ -7623,6 +7638,8 @@ impl SoundFxApp {
                     Color32::from_rgb(223, 216, 228)
                 } else if self.dark_theme {
                     Color32::from_rgb(255, 188, 219)
+                } else if intro_light_fade || light_outro {
+                    light_wave_secondary
                 } else {
                     Color32::from_rgb(236, 116, 179)
                 };
@@ -7630,8 +7647,8 @@ impl SoundFxApp {
                     (255, 255, 255)
                 } else if self.dark_theme {
                     (227, 82, 149)
-                } else if intro_light_fade {
-                    (255, 214, 234)
+                } else if intro_light_fade || light_outro {
+                    light_wave_glow
                 } else {
                     (16, 10, 14)
                 };
