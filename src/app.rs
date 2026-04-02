@@ -7427,7 +7427,7 @@ impl SoundFxApp {
                     TransitionPhase::Intro => {
                         1.0 - Self::ease_in_out_cubic(((progress - 0.18) / 0.18).clamp(0.0, 1.0))
                     }
-                    TransitionPhase::Outro => 0.0,
+                    TransitionPhase::Outro => 1.0,
                     TransitionPhase::Live => 1.0,
                 };
                 let ui_match: f32 = match phase {
@@ -7639,6 +7639,33 @@ impl SoundFxApp {
                                     (16.0 + aura * 34.0) as u8,
                                 )
                             },
+                            layer_alpha * ornament_alpha,
+                        ),
+                    );
+                } else if phase != TransitionPhase::Live {
+                    painter.circle_filled(
+                        center,
+                        base * 0.52,
+                        Self::with_alpha(
+                            Color32::from_rgba_premultiplied(
+                                255,
+                                215,
+                                234,
+                                (28.0 + aura * 40.0) as u8,
+                            ),
+                            layer_alpha,
+                        ),
+                    );
+                    painter.circle_filled(
+                        Pos2::new(center.x, center.y + base * 0.02),
+                        base * 0.40,
+                        Self::with_alpha(
+                            Color32::from_rgba_premultiplied(
+                                255,
+                                239,
+                                247,
+                                (24.0 + aura * 34.0) as u8,
+                            ),
                             layer_alpha * ornament_alpha,
                         ),
                     );
