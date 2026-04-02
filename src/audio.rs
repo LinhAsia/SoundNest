@@ -9,10 +9,18 @@ use uuid::Uuid;
 
 const POP_FADE_MS: f32 = 18.0;
 
+struct CachedAudio {
+    path: PathBuf,
+    channels: u16,
+    sample_rate: u32,
+    samples: Vec<f32>,
+}
+
 pub struct AudioEngine {
     _stream: OutputStream,
     handle: OutputStreamHandle,
     sink: Option<Sink>,
+    cached_audio: Option<CachedAudio>,
     current_id: Option<Uuid>,
     current_file_path: Option<PathBuf>,
     current_total_duration_secs: f32,
@@ -30,6 +38,7 @@ impl AudioEngine {
             _stream: stream,
             handle,
             sink: None,
+            cached_audio: None,
             current_id: None,
             current_file_path: None,
             current_total_duration_secs: 0.0,
@@ -51,7 +60,8 @@ impl AudioEngine {
     ) -> Result<()> {
         self.stop();
 
-        let (channels, sample_rate, trimmed_samples) = load_trimmed_samples(sound, asset_path)?;
+        let (channels, sample_rate, trimmed_samples) =
+            self.load_trimmed_samples(sound, asset_path)?;
         let speed = sound.speed.clamp(0.25, 2.0);
         let total_duration_secs =
             trimmed_samples.len() as f32 / channels.max(1) as f32 / sample_rate.max(1) as f32;
@@ -89,7 +99,14 @@ impl AudioEngine {
     pub fn play_file_from(&mut self, asset_path: &Path, start_position_secs: f32) -> Result<()> {
         self.stop();
 
-        let (channels, sample_rate, samples) = decode_audio_file(asset_path)?;
+        self.ensure_cached_audio(asset_path)?;
+        let cached = self
+            .cached_audio
+            .as_ref()
+            .expect("cached audio should exist after ensure_cached_audio");
+        let channels = cached.channels;
+        let sample_rate = cached.sample_rate;
+        let samples = &cached.samples;
         if samples.is_empty() {
             bail!("audio file is empty");
         }
@@ -185,6 +202,36 @@ impl AudioEngine {
     pub fn has_active_playback(&self) -> bool {
         self.sink.is_some()
     }
+
+    fn ensure_cached_audio(&mut self, asset_path: &Path) -> Result<()> {
+        let needs_reload = self
+            .cached_audio
+            .as_ref()
+            .is_none_or(|cached| cached.path.as_path() != asset_path);
+        if needs_reload {
+            let (channels, sample_rate, samples) = decode_audio_file(asset_path)?;
+            self.cached_audio = Some(CachedAudio {
+                path: asset_path.to_path_buf(),
+                channels,
+                sample_rate,
+                samples,
+            });
+        }
+        Ok(())
+    }
+
+    fn load_trimmed_samples(
+        &mut self,
+        sound: &SoundEffect,
+        asset_path: &Path,
+    ) -> Result<(u16, u32, Vec<f32>)> {
+        self.ensure_cached_audio(asset_path)?;
+        let cached = self
+            .cached_audio
+            .as_ref()
+            .expect("cached audio should exist after ensure_cached_audio");
+        trim_samples(sound, cached.channels, cached.sample_rate, &cached.samples)
+    }
 }
 
 pub fn play_file_blocking(asset_path: &Path) -> Result<()> {
@@ -198,9 +245,12 @@ pub fn play_file_blocking(asset_path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn load_trimmed_samples(sound: &SoundEffect, asset_path: &Path) -> Result<(u16, u32, Vec<f32>)> {
-    let (channels, sample_rate, samples) = decode_audio_file(asset_path)?;
-
+fn trim_samples(
+    sound: &SoundEffect,
+    channels: u16,
+    sample_rate: u32,
+    samples: &[f32],
+) -> Result<(u16, u32, Vec<f32>)> {
     if samples.is_empty() {
         bail!("audio file is empty");
     }
