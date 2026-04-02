@@ -8837,26 +8837,45 @@ impl SoundFxApp {
     }
 
     fn search_sound_button(ui: &mut Ui, enabled: bool) -> egui::Response {
-        if enabled {
-            Self::icon_action(ui, [36.0, 36.0], 0xe8b6, false, true)
+        let desired = vec2(36.0, 36.0);
+        let sense = if enabled {
+            Sense::click()
         } else {
-            let response = ui.add_enabled(
-                false,
-                Button::new(Self::icon(0xe8b6, 16.0, Color32::WHITE))
-                    .fill(Color32::TRANSPARENT)
-                    .stroke(Stroke::new(
-                        1.0,
-                        if Self::dark_theme_enabled() {
-                            Color32::from_rgb(76, 63, 83)
-                        } else {
-                            Color32::from_rgb(224, 211, 220)
-                        },
-                    ))
-                    .corner_radius(18.0),
-            );
-            Self::decorate_button_response(ui, &response);
-            response
-        }
+            Sense::hover()
+        };
+        let (rect, response) = ui.allocate_exact_size(desired, sense);
+        let fill = if enabled {
+            Color32::from_rgb(214, 51, 132)
+        } else {
+            Color32::TRANSPARENT
+        };
+        let stroke = if enabled {
+            Color32::from_rgb(214, 51, 132)
+        } else if Self::dark_theme_enabled() {
+            Color32::from_rgb(76, 63, 83)
+        } else {
+            Color32::from_rgb(224, 211, 220)
+        };
+        ui.painter().rect(
+            rect,
+            CornerRadius::same(18),
+            fill,
+            Stroke::new(1.0, stroke),
+            StrokeKind::Outside,
+        );
+        ui.painter().text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            char::from_u32(0xe8b6).unwrap_or(' '),
+            egui::FontId::new(16.0, FontFamily::Name(MATERIAL_ICONS_FONT.into())),
+            if enabled {
+                Color32::WHITE
+            } else {
+                Self::muted_text_color()
+            },
+        );
+        Self::decorate_button_response(ui, &response);
+        response
     }
 
     fn render_youtube_result_row(ui: &mut Ui, result: &YoutubeSearchResult) -> bool {
