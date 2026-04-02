@@ -7548,9 +7548,18 @@ impl SoundFxApp {
                     layer_alpha * ornament_alpha,
                 );
                 if intro_light_fade {
-                    card_fill = Self::with_alpha(card_fill, 0.0);
-                    glaze_fill = Self::with_alpha(glaze_fill, 0.0);
-                    card_stroke = Self::with_alpha(card_stroke, 0.35);
+                    card_fill = Self::with_alpha(
+                        Color32::from_rgba_premultiplied(255, 243, 249, 238),
+                        layer_alpha,
+                    );
+                    glaze_fill = Self::with_alpha(
+                        Color32::from_rgba_premultiplied(255, 255, 255, 132),
+                        layer_alpha,
+                    );
+                    card_stroke = Self::with_alpha(
+                        Color32::from_rgba_premultiplied(229, 168, 199, 148),
+                        layer_alpha,
+                    );
                 }
                 let wave_color = Self::with_alpha(
                     if self.dark_theme {
@@ -7596,6 +7605,8 @@ impl SoundFxApp {
                     (255, 255, 255)
                 } else if self.dark_theme {
                     (227, 82, 149)
+                } else if intro_light_fade {
+                    (255, 214, 234)
                 } else {
                     (16, 10, 14)
                 };
