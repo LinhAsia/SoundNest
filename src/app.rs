@@ -26,6 +26,7 @@ use std::fs;
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
@@ -206,6 +207,7 @@ pub struct SoundFxApp {
     library_audio_query: String,
     library_video_query: String,
     pending_sound_drag: Option<Uuid>,
+    sound_drag_active: Arc<AtomicBool>,
     ignored_drop_path: Option<PathBuf>,
     reveal_record_review_on_open: bool,
     reset_cursor_icon_next_frame: bool,
@@ -388,6 +390,7 @@ impl SoundFxApp {
             library_audio_query: String::new(),
             library_video_query: String::new(),
             pending_sound_drag: None,
+            sound_drag_active: Arc::new(AtomicBool::new(false)),
             ignored_drop_path: None,
             reveal_record_review_on_open: false,
             reset_cursor_icon_next_frame: false,
@@ -1605,6 +1608,9 @@ impl SoundFxApp {
     }
 
     fn drag_sound_file_out(&mut self, ctx: &Context, sound: &SoundEffect) -> Result<()> {
+        if self.sound_drag_active.swap(true, Ordering::Relaxed) {
+            return Ok(());
+        }
         let export_path = self.storage.export_processed_sound(sound)?;
         self.ignored_drop_path =
             Some(fs::canonicalize(&export_path).unwrap_or_else(|_| export_path.clone()));
@@ -1614,8 +1620,10 @@ impl SoundFxApp {
         self.reset_cursor_icon_next_frame = true;
         self.suppress_custom_cursor_frames = self.suppress_custom_cursor_frames.max(12);
         let drag_path = export_path.clone();
+        let drag_active = Arc::clone(&self.sound_drag_active);
         thread::spawn(move || {
             let _ = platform::drag_file_out(&drag_path);
+            drag_active.store(false, Ordering::Relaxed);
         });
         Ok(())
     }
@@ -5099,15 +5107,19 @@ impl SoundFxApp {
                                     Sense::click_and_drag()
                                 },
                             );
+                            let drag_active = self.sound_drag_active.load(Ordering::Relaxed);
                             let pointer_hover = !modal_open
+                                && !drag_active
                                 && ui
                                     .ctx()
                                     .input(|input| input.pointer.hover_pos())
                                     .is_some_and(|pos| tile_rect.contains(pos));
-                            let pointer_drag_active =
-                                !modal_open && Self::pointer_drag_active(ui.ctx(), body_rect);
-                            let pointer_primary_down =
-                                !modal_open && ui.ctx().input(|input| input.pointer.primary_down());
+                            let pointer_drag_active = !modal_open
+                                && !drag_active
+                                && Self::pointer_drag_active(ui.ctx(), body_rect);
+                            let pointer_primary_down = !modal_open
+                                && !drag_active
+                                && ui.ctx().input(|input| input.pointer.primary_down());
                             let hovered = !modal_open
                                 && (pointer_hover
                                     || tile_response.hovered()
@@ -5830,16 +5842,17 @@ impl SoundFxApp {
                             ui.id().with(sound.id),
                             Sense::click_and_drag(),
                         );
-                        let pointer_drag_active =
-                            Self::pointer_drag_active(ui.ctx(), frame.response.rect);
+                        let drag_active = self.sound_drag_active.load(Ordering::Relaxed);
+                        let pointer_drag_active = !drag_active
+                            && Self::pointer_drag_active(ui.ctx(), frame.response.rect);
                         let pointer_primary_down =
-                            ui.ctx().input(|input| input.pointer.primary_down());
+                            !drag_active && ui.ctx().input(|input| input.pointer.primary_down());
                         if pointer_primary_down
                             && (response.is_pointer_button_down_on() || pointer_drag_active)
                         {
                             self.pending_sound_drag = Some(sound.id);
                         }
-                        if response.hovered() {
+                        if !drag_active && response.hovered() {
                             ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
                         }
                         if pointer_primary_down && (response.dragged() || pointer_drag_active) {
@@ -9194,6 +9207,12 @@ impl eframe::App for SoundFxApp {
         if self.reset_cursor_icon_next_frame {
             ctx.set_cursor_icon(egui::CursorIcon::Default);
             self.reset_cursor_icon_next_frame = false;
+        }
+        if self.sound_drag_active.load(Ordering::Relaxed) {
+            self.pending_sound_drag = None;
+            ctx.set_cursor_icon(egui::CursorIcon::Default);
+            self.suppress_custom_cursor_frames = self.suppress_custom_cursor_frames.max(12);
+            ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
         }
         if !viewport_focused {
             self.pending_sound_drag = None;
