@@ -209,6 +209,7 @@ pub struct SoundFxApp {
     ignored_drop_path: Option<PathBuf>,
     reveal_record_review_on_open: bool,
     reset_cursor_icon_next_frame: bool,
+    suppress_custom_cursor_frames: u8,
     startup_sound_played: bool,
     pending_save: bool,
     last_edit_at: f64,
@@ -390,6 +391,7 @@ impl SoundFxApp {
             ignored_drop_path: None,
             reveal_record_review_on_open: false,
             reset_cursor_icon_next_frame: false,
+            suppress_custom_cursor_frames: 0,
             startup_sound_played: false,
             pending_save: false,
             last_edit_at: 0.0,
@@ -1607,6 +1609,7 @@ impl SoundFxApp {
         let result = platform::drag_file_out(&export_path);
         ctx.request_repaint();
         self.reset_cursor_icon_next_frame = true;
+        self.suppress_custom_cursor_frames = self.suppress_custom_cursor_frames.max(12);
         result
     }
 
@@ -9179,6 +9182,7 @@ impl eframe::App for SoundFxApp {
             self.pending_sound_drag = None;
             ctx.memory_mut(|memory| memory.stop_text_input());
             self.reset_cursor_icon_next_frame = true;
+            self.suppress_custom_cursor_frames = self.suppress_custom_cursor_frames.max(12);
         } else if !ctx.input(|input| input.pointer.primary_down()) {
             self.pending_sound_drag = None;
         }
@@ -9374,6 +9378,11 @@ impl eframe::App for SoundFxApp {
         self.render_record_overlay_viewport(ctx);
         self.render_titlebar_drag_zone(ctx);
         self.render_custom_window_resize_handles(ctx);
+        if self.suppress_custom_cursor_frames > 0 {
+            ctx.set_cursor_icon(egui::CursorIcon::Default);
+            self.suppress_custom_cursor_frames -= 1;
+            ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
+        }
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
