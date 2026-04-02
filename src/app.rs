@@ -6990,7 +6990,7 @@ impl SoundFxApp {
                 ui.add_space(12.0);
                 ui.horizontal(|ui| {
                     let response = ui.add_sized(
-                        [ui.available_width() - 240.0, 42.0],
+                        [ui.available_width() - 388.0, 42.0],
                         TextEdit::singleline(&mut self.myinstants_query)
                             .hint_text("sound effect")
                             .margin(Vec2::new(14.0, 12.0)),
@@ -7000,9 +7000,24 @@ impl SoundFxApp {
                     {
                         search_request = true;
                     }
-                    if Self::icon_action(ui, [52.0, 42.0], 0xe8b6, false, true).clicked() {
+                    if Self::search_sound_button(
+                        ui,
+                        !snapshot.searching
+                            && !snapshot.downloading
+                            && !youtube_snapshot.running
+                            && !youtube_snapshot.searching
+                            && !self.myinstants_query.trim().is_empty(),
+                    )
+                    .clicked()
+                    {
                         search_request = true;
                     }
+                    ui.label(
+                        RichText::new("OR")
+                            .size(12.5)
+                            .color(Self::muted_text_color())
+                            .strong(),
+                    );
                     let youtube_button = Self::youtube_search_button(
                         ui,
                         !snapshot.searching
@@ -8770,7 +8785,7 @@ impl SoundFxApp {
     }
 
     fn youtube_search_button(ui: &mut Ui, enabled: bool) -> egui::Response {
-        let desired = vec2(166.0, 36.0);
+        let desired = vec2(152.0, 36.0);
         let sense = if enabled {
             Sense::click()
         } else {
@@ -8778,18 +8793,14 @@ impl SoundFxApp {
         };
         let (rect, response) = ui.allocate_exact_size(desired, sense);
         let fill = if enabled {
-            if Self::dark_theme_enabled() {
-                Color32::from_rgb(35, 29, 41)
-            } else {
-                Color32::from_rgb(255, 251, 254)
-            }
+            Color32::from_rgb(214, 51, 132)
         } else if Self::dark_theme_enabled() {
             Color32::from_rgb(29, 25, 35)
         } else {
             Color32::from_rgb(245, 241, 245)
         };
         let stroke = if enabled {
-            Color32::from_rgb(229, 85, 149)
+            Color32::from_rgb(214, 51, 132)
         } else if Self::dark_theme_enabled() {
             Color32::from_rgb(76, 63, 83)
         } else {
@@ -8808,21 +8819,40 @@ impl SoundFxApp {
             color: Color32::from_rgb(255, 77, 141),
         };
         let icon_rect = Rect::from_center_size(
-            Pos2::new(rect.left() + 22.0, rect.center().y),
-            vec2(20.0, 20.0),
+            Pos2::new(rect.left() + 18.0, rect.center().y),
+            vec2(18.0, 18.0),
         );
         Self::paint_download_site_icon(ui.painter(), icon_rect, badge);
         ui.painter().text(
-            Pos2::new(rect.left() + 40.0, rect.center().y),
+            Pos2::new(rect.left() + 34.0, rect.center().y),
             egui::Align2::LEFT_CENTER,
             "Search YouTube",
             egui::FontId::proportional(13.0),
             if enabled {
-                Self::strong_text_color()
+                Color32::WHITE
             } else {
                 Self::muted_text_color()
             },
         );
+        Self::decorate_button_response(ui, &response);
+        response
+    }
+
+    fn search_sound_button(ui: &mut Ui, enabled: bool) -> egui::Response {
+        let desired = vec2(152.0, 36.0);
+        let response = ui.add_enabled_ui(enabled, |ui| {
+            ui.add_sized(
+                desired,
+                Self::action_button(
+                    RichText::new("Search Sound")
+                        .size(13.0)
+                        .color(Color32::WHITE),
+                    false,
+                    true,
+                ),
+            )
+        });
+        let response = response.inner;
         Self::decorate_button_response(ui, &response);
         response
     }
