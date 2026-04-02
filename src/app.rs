@@ -6253,7 +6253,11 @@ impl SoundFxApp {
                         start_handle_rect.expand(8.0).contains(pointer)
                             || end_handle_rect.expand(8.0).contains(pointer)
                     });
+                    let pan_left = ui.input(|input| input.key_down(egui::Key::A));
+                    let pan_right = ui.input(|input| input.key_down(egui::Key::D));
+                    let keyboard_panning = pan_left ^ pan_right;
                     let showing_hover_preview = response.hovered()
+                        && !keyboard_panning
                         && !hover_on_trim_handle
                         && !start_response.is_pointer_button_down_on()
                         && !end_response.is_pointer_button_down_on()
@@ -6334,8 +6338,6 @@ impl SoundFxApp {
                         let move_right = ui.input_mut(|input| {
                             input.consume_key(egui::Modifiers::NONE, egui::Key::W)
                         });
-                        let pan_left = ui.input(|input| input.key_down(egui::Key::A));
-                        let pan_right = ui.input(|input| input.key_down(egui::Key::D));
 
                         if pan_left || pan_right {
                             let pan_speed = (viewport_rect.width() * 2.4).max(420.0);
@@ -6352,7 +6354,7 @@ impl SoundFxApp {
                             ui.ctx().data_mut(|data| {
                                 data.insert_temp(zoom_scroll_offset_id, next_offset);
                             });
-                            ui.ctx().request_repaint_after(Duration::from_millis(16));
+                            ui.ctx().request_repaint();
                         }
 
                         if let Some(pointer_time) = pointer_time {
