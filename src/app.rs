@@ -7382,14 +7382,14 @@ impl SoundFxApp {
                 let intro_monochrome = self.dark_theme && phase == TransitionPhase::Intro;
                 let intro_light_fade = !self.dark_theme && phase == TransitionPhase::Intro;
                 let light_outro = !self.dark_theme && phase == TransitionPhase::Outro;
-                let light_intro_base = Color32::from_rgb(220, 216, 225);
-                let light_intro_berry = Color32::from_rgb(200, 178, 194);
-                let light_intro_magenta = Color32::from_rgb(183, 149, 170);
-                let light_intro_plum = Color32::from_rgb(160, 124, 147);
-                let light_intro_deep = Color32::from_rgb(136, 100, 124);
-                let light_wave_primary = Color32::from_rgb(220, 74, 151);
-                let light_wave_secondary = Color32::from_rgb(236, 104, 172);
-                let light_wave_glow = (255, 150, 206);
+                let light_intro_base = Color32::from_rgb(214, 209, 219);
+                let light_intro_berry = Color32::from_rgb(194, 167, 186);
+                let light_intro_magenta = Color32::from_rgb(176, 137, 160);
+                let light_intro_plum = Color32::from_rgb(150, 108, 134);
+                let light_intro_deep = Color32::from_rgb(124, 84, 111);
+                let light_wave_primary = Color32::from_rgb(214, 51, 132);
+                let light_wave_secondary = Color32::from_rgb(229, 85, 149);
+                let light_wave_glow = (255, 128, 194);
                 let (rose_ice, berry, magenta, plum, deep_plum, star_rgb, star_alpha_scale) =
                     if intro_monochrome {
                         (
@@ -7577,7 +7577,7 @@ impl SoundFxApp {
                         layer_alpha,
                     );
                     glaze_fill = Self::with_alpha(
-                        Color32::from_rgba_premultiplied(250, 218, 233, 28),
+                        Color32::from_rgba_premultiplied(245, 205, 225, 20),
                         layer_alpha,
                     );
                     card_stroke = Self::with_alpha(
@@ -7962,6 +7962,21 @@ impl SoundFxApp {
                     Pos2::new(center.x, center.y - half_h * 0.06),
                     vec2(inner_rect.width() * 0.68, inner_rect.height() * 0.34),
                 );
+                if intro_light_fade || light_outro {
+                    clip.rect_filled(
+                        band_rect.expand2(vec2(18.0, 14.0)),
+                        18.0,
+                        Self::with_alpha(
+                            Color32::from_rgba_premultiplied(
+                                light_wave_secondary.r(),
+                                light_wave_secondary.g(),
+                                light_wave_secondary.b(),
+                                (42.0 + t * 30.0).round().clamp(0.0, 255.0) as u8,
+                            ),
+                            layer_alpha * content_alpha,
+                        ),
+                    );
+                }
                 let bar_width = band_rect.width() / wave_bars.len().max(1) as f32;
                 for (index, bar) in wave_bars.iter().enumerate() {
                     let phase_shift = time * 3.2 + index as f32 * 0.44;
@@ -7979,6 +7994,21 @@ impl SoundFxApp {
                     Pos2::new(center.x, center.y + half_h * 0.24),
                     vec2(inner_rect.width() * 0.76, inner_rect.height() * 0.18),
                 );
+                if intro_light_fade || light_outro {
+                    clip.rect_filled(
+                        ribbon_rect.expand2(vec2(22.0, 16.0)),
+                        20.0,
+                        Self::with_alpha(
+                            Color32::from_rgba_premultiplied(
+                                light_wave_primary.r(),
+                                light_wave_primary.g(),
+                                light_wave_primary.b(),
+                                (34.0 + t * 24.0).round().clamp(0.0, 255.0) as u8,
+                            ),
+                            layer_alpha * content_alpha,
+                        ),
+                    );
+                }
                 let mut line = Vec::with_capacity(120);
                 for step in 0..120 {
                     let sample_t = step as f32 / 119.0;
@@ -8036,7 +8066,7 @@ impl SoundFxApp {
                     );
                     let note_scale = 0.64 + (index % 3) as f32 * 0.12 + audio_level * 0.12;
                     let note_alpha = if intro_light_fade || light_outro {
-                        (208.0 * aura + 18.0).clamp(0.0, 224.0) as u8
+                        (148.0 + aura * 88.0).clamp(0.0, 236.0) as u8
                     } else {
                         (160.0 * aura).clamp(0.0, 160.0) as u8
                     };
@@ -8062,7 +8092,7 @@ impl SoundFxApp {
                         )
                     };
                     let glow_alpha = if intro_light_fade || light_outro {
-                        (118.0 * aura + 12.0).clamp(0.0, 148.0) as u8
+                        (78.0 + aura * 64.0).clamp(0.0, 156.0) as u8
                     } else if self.dark_theme {
                         (110.0 * aura).clamp(0.0, 148.0) as u8
                     } else {
