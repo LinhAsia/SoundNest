@@ -1466,6 +1466,24 @@ impl SoundFxApp {
         })
     }
 
+    fn pointer_left_app(ctx: &Context) -> bool {
+        let app_rect = ctx.screen_rect().expand(4.0);
+        ctx.input(|input| {
+            if !input.viewport().focused.unwrap_or(true) || !input.pointer.primary_down() {
+                return false;
+            }
+            match input
+                .pointer
+                .hover_pos()
+                .or_else(|| input.pointer.interact_pos())
+                .or_else(|| input.pointer.latest_pos())
+            {
+                Some(pos) => !app_rect.contains(pos),
+                None => true,
+            }
+        })
+    }
+
     fn library_query_matches(name: &str, query: &str) -> bool {
         let query = query.trim();
         if query.is_empty() {
@@ -5108,6 +5126,7 @@ impl SoundFxApp {
                                 && pointer_primary_down
                                 && self.pending_sound_drag == Some(sound.id)
                                 && (body_response.dragged() || pointer_drag_active)
+                                && Self::pointer_left_app(ui.ctx())
                             {
                                 drag_sound = Some(sound.id);
                                 self.pending_sound_drag = None;
@@ -5820,6 +5839,7 @@ impl SoundFxApp {
                         if pointer_primary_down
                             && self.pending_sound_drag == Some(sound.id)
                             && (response.dragged() || pointer_drag_active)
+                            && Self::pointer_left_app(ui.ctx())
                         {
                             drag_request = Some(sound.id);
                             self.pending_sound_drag = None;
