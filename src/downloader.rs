@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, bail};
 use open::that_detached;
 use serde::Deserialize;
+use serde_json::Value;
 use std::fs;
 use std::io::{Read, Write};
 #[cfg(windows)]
@@ -214,15 +215,11 @@ impl YoutubeAudioDownloader {
 
 fn run_youtube_search_job(
     state: &Arc<Mutex<DownloadSnapshot>>,
-    bin_dir: &Path,
+    _bin_dir: &Path,
     query: &str,
 ) -> Result<Vec<YoutubeSearchResult>> {
-    update_state(state, "yt-dlp", Some(0.0), None);
-    ensure_ytdlp_installed(state, bin_dir)?;
     update_state(state, "Search YouTube", None, None);
-
-    let ytdlp_exe = bin_dir.join("yt-dlp.exe");
-    search_youtube(&ytdlp_exe, query)
+    search_youtube(query)
 }
 
 fn run_download_job(
@@ -320,77 +317,79 @@ fn run_ytdlp_download_attempt(
     Ok(newest)
 }
 
-fn search_youtube(ytdlp_exe: &Path, query: &str) -> Result<Vec<YoutubeSearchResult>> {
-    #[derive(Deserialize)]
-    struct SearchPayload {
-        entries: Vec<SearchEntry>,
-    }
+fn search_youtube(query: &str) -> Result<Vec<YoutubeSearchResult>> {
+    let encoded = urlencoding::encode(query);
+    let url = format!("https://www.youtube.com/results?search_query={encoded}&hl=en");
+    let body = ureq::get(&url)
+        .header(
+            "User-Agent",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
+        )
+        .header(
+            "Accept-Language",
+            "en-US,en;q=0.9",
+        )
+        .call()
+        .map_err(|e| anyhow::anyhow!(e.to_string()))?
+        .into_body()
+        .read_to_string()
+        .context("unable to read YouTube search response")?;
 
-    #[derive(Deserialize)]
-    struct SearchEntry {
-        id: Option<String>,
-        title: Option<String>,
-        webpage_url: Option<String>,
-        original_url: Option<String>,
-        uploader: Option<String>,
-        channel: Option<String>,
-        duration: Option<u64>,
-        view_count: Option<u64>,
-    }
+    let json = extract_yt_initial_data(&body).context("unable to parse YouTube search data")?;
+    let root: Value =
+        serde_json::from_str(json).context("invalid YouTube search metadata from webpage")?;
 
-    let mut cmd = Command::new(ytdlp_exe);
-    cmd.args([
-        "--dump-single-json",
-        "--skip-download",
-        "--no-warnings",
-        "--no-call-home",
-        "--playlist-end",
-        "12",
-        &format!("ytsearch12:{query}"),
-    ]);
-    #[cfg(windows)]
-    cmd.creation_flags(0x08000000);
-
-    let output = cmd
-        .output()
-        .with_context(|| format!("failed to launch {}", ytdlp_exe.display()))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-        let detail = if !stderr.is_empty() { stderr } else { stdout };
-        bail!(
-            "{}",
-            if detail.is_empty() {
-                format!("YouTube search failed: {}", output.status)
-            } else {
-                detail
-            }
-        );
-    }
-
-    let payload: SearchPayload = serde_json::from_slice(&output.stdout)
-        .context("invalid YouTube search metadata from yt-dlp")?;
+    let contents = root
+        .pointer(
+            "/contents/twoColumnSearchResultsRenderer/primaryContents/sectionListRenderer/contents",
+        )
+        .and_then(Value::as_array)
+        .ok_or_else(|| anyhow::anyhow!("YouTube results payload missing entries"))?;
 
     let mut results = Vec::new();
-    for entry in payload.entries {
-        let id = entry.id.unwrap_or_default();
-        let title = entry.title.unwrap_or_default();
-        if id.trim().is_empty() || title.trim().is_empty() {
+    for section in contents {
+        let Some(items) = section
+            .get("itemSectionRenderer")
+            .and_then(|v| v.get("contents"))
+            .and_then(Value::as_array)
+        else {
             continue;
+        };
+
+        for item in items {
+            let Some(video) = item.get("videoRenderer") else {
+                continue;
+            };
+            let Some(id) = video.get("videoId").and_then(Value::as_str) else {
+                continue;
+            };
+            let title = youtube_text(video.get("title")).unwrap_or_default();
+            if title.trim().is_empty() {
+                continue;
+            }
+            let uploader = youtube_text(video.get("ownerText"))
+                .or_else(|| youtube_text(video.get("longBylineText")))
+                .or_else(|| youtube_text(video.get("shortBylineText")));
+            let duration =
+                youtube_text(video.get("lengthText")).and_then(|text| parse_duration_text(&text));
+            let view_count = youtube_text(video.get("viewCountText"))
+                .and_then(|text| parse_view_count_text(&text));
+            results.push(YoutubeSearchResult {
+                id: id.to_owned(),
+                title,
+                webpage_url: format!("https://www.youtube.com/watch?v={id}"),
+                uploader,
+                duration,
+                view_count,
+            });
+            if results.len() >= 12 {
+                break;
+            }
         }
-        let webpage_url = entry
-            .webpage_url
-            .or(entry.original_url)
-            .unwrap_or_else(|| format!("https://www.youtube.com/watch?v={id}"));
-        results.push(YoutubeSearchResult {
-            id,
-            title,
-            webpage_url,
-            uploader: entry.uploader.or(entry.channel),
-            duration: entry.duration,
-            view_count: entry.view_count,
-        });
+
+        if results.len() >= 12 {
+            break;
+        }
     }
 
     if results.is_empty() {
@@ -398,6 +397,64 @@ fn search_youtube(ytdlp_exe: &Path, query: &str) -> Result<Vec<YoutubeSearchResu
     }
 
     Ok(results)
+}
+
+fn extract_yt_initial_data(body: &str) -> Option<&str> {
+    for marker in ["var ytInitialData = ", "window[\"ytInitialData\"] = "] {
+        let start = body.find(marker)? + marker.len();
+        let rest = &body[start..];
+        let end = rest.find(";</script>").or_else(|| rest.find(";</body>"))?;
+        return Some(rest[..end].trim());
+    }
+    None
+}
+
+fn youtube_text(value: Option<&Value>) -> Option<String> {
+    let value = value?;
+    if let Some(text) = value.get("simpleText").and_then(Value::as_str) {
+        let trimmed = text.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_owned());
+        }
+    }
+    let runs = value.get("runs").and_then(Value::as_array)?;
+    let mut combined = String::new();
+    for run in runs {
+        if let Some(text) = run.get("text").and_then(Value::as_str) {
+            combined.push_str(text);
+        }
+    }
+    let trimmed = combined.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_owned())
+}
+
+fn parse_duration_text(text: &str) -> Option<u64> {
+    let mut total = 0u64;
+    let mut parts = text
+        .split(':')
+        .filter_map(|part| part.trim().parse::<u64>().ok())
+        .collect::<Vec<_>>();
+    if parts.is_empty() {
+        return None;
+    }
+    while parts.len() < 3 {
+        parts.insert(0, 0);
+    }
+    for part in parts {
+        total = total.checked_mul(60)?.checked_add(part)?;
+    }
+    Some(total)
+}
+
+fn parse_view_count_text(text: &str) -> Option<u64> {
+    let digits = text
+        .chars()
+        .filter(|ch| ch.is_ascii_digit())
+        .collect::<String>();
+    if digits.is_empty() {
+        return None;
+    }
+    digits.parse::<u64>().ok()
 }
 
 fn ensure_ytdlp_installed(state: &Arc<Mutex<DownloadSnapshot>>, bin_dir: &Path) -> Result<()> {
