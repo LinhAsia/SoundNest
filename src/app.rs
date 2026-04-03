@@ -5104,7 +5104,7 @@ impl SoundFxApp {
                         }
 
                         for sound in row {
-                            let (tile_rect, tile_response) =
+                            let (tile_rect, _tile_response) =
                                 ui.allocate_exact_size(vec2(card_size, card_size), Sense::hover());
                             let body_rect = Rect::from_min_max(
                                 tile_rect.min,
@@ -5126,12 +5126,9 @@ impl SoundFxApp {
                                     .is_some_and(|pos| tile_rect.contains(pos));
                             let pointer_drag_active =
                                 !modal_open && Self::pointer_drag_active(ui.ctx(), body_rect);
-                            let hovered = !modal_open
-                                && (pointer_hover
-                                    || tile_response.hovered()
-                                    || body_response.hovered());
+                            let hovered = !modal_open && pointer_hover;
 
-                            if hovered && !self.suppress_sound_drag_until_release {
+                            if hovered {
                                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
                             }
                             if !modal_open
@@ -5846,6 +5843,10 @@ impl SoundFxApp {
                             ui.id().with(sound.id),
                             Sense::click_and_drag(),
                         );
+                        let pointer_hover = ui
+                            .ctx()
+                            .input(|input| input.pointer.hover_pos())
+                            .is_some_and(|pos| frame.response.rect.contains(pos));
                         let pointer_drag_active =
                             Self::pointer_drag_active(ui.ctx(), frame.response.rect);
                         if !self.suppress_sound_drag_until_release
@@ -5854,7 +5855,7 @@ impl SoundFxApp {
                         {
                             self.pending_sound_drag = Some(sound.id);
                         }
-                        if response.hovered() && !self.suppress_sound_drag_until_release {
+                        if pointer_hover {
                             ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
                         }
                         if !self.suppress_sound_drag_until_release
@@ -6772,7 +6773,7 @@ impl SoundFxApp {
     }
 
     fn draw_sound_drag_ghost_card(&self, ui: &mut Ui, sound: &SoundEffect) {
-        let card_size = vec2(182.0, 194.0);
+        let card_size = vec2(164.0, 176.0);
         let waveform_preview = Self::trimmed_waveform_preview(sound);
 
         Frame::new()
@@ -6782,19 +6783,19 @@ impl SoundFxApp {
                 Color32::from_rgba_premultiplied(227, 82, 149, 188),
             ))
             .shadow(Shadow {
-                offset: [0, 18],
-                blur: 36,
+                offset: [0, 14],
+                blur: 28,
                 spread: 0,
                 color: Color32::from_rgba_premultiplied(86, 43, 67, 36),
             })
-            .corner_radius(32.0)
-            .inner_margin(Margin::same(16))
+            .corner_radius(28.0)
+            .inner_margin(Margin::same(14))
             .show(ui, |ui| {
                 ui.set_min_size(card_size);
                 ui.set_width(card_size.x);
                 ui.vertical(|ui| {
                     ui.add_sized(
-                        [card_size.x - 32.0, 18.0],
+                        [card_size.x - 28.0, 18.0],
                         egui::Label::new(
                             RichText::new(&sound.name)
                                 .size(12.5)
@@ -6803,7 +6804,7 @@ impl SoundFxApp {
                         )
                         .truncate(),
                     );
-                    ui.add_space(8.0);
+                    ui.add_space(7.0);
                     Self::draw_wave_strip(
                         ui,
                         &waveform_preview,
@@ -6813,7 +6814,7 @@ impl SoundFxApp {
                         Self::panel_fill(),
                         68.0,
                     );
-                    ui.add_space(9.0);
+                    ui.add_space(8.0);
                     ui.horizontal(|ui| {
                         ui.label(
                             RichText::new(format_time(sound.trimmed_length()))
@@ -6827,10 +6828,10 @@ impl SoundFxApp {
                                 .color(Self::muted_text_color()),
                         );
                     });
-                    ui.add_space(10.0);
+                    ui.add_space(8.0);
                     ui.horizontal(|ui| {
                         ui.add_sized(
-                            [46.0, 31.0],
+                            [42.0, 29.0],
                             Self::action_button(
                                 Self::icon(0xe037, 18.0, Self::strong_text_color()),
                                 false,
@@ -6838,7 +6839,7 @@ impl SoundFxApp {
                             ),
                         );
                         ui.add_sized(
-                            [46.0, 31.0],
+                            [42.0, 29.0],
                             Self::action_button(
                                 Self::icon(0xe14d, 18.0, Color32::WHITE),
                                 false,
@@ -6869,7 +6870,8 @@ impl SoundFxApp {
 
         let time = ctx.input(|input| input.time) as f32;
         let sway = vec2(time.sin() * 1.6, (time * 2.4).sin() * 1.2);
-        let anchor = pointer_pos + vec2(18.0, -18.0) + sway;
+        let anchor = pointer_pos + vec2(14.0, -14.0) + sway;
+        let clip_rect = ctx.screen_rect().expand(-2.0);
 
         ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
         egui::Area::new(egui::Id::new(("sound-drag-ghost", sound_id)))
@@ -6877,6 +6879,7 @@ impl SoundFxApp {
             .fixed_pos(anchor)
             .interactable(false)
             .show(ctx, |ui| {
+                ui.set_clip_rect(clip_rect);
                 ui.set_opacity(0.96);
                 self.draw_sound_drag_ghost_card(ui, sound);
             });
