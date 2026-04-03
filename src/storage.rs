@@ -85,6 +85,14 @@ impl SoundEffect {
             self.trim_start_secs = (self.trim_end_secs - 0.05).max(0.0);
         }
     }
+
+    pub fn needs_processed_export(&self) -> bool {
+        const EPSILON: f32 = 0.005;
+        (self.volume - 1.0).abs() > EPSILON
+            || (self.speed - 1.0).abs() > EPSILON
+            || self.trim_start_secs.abs() > EPSILON
+            || (self.trim_end_secs - self.safe_duration()).abs() > 0.02
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Default)]
@@ -548,12 +556,36 @@ impl Storage {
         source_path: &Path,
         sound: &SoundEffect,
     ) -> Result<PathBuf> {
+        let extension = if sound.needs_processed_export() {
+            "wav".to_owned()
+        } else {
+            source_path
+                .extension()
+                .and_then(|value| value.to_str())
+                .filter(|value| !value.is_empty())
+                .unwrap_or("wav")
+                .to_owned()
+        };
         let export_name = format!(
-            "{}-{}.wav",
+            "{}-{}.{}",
             sanitize_stem(&sound.name),
-            &sound.id.to_string()[..8]
+            &sound.id.to_string()[..8],
+            extension
         );
         let export_path = self.exports_dir.join(export_name);
+        if !sound.needs_processed_export() {
+            if export_path.exists() {
+                return Ok(export_path);
+            }
+            match fs::hard_link(source_path, &export_path) {
+                Ok(()) => return Ok(export_path),
+                Err(_) => {
+                    fs::copy(source_path, &export_path)
+                        .with_context(|| format!("unable to export {}", export_path.display()))?;
+                    return Ok(export_path);
+                }
+            }
+        }
         write_processed_wav(source_path, &export_path, sound)?;
         Ok(export_path)
     }

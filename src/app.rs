@@ -1462,6 +1462,15 @@ impl SoundFxApp {
         })
     }
 
+    fn pointer_press_origin_within(ctx: &Context, rect: Rect) -> bool {
+        ctx.input(|input| {
+            input
+                .pointer
+                .press_origin()
+                .is_some_and(|pos| rect.contains(pos))
+        })
+    }
+
     fn pointer_left_app(ctx: &Context) -> bool {
         let app_rect = ctx.screen_rect().expand(4.0);
         ctx.input(|input| {
@@ -5101,7 +5110,10 @@ impl SoundFxApp {
                             if hovered {
                                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
                             }
-                            if !modal_open && body_response.is_pointer_button_down_on() {
+                            if !modal_open
+                                && body_response.is_pointer_button_down_on()
+                                && Self::pointer_press_origin_within(ui.ctx(), body_rect)
+                            {
                                 self.pending_sound_drag = Some(sound.id);
                             }
                             if !modal_open
@@ -5810,7 +5822,9 @@ impl SoundFxApp {
                         );
                         let pointer_drag_active =
                             Self::pointer_drag_active(ui.ctx(), frame.response.rect);
-                        if response.is_pointer_button_down_on() {
+                        if response.is_pointer_button_down_on()
+                            && Self::pointer_press_origin_within(ui.ctx(), frame.response.rect)
+                        {
                             self.pending_sound_drag = Some(sound.id);
                         }
                         if response.hovered() {
