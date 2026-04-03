@@ -1491,6 +1491,17 @@ impl SoundFxApp {
         })
     }
 
+    fn pointer_primary_pressed_in_app(ctx: &Context) -> bool {
+        let app_rect = ctx.screen_rect().expand(4.0);
+        ctx.input(|input| {
+            input.pointer.button_pressed(egui::PointerButton::Primary)
+                && input
+                    .pointer
+                    .press_origin()
+                    .is_some_and(|pos| app_rect.contains(pos))
+        })
+    }
+
     fn library_query_matches(name: &str, query: &str) -> bool {
         let query = query.trim();
         if query.is_empty() {
@@ -9307,6 +9318,10 @@ impl eframe::App for SoundFxApp {
         self.poll_myinstants_waveform_jobs();
         if !ctx.input(|input| input.pointer.primary_down()) {
             self.pending_sound_drag = None;
+            self.suppress_sound_drag_until_release = false;
+        } else if self.suppress_sound_drag_until_release
+            && Self::pointer_primary_pressed_in_app(ctx)
+        {
             self.suppress_sound_drag_until_release = false;
         }
 
