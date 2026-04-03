@@ -34,6 +34,7 @@ mod windows_platform {
             SelectObject,
         },
         System::{
+            Com::{CLSCTX_INPROC_SERVER, CoCreateInstance},
             Ole::{DROPEFFECT_COPY, IDropSource, IDropSource_Impl, OleInitialize, OleUninitialize},
             SystemServices::{MK_LBUTTON, MODIFIERKEYS_FLAGS},
             Threading::Sleep,
@@ -41,8 +42,8 @@ mod windows_platform {
         UI::{
             Controls::MARGINS,
             Shell::{
-                CIDLData_CreateFromIDArray, ILClone, ILCreateFromPathW, ILFindLastID, ILFree,
-                ILRemoveLastID, SHDoDragDrop,
+                CIDLData_CreateFromIDArray, CLSID_DragDropHelper, IDragSourceHelper, ILClone,
+                ILCreateFromPathW, ILFindLastID, ILFree, ILRemoveLastID, SHDRAGIMAGE, SHDoDragDrop,
             },
             WindowsAndMessaging::{
                 CreateWindowExW, DestroyWindow, FindWindowW, GWL_EXSTYLE, GWL_STYLE, GetCursorPos,
@@ -484,6 +485,47 @@ mod windows_platform {
         );
     }
 
+    fn initialize_transparent_drag_image(
+        data_object: &windows::Win32::System::Com::IDataObject,
+    ) -> Result<()> {
+        let mut bitmap_info = BITMAPINFO::default();
+        bitmap_info.bmiHeader = BITMAPINFOHEADER {
+            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: 1,
+            biHeight: -1,
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB.0,
+            ..Default::default()
+        };
+
+        let mut bits = ptr::null_mut();
+        let bitmap = unsafe {
+            CreateDIBSection(None, &bitmap_info, DIB_RGB_COLORS, &mut bits, None, 0)
+                .context("unable to create transparent drag image")?
+        };
+        unsafe {
+            ptr::write_bytes(bits.cast::<u8>(), 0, 4);
+        }
+
+        let drag_helper: IDragSourceHelper = unsafe {
+            CoCreateInstance(&CLSID_DragDropHelper, None, CLSCTX_INPROC_SERVER)
+                .context("unable to create drag source helper")?
+        };
+        let drag_image = SHDRAGIMAGE {
+            sizeDragImage: SIZE { cx: 1, cy: 1 },
+            ptOffset: POINT { x: 0, y: 0 },
+            hbmpDragImage: bitmap,
+            crColorKey: COLORREF(0),
+        };
+        unsafe {
+            let result = drag_helper.InitializeFromBitmap(&drag_image, data_object);
+            let _ = DeleteObject(bitmap.into());
+            result.context("unable to initialize transparent drag image")?;
+        }
+        Ok(())
+    }
+
     struct DragOverlayGuard {
         stop: Arc<AtomicBool>,
         worker: Option<thread::JoinHandle<()>>,
@@ -640,6 +682,7 @@ mod windows_platform {
                 let data_object =
                     CIDLData_CreateFromIDArray(parent_pidl as *const _, Some(&child_items))
                         .context("unable to build drag payload")?;
+                let _ = initialize_transparent_drag_image(&data_object);
                 let _overlay_guard = ghost.and_then(start_drag_overlay);
                 let drop_source: IDropSource = FileDropSource.into();
                 let _ = SHDoDragDrop(None, &data_object, &drop_source, DROPEFFECT_COPY)
