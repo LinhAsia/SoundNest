@@ -6742,6 +6742,120 @@ impl SoundFxApp {
         }
     }
 
+    fn draw_sound_drag_ghost_card(&self, ui: &mut Ui, sound: &SoundEffect) {
+        let card_size = vec2(182.0, 194.0);
+        let waveform_preview = Self::trimmed_waveform_preview(sound);
+
+        Frame::new()
+            .fill(Self::surface_fill())
+            .stroke(Stroke::new(
+                1.0,
+                Color32::from_rgba_premultiplied(227, 82, 149, 188),
+            ))
+            .shadow(Shadow {
+                offset: [0, 18],
+                blur: 36,
+                spread: 0,
+                color: Color32::from_rgba_premultiplied(86, 43, 67, 36),
+            })
+            .corner_radius(32.0)
+            .inner_margin(Margin::same(16))
+            .show(ui, |ui| {
+                ui.set_min_size(card_size);
+                ui.set_width(card_size.x);
+                ui.vertical(|ui| {
+                    ui.add_sized(
+                        [card_size.x - 32.0, 18.0],
+                        egui::Label::new(
+                            RichText::new(&sound.name)
+                                .size(12.5)
+                                .color(Self::strong_text_color())
+                                .strong(),
+                        )
+                        .truncate(),
+                    );
+                    ui.add_space(8.0);
+                    Self::draw_wave_strip(
+                        ui,
+                        &waveform_preview,
+                        None,
+                        Color32::from_rgb(214, 51, 132),
+                        Color32::from_rgb(238, 213, 227),
+                        Self::panel_fill(),
+                        68.0,
+                    );
+                    ui.add_space(9.0);
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new(format_time(sound.trimmed_length()))
+                                .size(11.5)
+                                .color(Self::muted_text_color()),
+                        );
+                        ui.separator();
+                        ui.label(
+                            RichText::new(format!("{:.0}%", sound.volume * 100.0))
+                                .size(11.5)
+                                .color(Self::muted_text_color()),
+                        );
+                    });
+                    ui.add_space(10.0);
+                    ui.horizontal(|ui| {
+                        ui.add_sized(
+                            [46.0, 31.0],
+                            Self::action_button(
+                                Self::icon(0xe037, 18.0, Self::strong_text_color()),
+                                false,
+                                false,
+                            ),
+                        );
+                        ui.add_sized(
+                            [46.0, 31.0],
+                            Self::action_button(
+                                Self::icon(0xe14d, 18.0, Color32::WHITE),
+                                false,
+                                true,
+                            ),
+                        );
+                    });
+                });
+            });
+    }
+
+    fn render_sound_drag_ghost(&self, ctx: &Context) {
+        let Some(sound_id) = self.pending_sound_drag else {
+            return;
+        };
+        if !ctx.input(|input| input.pointer.primary_down()) {
+            return;
+        }
+        let Some(pointer_pos) = ctx.input(|input| {
+            input
+                .pointer
+                .hover_pos()
+                .or_else(|| input.pointer.interact_pos())
+                .or_else(|| input.pointer.latest_pos())
+        }) else {
+            return;
+        };
+        let Some(sound) = self.sounds.iter().find(|sound| sound.id == sound_id) else {
+            return;
+        };
+
+        let time = ctx.input(|input| input.time) as f32;
+        let sway = vec2(time.sin() * 1.6, (time * 2.4).sin() * 1.2);
+        let anchor = pointer_pos + vec2(18.0, -18.0) + sway;
+
+        ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
+        egui::Area::new(egui::Id::new(("sound-drag-ghost", sound_id)))
+            .order(egui::Order::Tooltip)
+            .fixed_pos(anchor)
+            .interactable(false)
+            .show(ctx, |ui| {
+                ui.set_opacity(0.96);
+                self.draw_sound_drag_ghost_card(ui, sound);
+            });
+    }
+
     fn render_download_panel(&mut self, ctx: &Context) {
         if !self.show_download_panel {
             return;
@@ -9369,6 +9483,7 @@ impl eframe::App for SoundFxApp {
         self.render_trim_commit_panel(ctx);
         self.render_pitch_overlay_viewport(ctx);
         self.render_record_overlay_viewport(ctx);
+        self.render_sound_drag_ghost(ctx);
         self.render_titlebar_drag_zone(ctx);
         self.render_custom_window_resize_handles(ctx);
     }
