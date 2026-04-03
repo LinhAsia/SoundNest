@@ -1625,7 +1625,11 @@ impl SoundFxApp {
             Some(fs::canonicalize(&drag_path).unwrap_or_else(|_| drag_path.clone()));
         self.pending_sound_drag = None;
         self.suppress_sound_drag_until_release = true;
-        let result = platform::drag_file_out(&drag_path);
+        let drag_ghost = platform::DragGhostSpec {
+            waveform: Self::trimmed_waveform_preview(sound),
+            dark_theme: self.dark_theme,
+        };
+        let result = platform::drag_file_out(&drag_path, Some(&drag_ghost));
         ctx.request_repaint();
         result
     }

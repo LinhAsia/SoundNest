@@ -1,28 +1,41 @@
+#[derive(Clone, Debug)]
+pub struct DragGhostSpec {
+    pub waveform: Vec<f32>,
+    pub dark_theme: bool,
+}
+
 #[cfg(windows)]
 mod windows_platform {
+    use crate::platform::DragGhostSpec;
     use anyhow::{Context, Result, bail};
     use eframe::Frame;
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use std::os::windows::ffi::OsStrExt;
     use std::path::Path;
+    use std::ptr;
     use windows::Win32::{
         Foundation::{
-            DRAGDROP_S_CANCEL, DRAGDROP_S_DROP, DRAGDROP_S_USEDEFAULTCURSORS, HWND, S_OK,
+            COLORREF, DRAGDROP_S_CANCEL, DRAGDROP_S_DROP, DRAGDROP_S_USEDEFAULTCURSORS, HWND,
+            POINT, S_OK, SIZE,
         },
         Graphics::Dwm::{
             DWMNCRENDERINGPOLICY, DWMNCRP_DISABLED, DWMNCRP_ENABLED, DWMWA_NCRENDERING_POLICY,
             DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DEFAULT, DWMWCP_ROUND,
             DwmExtendFrameIntoClientArea, DwmSetWindowAttribute,
         },
+        Graphics::Gdi::{
+            BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateDIBSection, DIB_RGB_COLORS, DeleteObject,
+        },
         System::{
+            Com::{CLSCTX_INPROC_SERVER, CoCreateInstance},
             Ole::{DROPEFFECT_COPY, IDropSource, IDropSource_Impl, OleInitialize, OleUninitialize},
             SystemServices::{MK_LBUTTON, MODIFIERKEYS_FLAGS},
         },
         UI::{
             Controls::MARGINS,
             Shell::{
-                CIDLData_CreateFromIDArray, ILClone, ILCreateFromPathW, ILFindLastID, ILFree,
-                ILRemoveLastID, SHDoDragDrop,
+                CIDLData_CreateFromIDArray, CLSID_DragDropHelper, IDragSourceHelper, ILClone,
+                ILCreateFromPathW, ILFindLastID, ILFree, ILRemoveLastID, SHDRAGIMAGE, SHDoDragDrop,
             },
             WindowsAndMessaging::{
                 FindWindowW, GWL_EXSTYLE, GWL_STYLE, GetWindowLongW, HWND_NOTOPMOST, HWND_TOPMOST,
@@ -203,7 +216,292 @@ mod windows_platform {
         true
     }
 
-    pub fn drag_file_out(path: &Path) -> Result<()> {
+    fn create_drag_ghost_bitmap(
+        spec: &DragGhostSpec,
+    ) -> Result<(windows::Win32::Graphics::Gdi::HBITMAP, i32, i32)> {
+        let width = 164i32;
+        let height = 176i32;
+        let mut bitmap_info = BITMAPINFO::default();
+        bitmap_info.bmiHeader = BITMAPINFOHEADER {
+            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: width,
+            biHeight: -height,
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB.0,
+            ..Default::default()
+        };
+
+        let mut bits = ptr::null_mut();
+        let hbitmap = unsafe {
+            CreateDIBSection(None, &bitmap_info, DIB_RGB_COLORS, &mut bits, None, 0)
+                .context("unable to create drag ghost bitmap")?
+        };
+
+        let width_usize = width as usize;
+        let height_usize = height as usize;
+        let mut pixels = vec![0u8; width_usize * height_usize * 4];
+        draw_drag_ghost_pixels(&mut pixels, width_usize, height_usize, spec);
+        unsafe {
+            ptr::copy_nonoverlapping(pixels.as_ptr(), bits.cast::<u8>(), pixels.len());
+        }
+        Ok((hbitmap, width, height))
+    }
+
+    fn premul(color: [u8; 4]) -> [u8; 4] {
+        let alpha = color[3] as u16;
+        [
+            ((color[0] as u16 * alpha + 127) / 255) as u8,
+            ((color[1] as u16 * alpha + 127) / 255) as u8,
+            ((color[2] as u16 * alpha + 127) / 255) as u8,
+            color[3],
+        ]
+    }
+
+    fn set_pixel(buffer: &mut [u8], width: usize, x: usize, y: usize, color: [u8; 4]) {
+        let index = (y * width + x) * 4;
+        if index + 3 >= buffer.len() {
+            return;
+        }
+        buffer[index] = color[2];
+        buffer[index + 1] = color[1];
+        buffer[index + 2] = color[0];
+        buffer[index + 3] = color[3];
+    }
+
+    fn fill_round_rect(
+        buffer: &mut [u8],
+        width: usize,
+        height: usize,
+        x: f32,
+        y: f32,
+        rect_w: f32,
+        rect_h: f32,
+        radius: f32,
+        color: [u8; 4],
+    ) {
+        let color = premul(color);
+        let left = x.max(0.0) as usize;
+        let top = y.max(0.0) as usize;
+        let right = (x + rect_w).min(width as f32) as usize;
+        let bottom = (y + rect_h).min(height as f32) as usize;
+        let r = radius.min(rect_h * 0.5).min(rect_w * 0.5);
+
+        for py in top..bottom {
+            for px in left..right {
+                let fx = px as f32 + 0.5;
+                let fy = py as f32 + 0.5;
+                let inside_core = fx >= x + r && fx <= x + rect_w - r;
+                let inside_side = fy >= y + r && fy <= y + rect_h - r;
+                let tl_dx = fx - (x + r);
+                let tr_dx = fx - (x + rect_w - r);
+                let ty = fy - (y + r);
+                let by = fy - (y + rect_h - r);
+                let inside_corner = tl_dx * tl_dx + ty * ty <= r * r
+                    || tr_dx * tr_dx + ty * ty <= r * r
+                    || tl_dx * tl_dx + by * by <= r * r
+                    || tr_dx * tr_dx + by * by <= r * r;
+                if (inside_core && fy >= y && fy <= y + rect_h)
+                    || (inside_side && fx >= x && fx <= x + rect_w)
+                    || inside_corner
+                {
+                    set_pixel(buffer, width, px, py, color);
+                }
+            }
+        }
+    }
+
+    fn draw_wave_bars(
+        buffer: &mut [u8],
+        width: usize,
+        height: usize,
+        x: f32,
+        y: f32,
+        rect_w: f32,
+        rect_h: f32,
+        waveform: &[f32],
+        color: [u8; 4],
+    ) {
+        if waveform.is_empty() {
+            return;
+        }
+        let bar_count = waveform.len().min(28).max(8);
+        let step = rect_w / bar_count as f32;
+        let color = premul(color);
+        for index in 0..bar_count {
+            let source_index = index * waveform.len() / bar_count;
+            let level = waveform
+                .get(source_index)
+                .copied()
+                .unwrap_or(0.25)
+                .clamp(0.06, 1.0);
+            let bar_h = (rect_h * (0.18 + level * 0.72)).clamp(6.0, rect_h);
+            let left = (x + index as f32 * step + step * 0.22).max(0.0) as usize;
+            let right = (x + index as f32 * step + step * 0.78).min(width as f32) as usize;
+            let top = (y + (rect_h - bar_h) * 0.5).max(0.0) as usize;
+            let bottom = (top as f32 + bar_h).min(height as f32) as usize;
+            for py in top..bottom {
+                for px in left..right {
+                    set_pixel(buffer, width, px, py, color);
+                }
+            }
+        }
+    }
+
+    fn draw_drag_ghost_pixels(
+        buffer: &mut [u8],
+        width: usize,
+        height: usize,
+        spec: &DragGhostSpec,
+    ) {
+        let (card_fill, panel_fill, stroke, wave) = if spec.dark_theme {
+            (
+                [29, 24, 35, 242],
+                [22, 18, 27, 250],
+                [227, 82, 149, 210],
+                [255, 218, 234, 245],
+            )
+        } else {
+            (
+                [248, 242, 246, 244],
+                [255, 255, 255, 248],
+                [227, 82, 149, 190],
+                [214, 51, 132, 245],
+            )
+        };
+
+        fill_round_rect(
+            buffer,
+            width,
+            height,
+            8.0,
+            10.0,
+            148.0,
+            156.0,
+            28.0,
+            [86, 43, 67, 34],
+        );
+        fill_round_rect(
+            buffer, width, height, 0.0, 0.0, 164.0, 176.0, 28.0, card_fill,
+        );
+        fill_round_rect(
+            buffer,
+            width,
+            height,
+            0.0,
+            0.0,
+            164.0,
+            176.0,
+            28.0,
+            [0, 0, 0, 0],
+        );
+
+        for inset in 0..2usize {
+            fill_round_rect(
+                buffer,
+                width,
+                height,
+                inset as f32,
+                inset as f32,
+                164.0 - inset as f32 * 2.0,
+                176.0 - inset as f32 * 2.0,
+                28.0,
+                [
+                    stroke[0],
+                    stroke[1],
+                    stroke[2],
+                    if inset == 0 { 84 } else { 40 },
+                ],
+            );
+        }
+
+        fill_round_rect(
+            buffer,
+            width,
+            height,
+            14.0,
+            18.0,
+            74.0,
+            10.0,
+            5.0,
+            [stroke[0], stroke[1], stroke[2], 232],
+        );
+        fill_round_rect(
+            buffer, width, height, 14.0, 48.0, 136.0, 62.0, 18.0, panel_fill,
+        );
+        draw_wave_bars(
+            buffer,
+            width,
+            height,
+            22.0,
+            58.0,
+            120.0,
+            42.0,
+            &spec.waveform,
+            wave,
+        );
+        fill_round_rect(
+            buffer,
+            width,
+            height,
+            14.0,
+            126.0,
+            38.0,
+            28.0,
+            14.0,
+            [255, 255, 255, 18],
+        );
+        fill_round_rect(
+            buffer,
+            width,
+            height,
+            60.0,
+            126.0,
+            38.0,
+            28.0,
+            14.0,
+            [stroke[0], stroke[1], stroke[2], 230],
+        );
+        fill_round_rect(
+            buffer,
+            width,
+            height,
+            14.0,
+            118.0,
+            44.0,
+            4.0,
+            2.0,
+            [255, 255, 255, 108],
+        );
+    }
+
+    fn try_initialize_drag_image(
+        data_object: &windows::Win32::System::Com::IDataObject,
+        spec: &DragGhostSpec,
+    ) -> Result<()> {
+        let (bitmap, width, height) = create_drag_ghost_bitmap(spec)?;
+        let drag_helper: IDragSourceHelper = unsafe {
+            CoCreateInstance(&CLSID_DragDropHelper, None, CLSCTX_INPROC_SERVER)
+                .context("unable to create drag source helper")?
+        };
+        let drag_image = SHDRAGIMAGE {
+            sizeDragImage: SIZE {
+                cx: width,
+                cy: height,
+            },
+            ptOffset: POINT { x: 18, y: 18 },
+            hbmpDragImage: bitmap,
+            crColorKey: COLORREF(0),
+        };
+        unsafe {
+            let result = drag_helper.InitializeFromBitmap(&drag_image, data_object);
+            let _ = DeleteObject(bitmap.into());
+            result.context("unable to initialize drag ghost image")?;
+        }
+        Ok(())
+    }
+
+    pub fn drag_file_out(path: &Path, ghost: Option<&DragGhostSpec>) -> Result<()> {
         if !path.exists() {
             bail!("exported sound file is missing");
         }
@@ -254,6 +552,9 @@ mod windows_platform {
                 let data_object =
                     CIDLData_CreateFromIDArray(parent_pidl as *const _, Some(&child_items))
                         .context("unable to build drag payload")?;
+                if let Some(spec) = ghost {
+                    let _ = try_initialize_drag_image(&data_object, spec);
+                }
                 let drop_source: IDropSource = FileDropSource.into();
                 let _ = SHDoDragDrop(None, &data_object, &drop_source, DROPEFFECT_COPY)
                     .context("unable to start drag and drop")?;
@@ -288,6 +589,9 @@ pub fn set_overlay_window_native_visuals(
 }
 
 #[cfg(not(windows))]
-pub fn drag_file_out(_path: &std::path::Path) -> anyhow::Result<()> {
+pub fn drag_file_out(
+    _path: &std::path::Path,
+    _ghost: Option<&DragGhostSpec>,
+) -> anyhow::Result<()> {
     anyhow::bail!("Drag out is only available on Windows")
 }
