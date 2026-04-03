@@ -206,6 +206,7 @@ pub struct SoundFxApp {
     library_audio_query: String,
     library_video_query: String,
     pending_sound_drag: Option<Uuid>,
+    suppress_sound_drag_until_release: bool,
     ignored_drop_path: Option<PathBuf>,
     reveal_record_review_on_open: bool,
     startup_sound_played: bool,
@@ -386,6 +387,7 @@ impl SoundFxApp {
             library_audio_query: String::new(),
             library_video_query: String::new(),
             pending_sound_drag: None,
+            suppress_sound_drag_until_release: false,
             ignored_drop_path: None,
             reveal_record_review_on_open: false,
             startup_sound_played: false,
@@ -1611,6 +1613,7 @@ impl SoundFxApp {
         self.ignored_drop_path =
             Some(fs::canonicalize(&drag_path).unwrap_or_else(|_| drag_path.clone()));
         self.pending_sound_drag = None;
+        self.suppress_sound_drag_until_release = true;
         let result = platform::drag_file_out(&drag_path);
         ctx.request_repaint();
         result
@@ -5117,16 +5120,18 @@ impl SoundFxApp {
                                     || tile_response.hovered()
                                     || body_response.hovered());
 
-                            if hovered {
+                            if hovered && !self.suppress_sound_drag_until_release {
                                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
                             }
                             if !modal_open
+                                && !self.suppress_sound_drag_until_release
                                 && ui.ctx().input(|input| input.pointer.primary_down())
                                 && Self::pointer_press_origin_within(ui.ctx(), body_rect)
                             {
                                 self.pending_sound_drag = Some(sound.id);
                             }
                             if !modal_open
+                                && !self.suppress_sound_drag_until_release
                                 && (body_response.dragged()
                                     || body_response.is_pointer_button_down_on()
                                     || pointer_drag_active)
@@ -5832,15 +5837,18 @@ impl SoundFxApp {
                         );
                         let pointer_drag_active =
                             Self::pointer_drag_active(ui.ctx(), frame.response.rect);
-                        if ui.ctx().input(|input| input.pointer.primary_down())
+                        if !self.suppress_sound_drag_until_release
+                            && ui.ctx().input(|input| input.pointer.primary_down())
                             && Self::pointer_press_origin_within(ui.ctx(), frame.response.rect)
                         {
                             self.pending_sound_drag = Some(sound.id);
                         }
-                        if response.hovered() {
+                        if response.hovered() && !self.suppress_sound_drag_until_release {
                             ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
                         }
-                        if response.dragged() || pointer_drag_active {
+                        if !self.suppress_sound_drag_until_release
+                            && (response.dragged() || pointer_drag_active)
+                        {
                             ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
                         }
                         if self.pending_sound_drag == Some(sound.id)
@@ -6832,6 +6840,9 @@ impl SoundFxApp {
     }
 
     fn render_sound_drag_ghost(&self, ctx: &Context) {
+        if self.suppress_sound_drag_until_release {
+            return;
+        }
         let Some(sound_id) = self.pending_sound_drag else {
             return;
         };
@@ -9296,6 +9307,7 @@ impl eframe::App for SoundFxApp {
         self.poll_myinstants_waveform_jobs();
         if !ctx.input(|input| input.pointer.primary_down()) {
             self.pending_sound_drag = None;
+            self.suppress_sound_drag_until_release = false;
         }
 
         self.play_startup_sound_if_needed(ctx);
