@@ -5,7 +5,6 @@ mod windows_platform {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use std::os::windows::ffi::OsStrExt;
     use std::path::Path;
-    use std::thread;
     use windows::Win32::{
         Foundation::{
             DRAGDROP_S_CANCEL, DRAGDROP_S_DROP, DRAGDROP_S_USEDEFAULTCURSORS, HWND, S_OK,
@@ -204,7 +203,7 @@ mod windows_platform {
         true
     }
 
-    fn drag_file_out_blocking(path: &Path) -> Result<()> {
+    pub fn drag_file_out(path: &Path) -> Result<()> {
         if !path.exists() {
             bail!("exported sound file is missing");
         }
@@ -266,19 +265,6 @@ mod windows_platform {
             drag_result?;
         }
 
-        Ok(())
-    }
-
-    pub fn drag_file_out(path: &Path) -> Result<()> {
-        let path = path.to_path_buf();
-        thread::Builder::new()
-            .name("external-file-drag".to_owned())
-            .spawn(move || {
-                if let Err(error) = drag_file_out_blocking(&path) {
-                    eprintln!("external drag failed: {error}");
-                }
-            })
-            .context("unable to start drag session")?;
         Ok(())
     }
 }
