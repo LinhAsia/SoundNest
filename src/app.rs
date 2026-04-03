@@ -5111,7 +5111,7 @@ impl SoundFxApp {
                                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
                             }
                             if !modal_open
-                                && body_response.is_pointer_button_down_on()
+                                && ui.ctx().input(|input| input.pointer.primary_down())
                                 && Self::pointer_press_origin_within(ui.ctx(), body_rect)
                             {
                                 self.pending_sound_drag = Some(sound.id);
@@ -5822,7 +5822,7 @@ impl SoundFxApp {
                         );
                         let pointer_drag_active =
                             Self::pointer_drag_active(ui.ctx(), frame.response.rect);
-                        if response.is_pointer_button_down_on()
+                        if ui.ctx().input(|input| input.pointer.primary_down())
                             && Self::pointer_press_origin_within(ui.ctx(), frame.response.rect)
                         {
                             self.pending_sound_drag = Some(sound.id);
