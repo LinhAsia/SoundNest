@@ -205,10 +205,7 @@ pub struct SoundFxApp {
     settings_exit_candidate: Option<Uuid>,
     library_audio_query: String,
     library_video_query: String,
-    last_pointer_canvas_pos: Option<Pos2>,
     pending_sound_drag: Option<Uuid>,
-    queued_sound_drag: Option<Uuid>,
-    launch_queued_sound_drag: bool,
     suppress_sound_drag_until_release: bool,
     ignored_drop_path: Option<PathBuf>,
     reveal_record_review_on_open: bool,
@@ -389,10 +386,7 @@ impl SoundFxApp {
             settings_exit_candidate: None,
             library_audio_query: String::new(),
             library_video_query: String::new(),
-            last_pointer_canvas_pos: None,
             pending_sound_drag: None,
-            queued_sound_drag: None,
-            launch_queued_sound_drag: false,
             suppress_sound_drag_until_release: false,
             ignored_drop_path: None,
             reveal_record_review_on_open: false,
@@ -1630,8 +1624,6 @@ impl SoundFxApp {
         self.ignored_drop_path =
             Some(fs::canonicalize(&drag_path).unwrap_or_else(|_| drag_path.clone()));
         self.pending_sound_drag = None;
-        self.queued_sound_drag = None;
-        self.launch_queued_sound_drag = false;
         self.suppress_sound_drag_until_release = true;
         let result = platform::drag_file_out(&drag_path);
         ctx.request_repaint();
@@ -5091,6 +5083,7 @@ impl SoundFxApp {
                 let mut open_sound = None;
                 let mut preview_sound = None;
                 let mut copy_sound = None;
+                let mut drag_sound = None;
 
                 let columns = (((available_width + spacing) / (target_card + spacing)).floor()
                     as usize)
@@ -5157,9 +5150,8 @@ impl SoundFxApp {
                                 && self.pending_sound_drag == Some(sound.id)
                                 && Self::pointer_left_app(ui.ctx())
                             {
-                                self.queued_sound_drag = Some(sound.id);
-                                self.launch_queued_sound_drag = false;
-                                ui.ctx().request_repaint();
+                                drag_sound = Some(sound.id);
+                                self.pending_sound_drag = None;
                             }
                             if !modal_open && body_response.clicked() {
                                 open_sound = Some(sound.id);
@@ -5284,6 +5276,18 @@ impl SoundFxApp {
 
                 if let Some(sound_id) = preview_sound {
                     self.preview_sound(sound_id);
+                }
+                if let Some(sound_id) = drag_sound {
+                    if let Some(sound) = self
+                        .sounds
+                        .iter()
+                        .find(|sound| sound.id == sound_id)
+                        .cloned()
+                    {
+                        if let Err(error) = self.drag_sound_file_out(ui.ctx(), &sound) {
+                            self.set_error_status(error);
+                        }
+                    }
                 }
                 if let Some(sound_id) = copy_sound {
                     if let Some(sound) = self
@@ -5750,6 +5754,7 @@ impl SoundFxApp {
                     }
 
                     let mut preview_request = None;
+                    let mut drag_request = None;
 
                     for sound in &visible_sounds {
                         let selected = self.selected == Some(sound.id);
@@ -5861,9 +5866,8 @@ impl SoundFxApp {
                         if self.pending_sound_drag == Some(sound.id)
                             && Self::pointer_left_app(ui.ctx())
                         {
-                            self.queued_sound_drag = Some(sound.id);
-                            self.launch_queued_sound_drag = false;
-                            ui.ctx().request_repaint();
+                            drag_request = Some(sound.id);
+                            self.pending_sound_drag = None;
                         }
                         if response.clicked() {
                             self.selected = Some(sound.id);
@@ -5874,6 +5878,16 @@ impl SoundFxApp {
 
                     if let Some(sound_id) = preview_request {
                         self.preview_sound(sound_id);
+                    }
+                    if let Some(sound_id) = drag_request
+                        && let Some(sound) = self
+                            .sounds
+                            .iter()
+                            .find(|sound| sound.id == sound_id)
+                            .cloned()
+                        && let Err(error) = self.drag_sound_file_out(ui.ctx(), &sound)
+                    {
+                        self.set_error_status(error);
                     }
                 });
         });
@@ -6851,8 +6865,7 @@ impl SoundFxApp {
         if !ctx.input(|input| input.pointer.primary_down()) {
             return;
         }
-        let Some(pointer_pos) = Self::pointer_canvas_pos(ctx).or(self.last_pointer_canvas_pos)
-        else {
+        let Some(pointer_pos) = Self::pointer_canvas_pos(ctx) else {
             return;
         };
         let Some(sound) = self.sounds.iter().find(|sound| sound.id == sound_id) else {
@@ -6862,13 +6875,6 @@ impl SoundFxApp {
         let time = ctx.input(|input| input.time) as f32;
         let sway = vec2(time.sin() * 1.6, (time * 2.4).sin() * 1.2);
         let anchor = pointer_pos + vec2(14.0, -14.0) + sway;
-        let clip_rect = ctx.screen_rect().expand(-2.0);
-        let ghost_size = Self::sound_drag_ghost_size();
-        let ghost_rect = Rect::from_min_size(anchor, ghost_size);
-        let visible_rect = ghost_rect.intersect(clip_rect);
-        if visible_rect.is_negative() || !visible_rect.is_positive() {
-            return;
-        }
 
         ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
         egui::Area::new(egui::Id::new(("sound-drag-ghost", sound_id)))
@@ -6876,12 +6882,8 @@ impl SoundFxApp {
             .fixed_pos(anchor)
             .interactable(false)
             .show(ctx, |ui| {
-                let local_rect = Rect::from_min_size(Pos2::ZERO, ghost_size);
-                ui.scope_builder(egui::UiBuilder::new().max_rect(local_rect), |ui| {
-                    ui.set_clip_rect(ghost_rect.intersect(clip_rect));
-                    ui.set_opacity(0.96);
-                    self.draw_sound_drag_ghost_card(ui, sound);
-                });
+                ui.set_opacity(0.96);
+                self.draw_sound_drag_ghost_card(ui, sound);
             });
     }
 
@@ -9319,34 +9321,13 @@ impl eframe::App for SoundFxApp {
         self.center_window_if_needed(ctx);
         self.intercept_close_request(ctx);
         self.poll_myinstants_waveform_jobs();
-        if let Some(pointer_pos) = Self::pointer_canvas_pos(ctx) {
-            self.last_pointer_canvas_pos = Some(pointer_pos);
-        }
         if !ctx.input(|input| input.pointer.primary_down()) {
             self.pending_sound_drag = None;
-            self.queued_sound_drag = None;
-            self.launch_queued_sound_drag = false;
             self.suppress_sound_drag_until_release = false;
         } else if self.suppress_sound_drag_until_release
             && Self::pointer_primary_pressed_in_app(ctx)
         {
             self.suppress_sound_drag_until_release = false;
-        }
-        if let Some(sound_id) = self.queued_sound_drag {
-            if self.launch_queued_sound_drag {
-                if let Some(sound) = self
-                    .sounds
-                    .iter()
-                    .find(|sound| sound.id == sound_id)
-                    .cloned()
-                    && let Err(error) = self.drag_sound_file_out(ctx, &sound)
-                {
-                    self.set_error_status(error);
-                }
-            } else {
-                self.launch_queued_sound_drag = true;
-                ctx.request_repaint();
-            }
         }
 
         self.play_startup_sound_if_needed(ctx);
