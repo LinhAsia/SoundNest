@@ -1607,11 +1607,11 @@ impl SoundFxApp {
     }
 
     fn drag_sound_file_out(&mut self, ctx: &Context, sound: &SoundEffect) -> Result<()> {
-        let export_path = self.storage.export_processed_sound(sound)?;
+        let drag_path = self.storage.drag_sound_source_path(sound)?;
         self.ignored_drop_path =
-            Some(fs::canonicalize(&export_path).unwrap_or_else(|_| export_path.clone()));
+            Some(fs::canonicalize(&drag_path).unwrap_or_else(|_| drag_path.clone()));
         self.pending_sound_drag = None;
-        let result = platform::drag_file_out(&export_path);
+        let result = platform::drag_file_out(&drag_path);
         ctx.request_repaint();
         result
     }

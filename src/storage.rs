@@ -551,6 +551,14 @@ impl Storage {
         self.export_processed_sound_from_path(&sound.asset_path(&self.root_dir), sound)
     }
 
+    pub fn drag_sound_source_path(&self, sound: &SoundEffect) -> Result<PathBuf> {
+        if sound.needs_processed_export() {
+            self.export_processed_sound(sound)
+        } else {
+            Ok(sound.asset_path(&self.root_dir))
+        }
+    }
+
     pub fn export_processed_sound_from_path(
         &self,
         source_path: &Path,
