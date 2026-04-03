@@ -6889,10 +6889,12 @@ impl SoundFxApp {
             .fixed_pos(anchor)
             .interactable(false)
             .show(ctx, |ui| {
-                let (_, response) = ui.allocate_exact_size(ghost_size, Sense::hover());
-                ui.set_clip_rect(response.rect.intersect(clip_rect));
-                ui.set_opacity(0.96);
-                self.draw_sound_drag_ghost_card(ui, sound);
+                let local_rect = Rect::from_min_size(Pos2::ZERO, ghost_size);
+                ui.scope_builder(egui::UiBuilder::new().max_rect(local_rect), |ui| {
+                    ui.set_clip_rect(ghost_rect.intersect(clip_rect));
+                    ui.set_opacity(0.96);
+                    self.draw_sound_drag_ghost_card(ui, sound);
+                });
             });
     }
 
