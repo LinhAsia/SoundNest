@@ -400,7 +400,6 @@ impl SoundFxApp {
     fn with_initial_selection(mut self) -> Self {
         self.selected = self.sounds.first().map(|sound| sound.id);
         let _ = self.record_hotkey_manager.set_hotkey(self.record_hotkey);
-        self.refresh_import_audio_entries();
         self
     }
 
@@ -674,6 +673,7 @@ impl SoundFxApp {
     }
 
     fn add_sound(&mut self) {
+        self.refresh_import_audio_entries();
         self.show_import_panel = true;
     }
 
