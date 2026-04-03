@@ -13,6 +13,11 @@ mod windows_platform {
     use std::os::windows::ffi::OsStrExt;
     use std::path::Path;
     use std::ptr;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    use std::thread;
     use windows::Win32::{
         Foundation::{
             COLORREF, DRAGDROP_S_CANCEL, DRAGDROP_S_DROP, DRAGDROP_S_USEDEFAULTCURSORS, HWND,
@@ -24,29 +29,33 @@ mod windows_platform {
             DwmExtendFrameIntoClientArea, DwmSetWindowAttribute,
         },
         Graphics::Gdi::{
-            BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateDIBSection, DIB_RGB_COLORS, DeleteObject,
+            AC_SRC_ALPHA, AC_SRC_OVER, BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BLENDFUNCTION,
+            CreateCompatibleDC, CreateDIBSection, DIB_RGB_COLORS, DeleteDC, DeleteObject,
+            SelectObject,
         },
         System::{
-            Com::{CLSCTX_INPROC_SERVER, CoCreateInstance},
             Ole::{DROPEFFECT_COPY, IDropSource, IDropSource_Impl, OleInitialize, OleUninitialize},
             SystemServices::{MK_LBUTTON, MODIFIERKEYS_FLAGS},
+            Threading::Sleep,
         },
         UI::{
             Controls::MARGINS,
             Shell::{
-                CIDLData_CreateFromIDArray, CLSID_DragDropHelper, IDragSourceHelper, ILClone,
-                ILCreateFromPathW, ILFindLastID, ILFree, ILRemoveLastID, SHDRAGIMAGE, SHDoDragDrop,
+                CIDLData_CreateFromIDArray, ILClone, ILCreateFromPathW, ILFindLastID, ILFree,
+                ILRemoveLastID, SHDoDragDrop,
             },
             WindowsAndMessaging::{
-                FindWindowW, GWL_EXSTYLE, GWL_STYLE, GetWindowLongW, HWND_NOTOPMOST, HWND_TOPMOST,
-                IDC_ARROW, LoadCursorW, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE,
-                SWP_NOOWNERZORDER, SWP_NOSIZE, SetCursor, SetWindowLongW, SetWindowPos, WS_CAPTION,
-                WS_EX_APPWINDOW, WS_EX_TOOLWINDOW, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_POPUP,
+                CreateWindowExW, DestroyWindow, FindWindowW, GWL_EXSTYLE, GWL_STYLE, GetCursorPos,
+                GetWindowLongW, HWND_NOTOPMOST, HWND_TOPMOST, IDC_ARROW, LoadCursorW,
+                SW_SHOWNOACTIVATE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER,
+                SWP_NOSIZE, SetCursor, SetWindowLongW, SetWindowPos, ShowWindow, ULW_ALPHA,
+                UpdateLayeredWindow, WS_CAPTION, WS_EX_APPWINDOW, WS_EX_LAYERED, WS_EX_TOOLWINDOW,
+                WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_POPUP,
                 WS_SYSMENU, WS_THICKFRAME,
             },
         },
     };
-    use windows::core::{PCWSTR, implement};
+    use windows::core::{PCWSTR, implement, w};
 
     #[implement(IDropSource)]
     struct FileDropSource;
@@ -475,30 +484,109 @@ mod windows_platform {
         );
     }
 
-    fn try_initialize_drag_image(
-        data_object: &windows::Win32::System::Com::IDataObject,
-        spec: &DragGhostSpec,
-    ) -> Result<()> {
-        let (bitmap, width, height) = create_drag_ghost_bitmap(spec)?;
-        let drag_helper: IDragSourceHelper = unsafe {
-            CoCreateInstance(&CLSID_DragDropHelper, None, CLSCTX_INPROC_SERVER)
-                .context("unable to create drag source helper")?
-        };
-        let drag_image = SHDRAGIMAGE {
-            sizeDragImage: SIZE {
-                cx: width,
-                cy: height,
-            },
-            ptOffset: POINT { x: 18, y: 18 },
-            hbmpDragImage: bitmap,
-            crColorKey: COLORREF(0),
-        };
-        unsafe {
-            let result = drag_helper.InitializeFromBitmap(&drag_image, data_object);
-            let _ = DeleteObject(bitmap.into());
-            result.context("unable to initialize drag ghost image")?;
+    struct DragOverlayGuard {
+        stop: Arc<AtomicBool>,
+        worker: Option<thread::JoinHandle<()>>,
+    }
+
+    impl Drop for DragOverlayGuard {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::Relaxed);
+            if let Some(worker) = self.worker.take() {
+                let _ = worker.join();
+            }
         }
-        Ok(())
+    }
+
+    fn start_drag_overlay(spec: &DragGhostSpec) -> Option<DragOverlayGuard> {
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_for_thread = Arc::clone(&stop);
+        let spec = spec.clone();
+        let worker = thread::Builder::new()
+            .name("sound-drag-overlay".to_owned())
+            .spawn(move || unsafe {
+                let Ok((bitmap, width, height)) = create_drag_ghost_bitmap(&spec) else {
+                    return;
+                };
+                let mem_dc = CreateCompatibleDC(None);
+                if mem_dc.0.is_null() {
+                    let _ = DeleteObject(bitmap.into());
+                    return;
+                }
+                let old_bitmap = SelectObject(mem_dc, bitmap.into());
+                let hwnd = match CreateWindowExW(
+                    WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
+                    w!("STATIC"),
+                    w!(""),
+                    WS_POPUP,
+                    0,
+                    0,
+                    width,
+                    height,
+                    None,
+                    None,
+                    None,
+                    None,
+                ) {
+                    Ok(hwnd) => hwnd,
+                    Err(_) => {
+                        if !old_bitmap.0.is_null() {
+                            let _ = SelectObject(mem_dc, old_bitmap);
+                        }
+                        let _ = DeleteDC(mem_dc);
+                        let _ = DeleteObject(bitmap.into());
+                        return;
+                    }
+                };
+                let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+
+                let source_origin = POINT { x: 0, y: 0 };
+                let bitmap_size = SIZE {
+                    cx: width,
+                    cy: height,
+                };
+                let blend = BLENDFUNCTION {
+                    BlendOp: AC_SRC_OVER as u8,
+                    BlendFlags: 0,
+                    SourceConstantAlpha: 255,
+                    AlphaFormat: AC_SRC_ALPHA as u8,
+                };
+
+                while !stop_for_thread.load(Ordering::Relaxed) {
+                    let mut cursor = POINT::default();
+                    if GetCursorPos(&mut cursor).is_ok() {
+                        let position = POINT {
+                            x: cursor.x + 18,
+                            y: cursor.y - 18,
+                        };
+                        let _ = UpdateLayeredWindow(
+                            hwnd,
+                            None,
+                            Some(&position),
+                            Some(&bitmap_size),
+                            Some(mem_dc),
+                            Some(&source_origin),
+                            COLORREF(0),
+                            Some(&blend),
+                            ULW_ALPHA,
+                        );
+                    }
+                    Sleep(8);
+                }
+
+                let _ = DestroyWindow(hwnd);
+                if !old_bitmap.0.is_null() {
+                    let _ = SelectObject(mem_dc, old_bitmap);
+                }
+                let _ = DeleteDC(mem_dc);
+                let _ = DeleteObject(bitmap.into());
+            })
+            .ok()?;
+
+        Some(DragOverlayGuard {
+            stop,
+            worker: Some(worker),
+        })
     }
 
     pub fn drag_file_out(path: &Path, ghost: Option<&DragGhostSpec>) -> Result<()> {
@@ -552,9 +640,7 @@ mod windows_platform {
                 let data_object =
                     CIDLData_CreateFromIDArray(parent_pidl as *const _, Some(&child_items))
                         .context("unable to build drag payload")?;
-                if let Some(spec) = ghost {
-                    let _ = try_initialize_drag_image(&data_object, spec);
-                }
+                let _overlay_guard = ghost.and_then(start_drag_overlay);
                 let drop_source: IDropSource = FileDropSource.into();
                 let _ = SHDoDragDrop(None, &data_object, &drop_source, DROPEFFECT_COPY)
                     .context("unable to start drag and drop")?;
