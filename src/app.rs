@@ -6772,8 +6772,12 @@ impl SoundFxApp {
         }
     }
 
+    fn sound_drag_ghost_size() -> Vec2 {
+        vec2(164.0, 176.0)
+    }
+
     fn draw_sound_drag_ghost_card(&self, ui: &mut Ui, sound: &SoundEffect) {
-        let card_size = vec2(164.0, 176.0);
+        let card_size = Self::sound_drag_ghost_size();
         let waveform_preview = Self::trimmed_waveform_preview(sound);
 
         Frame::new()
@@ -6872,6 +6876,12 @@ impl SoundFxApp {
         let sway = vec2(time.sin() * 1.6, (time * 2.4).sin() * 1.2);
         let anchor = pointer_pos + vec2(14.0, -14.0) + sway;
         let clip_rect = ctx.screen_rect().expand(-2.0);
+        let ghost_size = Self::sound_drag_ghost_size();
+        let ghost_rect = Rect::from_min_size(anchor, ghost_size);
+        let visible_rect = ghost_rect.intersect(clip_rect);
+        if visible_rect.is_negative() || !visible_rect.is_positive() {
+            return;
+        }
 
         ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
         egui::Area::new(egui::Id::new(("sound-drag-ghost", sound_id)))
@@ -6879,7 +6889,8 @@ impl SoundFxApp {
             .fixed_pos(anchor)
             .interactable(false)
             .show(ctx, |ui| {
-                ui.set_clip_rect(clip_rect);
+                let (_, response) = ui.allocate_exact_size(ghost_size, Sense::hover());
+                ui.set_clip_rect(response.rect.intersect(clip_rect));
                 ui.set_opacity(0.96);
                 self.draw_sound_drag_ghost_card(ui, sound);
             });
