@@ -5101,10 +5101,7 @@ impl SoundFxApp {
                             if hovered {
                                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
                             }
-                            if !modal_open
-                                && (body_response.is_pointer_button_down_on()
-                                    || pointer_drag_active)
-                            {
+                            if !modal_open && body_response.is_pointer_button_down_on() {
                                 self.pending_sound_drag = Some(sound.id);
                             }
                             if !modal_open
@@ -5813,7 +5810,7 @@ impl SoundFxApp {
                         );
                         let pointer_drag_active =
                             Self::pointer_drag_active(ui.ctx(), frame.response.rect);
-                        if response.is_pointer_button_down_on() || pointer_drag_active {
+                        if response.is_pointer_button_down_on() {
                             self.pending_sound_drag = Some(sound.id);
                         }
                         if response.hovered() {
