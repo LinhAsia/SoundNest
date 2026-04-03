@@ -1473,24 +1473,6 @@ impl SoundFxApp {
         })
     }
 
-    fn pointer_left_app(ctx: &Context) -> bool {
-        let app_rect = ctx.screen_rect().expand(4.0);
-        ctx.input(|input| {
-            if !input.pointer.primary_down() {
-                return false;
-            }
-            match input
-                .pointer
-                .hover_pos()
-                .or_else(|| input.pointer.interact_pos())
-                .or_else(|| input.pointer.latest_pos())
-            {
-                Some(pos) => !app_rect.contains(pos),
-                None => true,
-            }
-        })
-    }
-
     fn pointer_primary_pressed_in_app(ctx: &Context) -> bool {
         let app_rect = ctx.screen_rect().expand(4.0);
         ctx.input(|input| {
@@ -5142,7 +5124,8 @@ impl SoundFxApp {
                             }
                             if !modal_open
                                 && self.pending_sound_drag == Some(sound.id)
-                                && Self::pointer_left_app(ui.ctx())
+                                && !self.suppress_sound_drag_until_release
+                                && (body_response.dragged() || pointer_drag_active)
                             {
                                 drag_sound = Some(sound.id);
                                 self.pending_sound_drag = None;
@@ -5858,7 +5841,8 @@ impl SoundFxApp {
                             ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
                         }
                         if self.pending_sound_drag == Some(sound.id)
-                            && Self::pointer_left_app(ui.ctx())
+                            && !self.suppress_sound_drag_until_release
+                            && (response.dragged() || pointer_drag_active)
                         {
                             drag_request = Some(sound.id);
                             self.pending_sound_drag = None;
