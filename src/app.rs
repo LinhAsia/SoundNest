@@ -3287,6 +3287,7 @@ impl SoundFxApp {
                             &mut preview_cursor_secs,
                             &mut trim_timeline_zoom,
                             !is_playing,
+                            true,
                         );
                         changed |= timeline_changed;
                         seek_request |= timeline_seek_request;
@@ -5907,6 +5908,7 @@ impl SoundFxApp {
         let mut seek_request = false;
         let mut changed = false;
         let mut trim_timeline_zoom = self.trim_timeline_zoom;
+        let editor_timeline_interactive = !self.has_modal_panel();
 
         Frame::new()
             .fill(Self::surface_fill())
@@ -5973,6 +5975,7 @@ impl SoundFxApp {
                             &mut preview_cursor_secs,
                             &mut trim_timeline_zoom,
                             !is_playing,
+                            editor_timeline_interactive,
                         );
                         changed |= timeline_changed;
                         seek_request |= timeline_seek_request;
@@ -6090,6 +6093,7 @@ impl SoundFxApp {
         preview_cursor_secs: &mut f32,
         zoom: &mut f32,
         clamp_cursor_to_trim: bool,
+        interactive: bool,
     ) -> (bool, bool) {
         sound.clamp_trim();
         let duration = sound.safe_duration();
@@ -6263,9 +6267,9 @@ impl SoundFxApp {
                         Sense::click_and_drag(),
                     );
 
-                    let pointer_pos = ui
-                        .ctx()
-                        .input(|input| input.pointer.hover_pos())
+                    let pointer_pos = interactive
+                        .then(|| ui.ctx().input(|input| input.pointer.hover_pos()))
+                        .flatten()
                         .filter(|pos| viewport_rect.contains(*pos));
                     let pointer_time = pointer_pos.map(|pointer| {
                         let ratio = ((pointer.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
@@ -6286,10 +6290,11 @@ impl SoundFxApp {
                     } else {
                         Color32::from_rgba_premultiplied(42, 39, 44, 110)
                     };
-                    let pan_left = ui.input(|input| input.key_down(egui::Key::A));
-                    let pan_right = ui.input(|input| input.key_down(egui::Key::D));
+                    let pan_left = interactive && ui.input(|input| input.key_down(egui::Key::A));
+                    let pan_right = interactive && ui.input(|input| input.key_down(egui::Key::D));
                     let keyboard_panning = pan_left ^ pan_right;
-                    let timeline_hovered = response.hovered() || pointer_pos.is_some();
+                    let timeline_hovered =
+                        interactive && (response.hovered() || pointer_pos.is_some());
                     let showing_hover_preview = pointer_pos.is_some()
                         && !keyboard_panning
                         && !start_response.is_pointer_button_down_on()
@@ -6350,7 +6355,7 @@ impl SoundFxApp {
                         ui.ctx().request_repaint();
                     }
 
-                    if pointer_pos.is_some() && !ui.ctx().wants_keyboard_input() {
+                    if interactive && pointer_pos.is_some() && !ui.ctx().wants_keyboard_input() {
                         let zoom_delta = ui.input(|input| {
                             if input.modifiers.ctrl {
                                 input.raw_scroll_delta.y
@@ -6403,7 +6408,8 @@ impl SoundFxApp {
                         }
                     }
 
-                    if duration > 0.0
+                    if interactive
+                        && duration > 0.0
                         && let Some(pointer) = start_response.interact_pointer_pos()
                         && (start_response.clicked() || start_response.dragged())
                     {
@@ -6414,7 +6420,8 @@ impl SoundFxApp {
                         changed = true;
                         ui.ctx()
                             .data_mut(|data| data.remove::<bool>(playhead_drag_id));
-                    } else if duration > 0.0
+                    } else if interactive
+                        && duration > 0.0
                         && let Some(pointer) = end_response.interact_pointer_pos()
                         && (end_response.clicked() || end_response.dragged())
                     {
@@ -6425,7 +6432,8 @@ impl SoundFxApp {
                         changed = true;
                         ui.ctx()
                             .data_mut(|data| data.remove::<bool>(playhead_drag_id));
-                    } else if !start_response.is_pointer_button_down_on()
+                    } else if interactive
+                        && !start_response.is_pointer_button_down_on()
                         && !end_response.is_pointer_button_down_on()
                         && duration > 0.0
                         && let Some(pointer) = response.interact_pointer_pos()
@@ -6443,7 +6451,8 @@ impl SoundFxApp {
                         }
                     }
 
-                    if response.drag_stopped()
+                    if interactive
+                        && response.drag_stopped()
                         && ui
                             .ctx()
                             .data(|data| data.get_temp::<bool>(playhead_drag_id))
@@ -6454,7 +6463,7 @@ impl SoundFxApp {
                             .data_mut(|data| data.remove::<bool>(playhead_drag_id));
                     }
 
-                    if !ui.input(|input| input.pointer.primary_down()) {
+                    if !interactive || !ui.input(|input| input.pointer.primary_down()) {
                         ui.ctx()
                             .data_mut(|data| data.remove::<bool>(playhead_drag_id));
                     }
