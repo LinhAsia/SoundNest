@@ -205,6 +205,7 @@ pub struct SoundFxApp {
     settings_exit_candidate: Option<Uuid>,
     library_audio_query: String,
     library_video_query: String,
+    last_pointer_canvas_pos: Option<Pos2>,
     pending_sound_drag: Option<Uuid>,
     queued_sound_drag: Option<Uuid>,
     launch_queued_sound_drag: bool,
@@ -388,6 +389,7 @@ impl SoundFxApp {
             settings_exit_candidate: None,
             library_audio_query: String::new(),
             library_video_query: String::new(),
+            last_pointer_canvas_pos: None,
             pending_sound_drag: None,
             queued_sound_drag: None,
             launch_queued_sound_drag: false,
@@ -6849,7 +6851,8 @@ impl SoundFxApp {
         if !ctx.input(|input| input.pointer.primary_down()) {
             return;
         }
-        let Some(pointer_pos) = Self::pointer_canvas_pos(ctx) else {
+        let Some(pointer_pos) = Self::pointer_canvas_pos(ctx).or(self.last_pointer_canvas_pos)
+        else {
             return;
         };
         let Some(sound) = self.sounds.iter().find(|sound| sound.id == sound_id) else {
@@ -9316,6 +9319,9 @@ impl eframe::App for SoundFxApp {
         self.center_window_if_needed(ctx);
         self.intercept_close_request(ctx);
         self.poll_myinstants_waveform_jobs();
+        if let Some(pointer_pos) = Self::pointer_canvas_pos(ctx) {
+            self.last_pointer_canvas_pos = Some(pointer_pos);
+        }
         if !ctx.input(|input| input.pointer.primary_down()) {
             self.pending_sound_drag = None;
             self.queued_sound_drag = None;
