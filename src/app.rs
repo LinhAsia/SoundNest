@@ -23,6 +23,8 @@ use eframe::epaint::Shadow;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 #[cfg(windows)]
+use std::os::windows::fs::MetadataExt;
+#[cfg(windows)]
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -2709,24 +2711,48 @@ impl SoundFxApp {
             return;
         }
 
-        Self::collect_audio_files_recursive(&self.import_dir, &mut self.import_audio_entries);
-        self.import_audio_entries
-            .sort_by(|left, right| left.cmp(right));
-    }
-
-    fn collect_audio_files_recursive(root: &Path, output: &mut Vec<PathBuf>) {
-        let Ok(entries) = fs::read_dir(root) else {
+        let Ok(entries) = fs::read_dir(&self.import_dir) else {
             return;
         };
 
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                Self::collect_audio_files_recursive(&path, output);
-            } else if is_supported_audio(&path) {
-                output.push(path);
+        self.import_audio_entries = entries
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| !Self::should_skip_import_path(path))
+            .filter(|path| path.is_dir() || is_supported_audio(path))
+            .collect();
+
+        self.import_audio_entries.sort_by(|left, right| {
+            right
+                .is_dir()
+                .cmp(&left.is_dir())
+                .then_with(|| left.file_name().cmp(&right.file_name()))
+        });
+    }
+
+    fn should_skip_import_path(path: &Path) -> bool {
+        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+            return true;
+        };
+        if name.starts_with('$') {
+            return true;
+        }
+        if matches!(
+            name,
+            "System Volume Information" | "Recovery" | "Config.Msi" | "MSOCache"
+        ) {
+            return true;
+        }
+        #[cfg(windows)]
+        if let Ok(metadata) = fs::metadata(path) {
+            let attrs = metadata.file_attributes();
+            const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
+            const FILE_ATTRIBUTE_SYSTEM: u32 = 0x4;
+            if attrs & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM) != 0 {
+                return true;
             }
         }
+        false
     }
 
     fn render_import_panel(&mut self, ctx: &Context) {
@@ -2736,6 +2762,7 @@ impl SoundFxApp {
 
         let mut open_panel = self.show_import_panel;
         let mut go_up = false;
+        let mut next_dir = None;
         let mut import_file = None;
         let mut close_request = false;
         let mut switch_root = None;
@@ -2874,16 +2901,11 @@ impl SoundFxApp {
                         }
 
                         for path in &self.import_audio_entries {
+                            let is_dir = path.is_dir();
                             let label = path
-                                .strip_prefix(&self.import_dir)
-                                .ok()
+                                .file_name()
                                 .and_then(|value| value.to_str())
-                                .filter(|value| !value.is_empty())
-                                .unwrap_or_else(|| {
-                                    path.file_name()
-                                        .and_then(|value| value.to_str())
-                                        .unwrap_or("sound")
-                                });
+                                .unwrap_or(if is_dir { "folder" } else { "sound" });
                             let row = Frame::new()
                                 .fill(Self::surface_fill())
                                 .stroke(Stroke::new(1.0, Self::border_color()))
@@ -2892,7 +2914,7 @@ impl SoundFxApp {
                                 .show(ui, |ui| {
                                     ui.horizontal(|ui| {
                                         ui.label(Self::icon(
-                                            0xeb82,
+                                            if is_dir { 0xe2c8 } else { 0xeb82 },
                                             18.0,
                                             Color32::from_rgb(214, 51, 132),
                                         ));
@@ -2914,7 +2936,11 @@ impl SoundFxApp {
                                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                             }
                             if response.clicked() {
-                                import_file = Some(path.clone());
+                                if is_dir {
+                                    next_dir = Some(path.clone());
+                                } else {
+                                    import_file = Some(path.clone());
+                                }
                             }
                             ui.add_space(10.0);
                         }
@@ -2932,6 +2958,9 @@ impl SoundFxApp {
         }
         if let Some(root) = switch_root {
             self.set_import_dir(Some(root));
+        }
+        if let Some(dir) = next_dir {
+            self.set_import_dir(Some(dir));
         }
         if let Some(path) = import_file {
             self.import_paths(vec![path]);
