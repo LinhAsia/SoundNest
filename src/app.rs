@@ -5192,6 +5192,7 @@ impl SoundFxApp {
                             }
                             if !modal_open
                                 && self.pending_sound_drag == Some(sound.id)
+                                && pointer_hover
                                 && ui.ctx().input(|input| input.pointer.primary_down())
                             {
                                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
@@ -5909,6 +5910,7 @@ impl SoundFxApp {
                             ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
                         }
                         if self.pending_sound_drag == Some(sound.id)
+                            && pointer_hover
                             && ui.ctx().input(|input| input.pointer.primary_down())
                         {
                             ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
