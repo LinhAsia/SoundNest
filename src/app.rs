@@ -207,7 +207,6 @@ pub struct SoundFxApp {
     library_audio_query: String,
     library_video_query: String,
     pending_sound_drag: Option<Uuid>,
-    suppress_sound_drag_until_release: bool,
     ignored_drop_path: Option<PathBuf>,
     reveal_record_review_on_open: bool,
     startup_sound_played: bool,
@@ -388,7 +387,6 @@ impl SoundFxApp {
             library_audio_query: String::new(),
             library_video_query: String::new(),
             pending_sound_drag: None,
-            suppress_sound_drag_until_release: false,
             ignored_drop_path: None,
             reveal_record_review_on_open: false,
             startup_sound_played: false,
@@ -1452,17 +1450,6 @@ impl SoundFxApp {
         self.myinstants_preview_audio_url = None;
     }
 
-    fn pointer_primary_pressed_in_app(ctx: &Context) -> bool {
-        let app_rect = ctx.screen_rect().expand(4.0);
-        ctx.input(|input| {
-            input.pointer.button_pressed(egui::PointerButton::Primary)
-                && input
-                    .pointer
-                    .press_origin()
-                    .is_some_and(|pos| app_rect.contains(pos))
-        })
-    }
-
     fn library_query_matches(name: &str, query: &str) -> bool {
         let query = query.trim();
         if query.is_empty() {
@@ -1585,7 +1572,6 @@ impl SoundFxApp {
         self.ignored_drop_path =
             Some(fs::canonicalize(&drag_path).unwrap_or_else(|_| drag_path.clone()));
         self.pending_sound_drag = None;
-        self.suppress_sound_drag_until_release = true;
         let drag_ghost = platform::DragGhostSpec {
             waveform: Self::trimmed_waveform_preview(sound),
             dark_theme: self.dark_theme,
@@ -5181,14 +5167,10 @@ impl SoundFxApp {
                             if hovered {
                                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
                             }
-                            if !modal_open
-                                && !self.suppress_sound_drag_until_release
-                                && body_response.drag_started()
-                            {
+                            if !modal_open && body_response.drag_started() {
                                 self.pending_sound_drag = Some(sound.id);
                             }
                             if !modal_open
-                                && !self.suppress_sound_drag_until_release
                                 && (body_response.dragged()
                                     || (self.pending_sound_drag == Some(sound.id)
                                         && body_response.is_pointer_button_down_on()))
@@ -5197,7 +5179,6 @@ impl SoundFxApp {
                             }
                             if !modal_open
                                 && self.pending_sound_drag == Some(sound.id)
-                                && !self.suppress_sound_drag_until_release
                                 && body_response.dragged()
                             {
                                 drag_sound = Some(sound.id);
@@ -5897,21 +5878,19 @@ impl SoundFxApp {
                             .ctx()
                             .input(|input| input.pointer.hover_pos())
                             .is_some_and(|pos| frame.response.rect.contains(pos));
-                        if !self.suppress_sound_drag_until_release && response.drag_started() {
+                        if response.drag_started() {
                             self.pending_sound_drag = Some(sound.id);
                         }
                         if pointer_hover {
                             ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
                         }
-                        if !self.suppress_sound_drag_until_release
-                            && (response.dragged()
-                                || (self.pending_sound_drag == Some(sound.id)
-                                    && response.is_pointer_button_down_on()))
+                        if response.dragged()
+                            || (self.pending_sound_drag == Some(sound.id)
+                                && response.is_pointer_button_down_on())
                         {
                             ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
                         }
                         if self.pending_sound_drag == Some(sound.id)
-                            && !self.suppress_sound_drag_until_release
                             && response.dragged()
                         {
                             drag_request = Some(sound.id);
@@ -9268,11 +9247,6 @@ impl eframe::App for SoundFxApp {
         self.poll_myinstants_waveform_jobs();
         if !ctx.input(|input| input.pointer.primary_down()) {
             self.pending_sound_drag = None;
-            self.suppress_sound_drag_until_release = false;
-        } else if self.suppress_sound_drag_until_release
-            && Self::pointer_primary_pressed_in_app(ctx)
-        {
-            self.suppress_sound_drag_until_release = false;
         }
 
         self.play_startup_sound_if_needed(ctx);
