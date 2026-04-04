@@ -5104,6 +5104,7 @@ impl SoundFxApp {
         ui.add_space(12.0);
 
         ScrollArea::vertical()
+            .drag_to_scroll(false)
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 if self.library_tab == LibraryTab::Videos {
