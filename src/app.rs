@@ -1459,6 +1459,16 @@ impl SoundFxApp {
             .contains(&query.to_ascii_lowercase())
     }
 
+    fn pointer_primary_pressed_within(ctx: &Context, rect: Rect) -> bool {
+        ctx.input(|input| {
+            input.pointer.button_pressed(egui::PointerButton::Primary)
+                && input
+                    .pointer
+                    .press_origin()
+                    .is_some_and(|pos| rect.contains(pos))
+        })
+    }
+
     fn reveal_window(ctx: &Context) {
         ctx.send_viewport_cmd(ViewportCommand::Visible(true));
         ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
@@ -5167,7 +5177,9 @@ impl SoundFxApp {
                             if hovered {
                                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
                             }
-                            if !modal_open && body_response.drag_started() {
+                            if !modal_open
+                                && Self::pointer_primary_pressed_within(ui.ctx(), body_rect)
+                            {
                                 self.pending_sound_drag = Some(sound.id);
                             }
                             if !modal_open
@@ -5878,7 +5890,7 @@ impl SoundFxApp {
                             .ctx()
                             .input(|input| input.pointer.hover_pos())
                             .is_some_and(|pos| frame.response.rect.contains(pos));
-                        if response.drag_started() {
+                        if Self::pointer_primary_pressed_within(ui.ctx(), frame.response.rect) {
                             self.pending_sound_drag = Some(sound.id);
                         }
                         if pointer_hover {
@@ -5890,9 +5902,7 @@ impl SoundFxApp {
                         {
                             ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
                         }
-                        if self.pending_sound_drag == Some(sound.id)
-                            && response.dragged()
-                        {
+                        if self.pending_sound_drag == Some(sound.id) && response.dragged() {
                             drag_request = Some(sound.id);
                             self.pending_sound_drag = None;
                         }
