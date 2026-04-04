@@ -2060,6 +2060,7 @@ impl SoundFxApp {
         } else {
             Color32::from_rgba_premultiplied(68, 27, 56, 48)
         };
+        style.interaction.selectable_labels = false;
         style.interaction.show_tooltips_only_when_still = false;
         style.interaction.tooltip_delay = 0.0;
         style.interaction.tooltip_grace_time = 0.8;
@@ -5165,12 +5166,8 @@ impl SoundFxApp {
                         for sound in row {
                             let (tile_rect, _tile_response) =
                                 ui.allocate_exact_size(vec2(card_size, card_size), Sense::hover());
-                            let body_rect = Rect::from_min_max(
-                                tile_rect.min,
-                                Pos2::new(tile_rect.max.x, tile_rect.max.y - 46.0),
-                            );
                             let body_response = ui.interact(
-                                body_rect,
+                                tile_rect,
                                 ui.id().with(("library-grid", sound.id)),
                                 if modal_open {
                                     Sense::hover()
@@ -5189,7 +5186,7 @@ impl SoundFxApp {
                                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
                             }
                             if !modal_open
-                                && Self::pointer_primary_pressed_within(ui.ctx(), body_rect)
+                                && Self::pointer_primary_pressed_within(ui.ctx(), tile_rect)
                             {
                                 self.pending_sound_drag = Some(sound.id);
                             }
@@ -5211,6 +5208,7 @@ impl SoundFxApp {
                             }
 
                             ui.scope_builder(egui::UiBuilder::new().max_rect(tile_rect), |ui| {
+                                ui.style_mut().interaction.selectable_labels = false;
                                 let fill = if hovered {
                                     Color32::from_rgb(227, 82, 149)
                                 } else {
@@ -5318,6 +5316,9 @@ impl SoundFxApp {
                                         });
                                     });
                             });
+                            if hovered {
+                                ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+                            }
                         }
                     });
 
@@ -5850,6 +5851,7 @@ impl SoundFxApp {
                             .corner_radius(28.0)
                             .inner_margin(Margin::same(18))
                             .show(ui, |ui| {
+                                ui.style_mut().interaction.selectable_labels = false;
                                 ui.label(
                                     RichText::new(&sound.name)
                                         .size(16.5)
