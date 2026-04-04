@@ -5814,6 +5814,7 @@ impl SoundFxApp {
                         return;
                     }
 
+                    let modal_open = self.has_modal_panel();
                     let mut preview_request = None;
                     let mut drag_request = None;
 
