@@ -2546,6 +2546,7 @@ impl SoundFxApp {
                 );
                 Self::decorate_button_response(ui, &spn_response);
                 if spn_response.clicked() {
+                    self.refresh_pitch_capture_devices();
                     self.show_pitch_panel = !self.show_pitch_panel;
                 }
 
@@ -2566,6 +2567,7 @@ impl SoundFxApp {
                 }
 
                 if Self::icon_titlebar(ui, [42.0, 30.0], 0xe061, false, false).clicked() {
+                    self.refresh_record_capture_devices();
                     self.show_record_panel = true;
                 }
 
