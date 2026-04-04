@@ -2403,7 +2403,11 @@ impl SoundFxApp {
     }
 
     fn decorate_button_response(ui: &Ui, response: &egui::Response) {
-        if response.hovered() {
+        let pointer_over = ui
+            .ctx()
+            .input(|input| input.pointer.latest_pos().or(input.pointer.hover_pos()))
+            .is_some_and(|pos| response.rect.contains(pos));
+        if pointer_over {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             Self::paint_hover_button_notes(
                 ui.painter(),
