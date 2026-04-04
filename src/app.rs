@@ -15,9 +15,8 @@ use anyhow::{Context as _, Result};
 use clipboard_win::{Clipboard, Setter, formats::FileList};
 use eframe::egui::{
     self, Align, Button, CentralPanel, Color32, ComboBox, Context, CornerRadius, FontFamily, Frame,
-    Margin, Pos2, ProgressBar, Rect, RichText, ScrollArea, Sense, Slider, Stroke, StrokeKind,
-    TextEdit, TextureHandle, Ui, Vec2, ViewportBuilder, ViewportClass, ViewportCommand, ViewportId,
-    vec2,
+    Margin, Pos2, ProgressBar, Rect, RichText, ScrollArea, Sense, Stroke, StrokeKind, TextEdit,
+    TextureHandle, Ui, Vec2, ViewportBuilder, ViewportClass, ViewportCommand, ViewportId, vec2,
 };
 use eframe::epaint::Shadow;
 use std::collections::{HashMap, HashSet};
@@ -2140,6 +2139,67 @@ impl SoundFxApp {
         .inner
     }
 
+    fn click_slider(
+        ui: &mut Ui,
+        value: &mut f32,
+        range: std::ops::RangeInclusive<f32>,
+        step: f32,
+        size: Vec2,
+    ) -> egui::Response {
+        let desired_size = vec2(size.x.max(48.0), size.y.max(20.0));
+        let (rect, mut response) = ui.allocate_exact_size(desired_size, Sense::click());
+        let dark_theme = Self::dark_theme_enabled();
+        let track_rect = Rect::from_center_size(rect.center(), vec2(rect.width(), 8.0));
+        let min = *range.start();
+        let max = *range.end();
+        let span = (max - min).max(f32::EPSILON);
+        let normalized = ((*value - min) / span).clamp(0.0, 1.0);
+        let knob_x = egui::lerp(track_rect.left()..=track_rect.right(), normalized);
+        let knob_center = Pos2::new(knob_x, track_rect.center().y);
+        let track_fill = if dark_theme {
+            Color32::from_rgb(244, 240, 247)
+        } else {
+            Color32::from_rgb(237, 231, 238)
+        };
+        let active_fill = Color32::from_rgb(227, 82, 149);
+        let knob_fill = if response.hovered() {
+            Color32::from_rgb(255, 248, 252)
+        } else {
+            Color32::WHITE
+        };
+        let painter = ui.painter_at(rect);
+        painter.rect_filled(track_rect, 4.0, track_fill);
+        painter.rect_filled(
+            Rect::from_min_max(track_rect.min, Pos2::new(knob_x, track_rect.max.y)),
+            4.0,
+            active_fill,
+        );
+        painter.circle_filled(knob_center, 8.0, knob_fill);
+        painter.circle_stroke(knob_center, 8.0, Stroke::new(1.5, active_fill));
+
+        if response.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        if response.clicked()
+            && let Some(pointer) = response.interact_pointer_pos()
+        {
+            let ratio = ((pointer.x - track_rect.left()) / track_rect.width()).clamp(0.0, 1.0);
+            let raw = min + span * ratio;
+            let stepped = if step > 0.0 {
+                min + ((raw - min) / step).round() * step
+            } else {
+                raw
+            };
+            let next = stepped.clamp(min, max);
+            if (*value - next).abs() > f32::EPSILON {
+                *value = next;
+                response.mark_changed();
+            }
+        }
+
+        response
+    }
+
     fn with_dark_combo_visuals<R>(ui: &mut Ui, add_contents: impl FnOnce(&mut Ui) -> R) -> R {
         ui.scope(|ui| {
             if Self::dark_theme_enabled() {
@@ -3310,10 +3370,12 @@ impl SoundFxApp {
                         Self::with_slider_visuals(ui, |ui| {
                             ui.horizontal(|ui| {
                                 ui.label(Self::icon(0xe050, 16.0, Self::muted_text_color()));
-                                let volume_response = ui.add(
-                                    Slider::new(&mut draft.sound.volume, 0.0..=5.0)
-                                        .show_value(false)
-                                        .step_by(0.01),
+                                let volume_response = Self::click_slider(
+                                    ui,
+                                    &mut draft.sound.volume,
+                                    0.0..=5.0,
+                                    0.01,
+                                    vec2(128.0, 24.0),
                                 );
                                 ui.label(
                                     RichText::new(format!("{:.0}%", draft.sound.volume * 100.0))
@@ -3322,10 +3384,12 @@ impl SoundFxApp {
                                 );
                                 ui.add_space(10.0);
                                 ui.label(Self::icon(0xe9e4, 16.0, Self::muted_text_color()));
-                                let speed_response = ui.add(
-                                    Slider::new(&mut draft.sound.speed, 0.25..=2.0)
-                                        .show_value(false)
-                                        .step_by(0.01),
+                                let speed_response = Self::click_slider(
+                                    ui,
+                                    &mut draft.sound.speed,
+                                    0.25..=2.0,
+                                    0.01,
+                                    vec2(128.0, 24.0),
                                 );
                                 ui.label(
                                     RichText::new(format!("{:.2}x", draft.sound.speed))
@@ -4265,10 +4329,12 @@ impl SoundFxApp {
                     Self::with_slider_visuals(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.label(Self::icon(0xe8b5, 16.0, Self::muted_text_color()));
-                            let speed_response = ui.add(
-                                Slider::new(&mut self.pitch_update_hz, 1.0..=12.0)
-                                    .show_value(false)
-                                    .step_by(0.5),
+                            let speed_response = Self::click_slider(
+                                ui,
+                                &mut self.pitch_update_hz,
+                                1.0..=12.0,
+                                0.5,
+                                vec2(164.0, 24.0),
                             );
                             ui.label(
                                 RichText::new(format!("{:.1}/s", self.pitch_update_hz))
@@ -4995,11 +5061,12 @@ impl SoundFxApp {
 
             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                 Self::with_slider_visuals(ui, |ui| {
-                    let scale_response = ui.add_sized(
-                        [112.0, 28.0],
-                        Slider::new(&mut self.library_grid_scale, 0.72..=1.1)
-                            .show_value(false)
-                            .step_by(0.01),
+                    let scale_response = Self::click_slider(
+                        ui,
+                        &mut self.library_grid_scale,
+                        0.72..=1.1,
+                        0.01,
+                        vec2(112.0, 28.0),
                     );
                     scale_changed = scale_response.changed();
                     ui.add_space(8.0);
@@ -5993,10 +6060,12 @@ impl SoundFxApp {
                         Self::with_slider_visuals(ui, |ui| {
                             ui.horizontal(|ui| {
                                 ui.label(Self::icon(0xe050, 16.0, Self::muted_text_color()));
-                                let volume_response = ui.add(
-                                    Slider::new(&mut sound.volume, 0.0..=5.0)
-                                        .show_value(false)
-                                        .step_by(0.01),
+                                let volume_response = Self::click_slider(
+                                    ui,
+                                    &mut sound.volume,
+                                    0.0..=5.0,
+                                    0.01,
+                                    vec2(128.0, 24.0),
                                 );
                                 ui.label(
                                     RichText::new(format!("{:.0}%", sound.volume * 100.0))
@@ -6005,10 +6074,12 @@ impl SoundFxApp {
                                 );
                                 ui.add_space(10.0);
                                 ui.label(Self::icon(0xe9e4, 16.0, Self::muted_text_color()));
-                                let speed_response = ui.add(
-                                    Slider::new(&mut sound.speed, 0.25..=2.0)
-                                        .show_value(false)
-                                        .step_by(0.01),
+                                let speed_response = Self::click_slider(
+                                    ui,
+                                    &mut sound.speed,
+                                    0.25..=2.0,
+                                    0.01,
+                                    vec2(128.0, 24.0),
                                 );
                                 ui.label(
                                     RichText::new(format!("{:.2}x", sound.speed))
