@@ -5909,25 +5909,29 @@ impl SoundFxApp {
                             .ctx()
                             .input(|input| input.pointer.hover_pos())
                             .is_some_and(|pos| frame.response.rect.contains(pos));
-                        if Self::pointer_primary_pressed_within(ui.ctx(), frame.response.rect) {
+                        if !modal_open
+                            && Self::pointer_primary_pressed_within(ui.ctx(), frame.response.rect)
+                        {
                             self.pending_sound_drag = Some(sound.id);
                         }
-                        if pointer_hover {
+                        if !modal_open && pointer_hover {
                             ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
                         }
-                        if self.pending_sound_drag == Some(sound.id)
+                        if !modal_open
+                            && self.pending_sound_drag == Some(sound.id)
                             && pointer_hover
                             && ui.ctx().input(|input| input.pointer.primary_down())
                         {
                             ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
                         }
-                        if self.pending_sound_drag == Some(sound.id)
+                        if !modal_open
+                            && self.pending_sound_drag == Some(sound.id)
                             && Self::pointer_primary_drag_ready(ui.ctx())
                         {
                             drag_request = Some(sound.id);
                             self.pending_sound_drag = None;
                         }
-                        if response.clicked() {
+                        if !modal_open && response.clicked() {
                             self.selected = Some(sound.id);
                             preview_request = Some(sound.id);
                         }
