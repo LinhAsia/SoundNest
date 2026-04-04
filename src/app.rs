@@ -663,6 +663,23 @@ impl SoundFxApp {
         self.preview_sound_from_position(sound.id, Some(cursor_secs));
     }
 
+    fn handle_trim_start_preview(&mut self, ctx: &Context) {
+        if self.is_transition_active() || self.has_modal_panel() || ctx.wants_keyboard_input() {
+            return;
+        }
+
+        if !ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::S)) {
+            return;
+        }
+
+        let Some(index) = self.selected_sound_index() else {
+            return;
+        };
+        let sound = self.sounds[index].clone();
+        self.set_preview_cursor_secs(sound.id, sound.trim_start_secs, sound.safe_duration());
+        self.preview_sound_from_position(sound.id, Some(sound.trim_start_secs));
+    }
+
     fn intercept_close_request(&mut self, ctx: &Context) {
         let close_requested = ctx.input(|input| input.viewport().close_requested());
         if close_requested && !self.startup.close_sent {
@@ -1070,6 +1087,42 @@ impl SoundFxApp {
         }
     }
 
+    fn trigger_pitch_hotkey_action(&mut self, ctx: &Context) {
+        let snapshot = self.pitch_monitor.snapshot();
+        if snapshot.running {
+            self.pitch_monitor.stop();
+            self.pitch_overlay_native_visuals_applied = false;
+            ctx.send_viewport_cmd_to(Self::pitch_overlay_viewport_id(), ViewportCommand::Close);
+            self.clear_status();
+            return;
+        }
+
+        if self.pitch_input_source == PitchInputSource::Microphone
+            && self.selected_pitch_input_device.is_none()
+        {
+            self.set_error_status("No microphone input found");
+            return;
+        }
+
+        match self.pitch_monitor.start(PitchMonitorConfig {
+            source: self.pitch_input_source,
+            input_device_name: if self.pitch_input_source == PitchInputSource::Microphone {
+                self.selected_pitch_input_device.clone()
+            } else {
+                None
+            },
+            updates_per_second: self.pitch_update_hz,
+        }) {
+            Ok(()) => {
+                self.center_pitch_overlay_next_frame = true;
+                self.pitch_overlay_native_visuals_applied = false;
+                Self::reveal_window(ctx);
+                self.clear_status();
+            }
+            Err(error) => self.set_error_status(error),
+        }
+    }
+
     fn preview_recording_draft_from_position(&mut self, start_position_secs: Option<f32>) {
         let Some(draft) = self.recording_draft.as_ref() else {
             return;
@@ -1350,7 +1403,11 @@ impl SoundFxApp {
             self.set_error_status(error);
         }
         if self.record_hotkey_manager.take_triggered() {
-            self.trigger_record_hotkey_action(ctx);
+            if self.show_pitch_panel {
+                self.trigger_pitch_hotkey_action(ctx);
+            } else {
+                self.trigger_record_hotkey_action(ctx);
+            }
         }
     }
 
@@ -2155,7 +2212,7 @@ impl SoundFxApp {
         size: Vec2,
     ) -> egui::Response {
         let desired_size = vec2(size.x.max(48.0), size.y.max(20.0));
-        let (rect, mut response) = ui.allocate_exact_size(desired_size, Sense::click());
+        let (rect, mut response) = ui.allocate_exact_size(desired_size, Sense::click_and_drag());
         let dark_theme = Self::dark_theme_enabled();
         let track_rect = Rect::from_center_size(rect.center(), vec2(rect.width(), 8.0));
         let min = *range.start();
@@ -2188,7 +2245,7 @@ impl SoundFxApp {
         if response.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
-        if response.clicked()
+        if (response.clicked() || response.dragged())
             && let Some(pointer) = response.interact_pointer_pos()
         {
             let ratio = ((pointer.x - track_rect.left()) / track_rect.width()).clamp(0.0, 1.0);
@@ -4249,6 +4306,22 @@ impl SoundFxApp {
                             .color(Color32::from_rgb(58, 48, 58))
                             .strong(),
                     );
+                    if let Some(key) = self.record_hotkey {
+                        let key_button = ui.add_sized(
+                            [84.0, 28.0],
+                            Self::action_button(
+                                RichText::new(format!("Key {}", Self::format_key_name(key)))
+                                    .size(12.5)
+                                    .color(Self::strong_text_color()),
+                                false,
+                                false,
+                            ),
+                        );
+                        Self::decorate_button_response(ui, &key_button);
+                        if key_button.clicked() {
+                            self.trigger_pitch_hotkey_action(ctx);
+                        }
+                    }
                     ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                         if Self::icon_titlebar(ui, [34.0, 28.0], 0xe5cd, false, true).clicked() {
                             close_request = true;
@@ -5162,12 +5235,6 @@ impl SoundFxApp {
                 for (row_index, row) in sounds.chunks(columns).enumerate() {
                     ui.horizontal_top(|ui| {
                         ui.spacing_mut().item_spacing = vec2(spacing, spacing);
-                        let row_width = row.len() as f32 * card_size
-                            + row.len().saturating_sub(1) as f32 * spacing;
-                        let left_pad = ((available_width - row_width) * 0.5).max(0.0);
-                        if left_pad > 0.0 {
-                            ui.add_space(left_pad);
-                        }
 
                         for sound in row {
                             let (tile_rect, _tile_response) =
@@ -5327,6 +5394,9 @@ impl SoundFxApp {
                                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
                             }
                         }
+                        for _ in row.len()..columns {
+                            ui.allocate_exact_size(vec2(card_size, card_size), Sense::hover());
+                        }
                     });
 
                     if row_index + 1 < row_count {
@@ -5410,12 +5480,6 @@ impl SoundFxApp {
                 ui.spacing_mut().item_spacing = vec2(spacing, spacing);
                 if side_padding > 0.0 {
                     ui.add_space(side_padding);
-                }
-                let row_width =
-                    row.len() as f32 * card_size + row.len().saturating_sub(1) as f32 * spacing;
-                let left_pad = ((available_width - row_width) * 0.5).max(0.0);
-                if left_pad > 0.0 {
-                    ui.add_space(left_pad);
                 }
 
                 for video in row {
@@ -5556,6 +5620,9 @@ impl SoundFxApp {
                                 });
                             });
                     });
+                }
+                for _ in row.len()..columns {
+                    ui.allocate_exact_size(vec2(card_size, card_size), Sense::hover());
                 }
             });
 
@@ -5988,6 +6055,7 @@ impl SoundFxApp {
         let mut preview_toggle = false;
         let mut delete_request = false;
         let mut copy_request = false;
+        let mut open_location_request = false;
         let mut commit_trim_request = false;
         let mut seek_request = false;
         let mut changed = false;
@@ -6007,7 +6075,7 @@ impl SoundFxApp {
             .inner_margin(Margin::same(28))
             .show(ui, |ui| {
                 let sound = &mut self.sounds[index];
-                let controls_width = 52.0 + 52.0 + 64.0 + 64.0 + 36.0;
+                let controls_width = 52.0 + 52.0 + 52.0 + 64.0 + 64.0 + 36.0;
                 let name_width = (ui.available_width() - controls_width).max(180.0);
 
                 ui.horizontal(|ui| {
@@ -6030,6 +6098,9 @@ impl SoundFxApp {
                         }
                         if Self::icon_action(ui, [64.0, 34.0], 0xe14d, false, false).clicked() {
                             copy_request = true;
+                        }
+                        if Self::icon_action(ui, [52.0, 34.0], 0xe2c8, false, false).clicked() {
+                            open_location_request = true;
                         }
                         if Self::icon_action(
                             ui,
@@ -6108,6 +6179,42 @@ impl SoundFxApp {
                             });
                         });
                     });
+
+                ui.add_space(16.0);
+
+                let drop_response = Frame::new()
+                    .fill(Self::panel_fill())
+                    .stroke(Stroke::new(1.0, Self::subtle_border_color()))
+                    .corner_radius(22.0)
+                    .inner_margin(Margin::same(18))
+                    .show(ui, |ui| {
+                        ui.set_min_height(76.0);
+                        ui.horizontal_centered(|ui| {
+                            ui.label(Self::icon(0xe2c4, 20.0, Color32::from_rgb(214, 51, 132)));
+                            ui.add_space(10.0);
+                            ui.vertical_centered(|ui| {
+                                ui.label(
+                                    RichText::new("Drop sound here")
+                                        .size(14.0)
+                                        .color(Self::strong_text_color())
+                                        .strong(),
+                                );
+                                ui.label(
+                                    RichText::new("or click to open import browser")
+                                        .size(12.0)
+                                        .color(Self::muted_text_color()),
+                                );
+                            });
+                        });
+                    })
+                    .response
+                    .interact(Sense::click());
+                if drop_response.hovered() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                }
+                if drop_response.clicked() {
+                    self.add_sound();
+                }
             });
 
         let sound_id = self.sounds[index].id;
@@ -6130,6 +6237,15 @@ impl SoundFxApp {
 
         if copy_request {
             self.copy_selected_processed_sound();
+        }
+
+        if open_location_request {
+            let path = self.sounds[index].asset_path(self.storage.root_dir());
+            if let Some(parent) = path.parent()
+                && let Err(error) = open::that(parent)
+            {
+                self.set_error_status(error);
+            }
         }
 
         if commit_trim_request {
@@ -6223,6 +6339,7 @@ impl SoundFxApp {
                 );
                 ui.add_space(4.0);
                 ui.label("Space: preview or stop");
+                ui.label("S: preview from the left trim");
                 ui.label("Q: move the left trim to the mouse");
                 ui.label("W: move the right trim to the mouse");
                 ui.label("A / D: pan timeline left or right");
@@ -6402,6 +6519,19 @@ impl SoundFxApp {
                             4.0,
                             hover_playhead_color,
                         );
+                        if let Some(pointer_time) = pointer_time {
+                            painter.text(
+                                Pos2::new(pointer.x + 8.0, rect.top() + 12.0),
+                                egui::Align2::LEFT_TOP,
+                                format_time(pointer_time),
+                                egui::FontId::proportional(11.5),
+                                if dark_theme {
+                                    Color32::from_rgb(208, 244, 255)
+                                } else {
+                                    Color32::from_rgb(42, 39, 44)
+                                },
+                            );
+                        }
                     }
 
                     let cursor_ratio = (*preview_cursor_secs / duration).clamp(0.0, 1.0);
@@ -6855,6 +6985,7 @@ impl SoundFxApp {
         let snapshot = self.downloader.snapshot();
         let mut open_panel = self.show_download_panel;
         let mut should_start_download = false;
+        let mut should_stop_download = false;
         let mut add_to_library = false;
         let mut open_file = false;
         let mut open_folder = false;
@@ -6961,6 +7092,9 @@ impl SoundFxApp {
                     }
 
                     if snapshot.running {
+                        if Self::icon_action(ui, [42.0, 32.0], 0xe047, false, true).clicked() {
+                            should_stop_download = true;
+                        }
                         ui.label(
                             RichText::new(snapshot.stage.clone())
                                 .size(13.0)
@@ -6976,6 +7110,16 @@ impl SoundFxApp {
                             .desired_width(ui.available_width())
                             .fill(Color32::from_rgb(227, 82, 149)),
                     );
+                } else if snapshot.running {
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        ui.add(egui::Spinner::new().size(18.0));
+                        ui.label(
+                            RichText::new("Working...")
+                                .size(12.5)
+                                .color(Self::muted_text_color()),
+                        );
+                    });
                 }
 
                 if let Some(error) = &snapshot.error {
@@ -7044,6 +7188,9 @@ impl SoundFxApp {
                 Err(error) => self.set_error_status(error),
             }
         }
+        if should_stop_download {
+            self.downloader.stop_audio_download();
+        }
 
         if let Some(path) = snapshot.last_file.clone() {
             if add_to_library {
@@ -7086,6 +7233,7 @@ impl SoundFxApp {
         let mut folder_request: Option<MyinstantsResult> = None;
         let mut copy_request: Option<MyinstantsResult> = None;
         let mut youtube_download_request: Option<String> = None;
+        let mut stop_youtube_download = false;
         let mut clear_youtube_results = false;
         let mut more_request = false;
 
@@ -7172,15 +7320,25 @@ impl SoundFxApp {
                     || youtube_snapshot.searching
                     || youtube_snapshot.running
                 {
-                    ui.label(
-                        RichText::new(if youtube_snapshot.searching || youtube_snapshot.running {
-                            youtube_snapshot.stage.as_str()
-                        } else {
-                            "..."
-                        })
-                        .size(14.0)
-                        .color(Color32::from_rgb(214, 51, 132)),
-                    );
+                    ui.horizontal(|ui| {
+                        ui.add(egui::Spinner::new().size(16.0));
+                        ui.label(
+                            RichText::new(
+                                if youtube_snapshot.searching || youtube_snapshot.running {
+                                    youtube_snapshot.stage.as_str()
+                                } else {
+                                    "..."
+                                },
+                            )
+                            .size(14.0)
+                            .color(Color32::from_rgb(214, 51, 132)),
+                        );
+                        if youtube_snapshot.running
+                            && Self::icon_action(ui, [42.0, 30.0], 0xe047, false, true).clicked()
+                        {
+                            stop_youtube_download = true;
+                        }
+                    });
                     ui.add_space(8.0);
                 }
                 if let Some(error) = snapshot
@@ -7403,6 +7561,9 @@ impl SoundFxApp {
                 Ok(()) => self.clear_status(),
                 Err(error) => self.set_error_status(error),
             }
+        }
+        if stop_youtube_download {
+            self.downloader.stop_audio_download();
         }
         if clear_youtube_results {
             self.downloader.clear_youtube_results();
@@ -9302,6 +9463,7 @@ impl eframe::App for SoundFxApp {
 
         self.enforce_square_window_if_needed(ctx);
         self.handle_space_preview(ctx);
+        self.handle_trim_start_preview(ctx);
         self.handle_record_hotkey(ctx);
 
         if !self.is_transition_active() {

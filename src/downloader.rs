@@ -8,7 +8,10 @@ use std::io::{Read, Write};
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+};
 use std::thread;
 use zip::ZipArchive;
 
@@ -51,6 +54,8 @@ pub struct YoutubeAudioDownloader {
     bin_dir: PathBuf,
     download_dir: PathBuf,
     state: Arc<Mutex<DownloadSnapshot>>,
+    cancel_requested: Arc<AtomicBool>,
+    active_process_id: Arc<Mutex<Option<u32>>>,
 }
 
 impl YoutubeAudioDownloader {
@@ -65,6 +70,8 @@ impl YoutubeAudioDownloader {
             bin_dir,
             download_dir,
             state: Arc::new(Mutex::new(DownloadSnapshot::default())),
+            cancel_requested: Arc::new(AtomicBool::new(false)),
+            active_process_id: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -157,6 +164,8 @@ impl YoutubeAudioDownloader {
             if state.running || state.searching {
                 bail!("Downloader is busy");
             }
+            self.cancel_requested.store(false, Ordering::Relaxed);
+            *self.active_process_id.lock().unwrap() = None;
             state.running = true;
             state.stage = "Prepare".to_owned();
             state.progress = None;
@@ -169,13 +178,23 @@ impl YoutubeAudioDownloader {
         let bin_dir = self.bin_dir.clone();
         let download_dir = self.download_dir.clone();
         let state = self.state.clone();
+        let cancel_requested = Arc::clone(&self.cancel_requested);
+        let active_process_id = Arc::clone(&self.active_process_id);
 
         thread::spawn(move || {
-            let result =
-                run_download_job(&state, &bin_dir, &download_dir, &url).map_err(|e| e.to_string());
+            let result = run_download_job(
+                &state,
+                &bin_dir,
+                &download_dir,
+                &url,
+                &cancel_requested,
+                &active_process_id,
+            )
+            .map_err(|e| e.to_string());
             let mut snapshot = state.lock().unwrap();
             snapshot.running = false;
             snapshot.progress = None;
+            *active_process_id.lock().unwrap() = None;
             match result {
                 Ok(path) => {
                     snapshot.stage = "Done".to_owned();
@@ -195,6 +214,17 @@ impl YoutubeAudioDownloader {
         Ok(())
     }
 
+    pub fn stop_audio_download(&self) {
+        self.cancel_requested.store(true, Ordering::Relaxed);
+        if let Some(pid) = *self.active_process_id.lock().unwrap() {
+            let _ = stop_process(pid);
+        }
+        let mut state = self.state.lock().unwrap();
+        if state.running {
+            state.stage = "Stopping".to_owned();
+        }
+    }
+
     pub fn open_file(&self, path: &Path) -> Result<()> {
         that_detached(path).context("unable to open file")
     }
@@ -208,7 +238,7 @@ impl YoutubeAudioDownloader {
     }
 
     pub fn ensure_ffmpeg_available(&self) -> Result<PathBuf> {
-        ensure_ffmpeg_installed(&self.state, &self.bin_dir)?;
+        ensure_ffmpeg_installed(&self.state, &self.bin_dir, &self.cancel_requested)?;
         Ok(self.bin_dir.join("ffmpeg.exe"))
     }
 }
@@ -227,15 +257,20 @@ fn run_download_job(
     bin_dir: &Path,
     download_dir: &Path,
     url: &str,
+    cancel_requested: &Arc<AtomicBool>,
+    active_process_id: &Arc<Mutex<Option<u32>>>,
 ) -> Result<PathBuf> {
     update_state(state, "yt-dlp", Some(0.0), None);
-    ensure_ytdlp_installed(state, bin_dir)?;
+    ensure_ytdlp_installed(state, bin_dir, cancel_requested)?;
+    ensure_not_cancelled(cancel_requested)?;
 
     update_state(state, "ffmpeg", Some(0.0), None);
-    ensure_ffmpeg_installed(state, bin_dir)?;
+    ensure_ffmpeg_installed(state, bin_dir, cancel_requested)?;
+    ensure_not_cancelled(cancel_requested)?;
 
     update_state(state, "deno", Some(0.0), None);
-    ensure_deno_installed(state, bin_dir)?;
+    ensure_deno_installed(state, bin_dir, cancel_requested)?;
+    ensure_not_cancelled(cancel_requested)?;
 
     update_state(state, "Download", None, None);
     let ytdlp_exe = bin_dir.join("yt-dlp.exe");
@@ -266,13 +301,25 @@ fn run_download_job(
     }
     args.push(url.to_owned());
 
-    match run_ytdlp_download_attempt(&ytdlp_exe, &args, download_dir) {
+    match run_ytdlp_download_attempt(
+        &ytdlp_exe,
+        &args,
+        download_dir,
+        cancel_requested,
+        active_process_id,
+    ) {
         Ok(path) => Ok(path),
         Err(first_error) => {
             update_state(state, "Refresh yt-dlp", None, None);
-            let refresh_note = refresh_ytdlp_after_failure(state, bin_dir)?;
+            let refresh_note = refresh_ytdlp_after_failure(state, bin_dir, cancel_requested)?;
             update_state(state, "Retry download", None, None);
-            match run_ytdlp_download_attempt(&ytdlp_exe, &args, download_dir) {
+            match run_ytdlp_download_attempt(
+                &ytdlp_exe,
+                &args,
+                download_dir,
+                cancel_requested,
+                active_process_id,
+            ) {
                 Ok(path) => Ok(path),
                 Err(retry_error) => bail!("{first_error} | {refresh_note} | {retry_error}"),
             }
@@ -284,15 +331,24 @@ fn run_ytdlp_download_attempt(
     ytdlp_exe: &Path,
     args: &[String],
     download_dir: &Path,
+    cancel_requested: &Arc<AtomicBool>,
+    active_process_id: &Arc<Mutex<Option<u32>>>,
 ) -> Result<PathBuf> {
     let mut cmd = Command::new(&ytdlp_exe);
     cmd.args(args);
     #[cfg(windows)]
     cmd.creation_flags(0x08000000);
 
-    let output = cmd
-        .output()
+    let child = cmd
+        .spawn()
         .with_context(|| format!("failed to launch {}", ytdlp_exe.display()))?;
+    let pid = child.id();
+    *active_process_id.lock().unwrap() = Some(pid);
+    let output = child
+        .wait_with_output()
+        .with_context(|| format!("failed to wait for {}", ytdlp_exe.display()))?;
+    *active_process_id.lock().unwrap() = None;
+    ensure_not_cancelled(cancel_requested)?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
@@ -457,7 +513,11 @@ fn parse_view_count_text(text: &str) -> Option<u64> {
     digits.parse::<u64>().ok()
 }
 
-fn ensure_ytdlp_installed(state: &Arc<Mutex<DownloadSnapshot>>, bin_dir: &Path) -> Result<()> {
+fn ensure_ytdlp_installed(
+    state: &Arc<Mutex<DownloadSnapshot>>,
+    bin_dir: &Path,
+    cancel_requested: &Arc<AtomicBool>,
+) -> Result<()> {
     let ytdlp_path = bin_dir.join("yt-dlp.exe");
     if ytdlp_path.exists() && validate_tool(&ytdlp_path, "--version").is_ok() {
         update_state(state, "yt-dlp ready", Some(1.0), None);
@@ -470,12 +530,14 @@ fn ensure_ytdlp_installed(state: &Arc<Mutex<DownloadSnapshot>>, bin_dir: &Path) 
         state,
         "yt-dlp",
         "yt-dlp ready",
+        cancel_requested,
     )
 }
 
 fn refresh_ytdlp_after_failure(
     state: &Arc<Mutex<DownloadSnapshot>>,
     bin_dir: &Path,
+    cancel_requested: &Arc<AtomicBool>,
 ) -> Result<String> {
     let ytdlp_path = bin_dir.join("yt-dlp.exe");
     let local_version = read_local_ytdlp_version(&ytdlp_path).ok();
@@ -498,6 +560,7 @@ fn refresh_ytdlp_after_failure(
         state,
         &stage,
         "yt-dlp ready",
+        cancel_requested,
     )?;
     let installed = read_local_ytdlp_version(&ytdlp_path)
         .ok()
@@ -506,7 +569,11 @@ fn refresh_ytdlp_after_failure(
     Ok(format!("yt-dlp updated ({installed})"))
 }
 
-fn ensure_ffmpeg_installed(state: &Arc<Mutex<DownloadSnapshot>>, bin_dir: &Path) -> Result<()> {
+fn ensure_ffmpeg_installed(
+    state: &Arc<Mutex<DownloadSnapshot>>,
+    bin_dir: &Path,
+    cancel_requested: &Arc<AtomicBool>,
+) -> Result<()> {
     let ffmpeg_path = bin_dir.join("ffmpeg.exe");
     let ffprobe_path = bin_dir.join("ffprobe.exe");
     let marker_path = bin_dir.join(FFMPEG_MARKER_FILE);
@@ -533,6 +600,7 @@ fn ensure_ffmpeg_installed(state: &Arc<Mutex<DownloadSnapshot>>, bin_dir: &Path)
         state,
         "ffmpeg",
         "ffmpeg extract",
+        cancel_requested,
     )?;
     extract_ffmpeg(&zip_path, bin_dir)?;
     let _ = fs::remove_file(&zip_path);
@@ -543,7 +611,11 @@ fn ensure_ffmpeg_installed(state: &Arc<Mutex<DownloadSnapshot>>, bin_dir: &Path)
     Ok(())
 }
 
-fn ensure_deno_installed(state: &Arc<Mutex<DownloadSnapshot>>, bin_dir: &Path) -> Result<()> {
+fn ensure_deno_installed(
+    state: &Arc<Mutex<DownloadSnapshot>>,
+    bin_dir: &Path,
+    cancel_requested: &Arc<AtomicBool>,
+) -> Result<()> {
     let deno_path = bin_dir.join("deno.exe");
     if deno_path.exists() && validate_tool(&deno_path, "--version").is_ok() {
         update_state(state, "deno ready", Some(1.0), None);
@@ -552,7 +624,14 @@ fn ensure_deno_installed(state: &Arc<Mutex<DownloadSnapshot>>, bin_dir: &Path) -
 
     let _ = fs::remove_file(&deno_path);
     let zip_path = bin_dir.join("deno.zip");
-    download_file(DENO_DOWNLOAD_URL, &zip_path, state, "deno", "deno extract")?;
+    download_file(
+        DENO_DOWNLOAD_URL,
+        &zip_path,
+        state,
+        "deno",
+        "deno extract",
+        cancel_requested,
+    )?;
     extract_file_from_zip(&zip_path, "deno.exe", &deno_path)?;
     let _ = fs::remove_file(&zip_path);
     validate_tool(&deno_path, "--version")?;
@@ -578,6 +657,7 @@ fn download_file(
     state: &Arc<Mutex<DownloadSnapshot>>,
     stage: &str,
     done_stage: &str,
+    cancel_requested: &Arc<AtomicBool>,
 ) -> Result<()> {
     let response = ureq::get(url)
         .header("User-Agent", "SoundFxManager")
@@ -599,6 +679,7 @@ fn download_file(
     let mut buffer = [0u8; 8192];
 
     loop {
+        ensure_not_cancelled(cancel_requested)?;
         let bytes_read = reader.read(&mut buffer)?;
         if bytes_read == 0 {
             break;
@@ -621,6 +702,26 @@ fn download_file(
     fs::rename(&temp_path, path).with_context(|| format!("unable to write {}", path.display()))?;
     update_state(state, done_stage, Some(1.0), None);
     Ok(())
+}
+
+fn ensure_not_cancelled(cancel_requested: &Arc<AtomicBool>) -> Result<()> {
+    if cancel_requested.load(Ordering::Relaxed) {
+        bail!("Download canceled");
+    }
+    Ok(())
+}
+
+fn stop_process(pid: u32) -> Result<()> {
+    let output = Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .output()
+        .context("unable to stop download process")?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("{}", stderr.trim());
+    }
 }
 
 fn fetch_latest_ytdlp_version() -> Result<String> {
