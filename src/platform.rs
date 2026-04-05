@@ -152,19 +152,14 @@ mod windows_platform {
         enabled: bool,
         popup_only: bool,
     ) -> bool {
-        let find_by_title = |title: &str| -> Option<HWND> {
-            let mut utf16 = title.encode_utf16().collect::<Vec<_>>();
-            utf16.push(0);
-            let Ok(hwnd) = (unsafe { FindWindowW(PCWSTR::null(), PCWSTR(utf16.as_ptr())) }) else {
-                return None;
-            };
-            (!hwnd.0.is_null()).then_some(hwnd)
-        };
-
-        let Some(hwnd) = find_by_title(window_title).or_else(|| find_by_title("egui window"))
-        else {
+        let mut utf16 = window_title.encode_utf16().collect::<Vec<_>>();
+        utf16.push(0);
+        let Ok(hwnd) = (unsafe { FindWindowW(PCWSTR::null(), PCWSTR(utf16.as_ptr())) }) else {
             return false;
         };
+        if hwnd.0.is_null() {
+            return false;
+        }
 
         unsafe {
             let style = GetWindowLongW(hwnd, GWL_STYLE) as u32;

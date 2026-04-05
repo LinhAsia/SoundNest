@@ -5003,6 +5003,7 @@ impl SoundFxApp {
         };
         let mut builder = ViewportBuilder::default()
             .with_title(PITCH_OVERLAY_TITLE)
+            .with_title_shown(false)
             .with_decorations(false)
             .with_transparent(true)
             .with_resizable(false)
@@ -6132,6 +6133,7 @@ impl SoundFxApp {
         let overlay_size = vec2(430.0, 118.0);
         let mut builder = ViewportBuilder::default()
             .with_title(RECORD_OVERLAY_TITLE)
+            .with_title_shown(false)
             .with_inner_size(overlay_size)
             .with_min_inner_size(overlay_size)
             .with_max_inner_size(overlay_size)
@@ -6687,23 +6689,9 @@ impl SoundFxApp {
                     Self::subtle_border_color(),
                 );
                 self.editor_drop_rect = Some(drop_response.rect);
-                let external_drag_hover =
-                    ui.ctx().input(|input| !input.raw.hovered_files.is_empty());
-                let pointer_over_drop = ui
-                    .ctx()
-                    .input(|input| input.pointer.hover_pos().or(input.pointer.latest_pos()))
-                    .is_some_and(|pos| drop_response.rect.contains(pos));
-                if external_drag_hover {
-                    self.editor_drop_armed = pointer_over_drop;
-                    ui.ctx().set_cursor_icon(if pointer_over_drop {
-                        egui::CursorIcon::Copy
-                    } else {
-                        egui::CursorIcon::NotAllowed
-                    });
-                } else if !ui.ctx().input(|input| !input.raw.dropped_files.is_empty()) {
-                    self.editor_drop_armed = false;
-                }
-                if drop_response.hovered() && !external_drag_hover {
+                if drop_response.hovered()
+                    && ui.ctx().input(|input| input.raw.hovered_files.is_empty())
+                {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                 }
                 if drop_response.clicked() {
@@ -8244,13 +8232,14 @@ impl SoundFxApp {
         let popup_size = monitor_size
             .map(|size| {
                 vec2(
-                    (size.x * 0.54).clamp(820.0, 980.0),
-                    (size.y * 0.46).clamp(440.0, 540.0),
+                    (size.x * 0.56).clamp(860.0, 1040.0),
+                    (size.y * 0.50).clamp(500.0, 600.0),
                 )
             })
-            .unwrap_or(vec2(900.0, 500.0));
+            .unwrap_or(vec2(940.0, 540.0));
         let mut builder = ViewportBuilder::default()
             .with_title("Trim Sound")
+            .with_title_shown(false)
             .with_decorations(false)
             .with_transparent(true)
             .with_resizable(false)
@@ -8455,7 +8444,7 @@ impl SoundFxApp {
                         });
                 });
         });
-        let _ = platform::set_overlay_window_native_visuals("Trim Sound", true, true);
+        let _ = platform::set_overlay_window_native_visuals("Trim Sound", false, true);
 
         self.show_trim_popup = !close_request;
         let sound_duration = self.sounds[index].safe_duration();
@@ -10476,23 +10465,26 @@ impl eframe::App for SoundFxApp {
         self.render_titlebar_drag_zone(ctx);
         self.render_custom_window_resize_handles(ctx);
 
-        if !self.is_transition_active() {
-            self.handle_dropped_files(ctx);
-        }
-
-        if self.app_view == AppView::Editor
+        let external_file_hover = self.app_view == AppView::Editor
             && !self.has_modal_panel()
-            && ctx.input(|input| !input.raw.hovered_files.is_empty())
-        {
+            && ctx.input(|input| !input.raw.hovered_files.is_empty());
+        if external_file_hover {
             let pointer_over_drop = ctx
                 .input(|input| input.pointer.hover_pos().or(input.pointer.latest_pos()))
                 .zip(self.editor_drop_rect)
                 .is_some_and(|(pos, rect)| rect.contains(pos));
+            self.editor_drop_armed = pointer_over_drop;
             ctx.set_cursor_icon(if pointer_over_drop {
                 egui::CursorIcon::Copy
             } else {
                 egui::CursorIcon::NotAllowed
             });
+        } else if !ctx.input(|input| !input.raw.dropped_files.is_empty()) {
+            self.editor_drop_armed = false;
+        }
+
+        if !self.is_transition_active() {
+            self.handle_dropped_files(ctx);
         }
     }
 
