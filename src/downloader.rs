@@ -713,9 +713,10 @@ fn ensure_not_cancelled(cancel_requested: &Arc<AtomicBool>) -> Result<()> {
 
 fn stop_process(pid: u32) -> Result<()> {
     let mut cmd = Command::new("taskkill");
-    cmd.args(["/PID", &pid.to_string(), "/T", "/F"])
-        .spawn()
-        .context("unable to stop download process")?;
+    cmd.args(["/PID", &pid.to_string(), "/T", "/F"]);
+    #[cfg(windows)]
+    cmd.creation_flags(0x08000000);
+    cmd.spawn().context("unable to stop download process")?;
     Ok(())
 }
 

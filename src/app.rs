@@ -216,6 +216,7 @@ pub struct SoundFxApp {
     library_audio_query: String,
     library_video_query: String,
     editor_drop_armed: bool,
+    editor_drop_rect: Option<Rect>,
     pending_sound_drag: Option<Uuid>,
     ignored_drop_path: Option<PathBuf>,
     reveal_record_review_on_open: bool,
@@ -427,6 +428,7 @@ impl SoundFxApp {
             library_audio_query: String::new(),
             library_video_query: String::new(),
             editor_drop_armed: false,
+            editor_drop_rect: None,
             pending_sound_drag: None,
             ignored_drop_path: None,
             reveal_record_review_on_open: false,
@@ -666,20 +668,18 @@ impl SoundFxApp {
             return;
         }
 
-        if ctx.wants_keyboard_input() {
-            return;
-        }
-
-        if !ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Space)) {
-            return;
-        }
-
         if self.video_viewer.is_some() {
+            if !ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Space)) {
+                return;
+            }
             self.toggle_video_viewer_playback();
             return;
         }
 
         if self.show_record_review_panel {
+            if !ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Space)) {
+                return;
+            }
             let Some(sound) = self
                 .recording_draft
                 .as_ref()
@@ -701,6 +701,39 @@ impl SoundFxApp {
                 self.set_preview_cursor_secs(sound.id, cursor_secs, sound.safe_duration());
             }
             self.preview_recording_draft_from_position(Some(cursor_secs));
+            return;
+        }
+
+        if self.show_trim_popup {
+            if !ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Space)) {
+                return;
+            }
+            let Some(index) = self.selected_sound_index() else {
+                return;
+            };
+            let sound = self.sounds[index].clone();
+            if self
+                .audio
+                .as_ref()
+                .is_some_and(|audio| audio.is_playing(sound.id))
+            {
+                self.stop_preview();
+                return;
+            }
+            let mut cursor_secs = self.preview_cursor_secs_for(&sound);
+            if cursor_secs >= sound.trim_end_secs - 0.02 {
+                cursor_secs = sound.trim_start_secs;
+                self.set_preview_cursor_secs(sound.id, cursor_secs, sound.safe_duration());
+            }
+            self.preview_sound_from_position(sound.id, Some(cursor_secs));
+            return;
+        }
+
+        if ctx.wants_keyboard_input() {
+            return;
+        }
+
+        if !ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Space)) {
             return;
         }
 
@@ -729,7 +762,40 @@ impl SoundFxApp {
     }
 
     fn handle_trim_start_preview(&mut self, ctx: &Context) {
-        if self.is_transition_active() || self.has_modal_panel() || ctx.wants_keyboard_input() {
+        if self.is_transition_active() {
+            return;
+        }
+
+        if self.show_record_review_panel {
+            if !ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::S)) {
+                return;
+            }
+            let Some(sound) = self
+                .recording_draft
+                .as_ref()
+                .map(|draft| draft.sound.clone())
+            else {
+                return;
+            };
+            self.set_preview_cursor_secs(sound.id, sound.trim_start_secs, sound.safe_duration());
+            self.preview_recording_draft_from_position(Some(sound.trim_start_secs));
+            return;
+        }
+
+        if self.show_trim_popup {
+            if !ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::S)) {
+                return;
+            }
+            let Some(index) = self.selected_sound_index() else {
+                return;
+            };
+            let sound = self.sounds[index].clone();
+            self.set_preview_cursor_secs(sound.id, sound.trim_start_secs, sound.safe_duration());
+            self.preview_sound_from_position(sound.id, Some(sound.trim_start_secs));
+            return;
+        }
+
+        if self.has_modal_panel() || ctx.wants_keyboard_input() {
             return;
         }
 
@@ -809,21 +875,18 @@ impl SoundFxApp {
             return;
         };
         let sound = self.sounds[index].clone();
-        let source_path = match self.storage.drag_sound_source_path(&sound) {
-            Ok(path) => path,
-            Err(error) => {
-                self.set_error_status(error);
-                return;
-            }
-        };
-        let source_is_temporary = source_path.starts_with(self.storage.root_dir().join("exports"));
+        let source_path = sound.asset_path(self.storage.root_dir());
+        if !source_path.exists() {
+            self.set_error_status(format!("unable to open {}", source_path.display()));
+            return;
+        }
         let preview_id = sound.id;
         let preview_start = sound.trim_start_secs;
         let preview_duration = sound.safe_duration();
         self.recording_draft = Some(RecordingDraft {
             sound,
             source_path,
-            source_is_temporary,
+            source_is_temporary: false,
         });
         self.show_record_panel = false;
         self.show_record_review_panel = true;
@@ -870,6 +933,10 @@ impl SoundFxApp {
 
     fn pitch_overlay_viewport_id() -> ViewportId {
         ViewportId::from_hash_of(PITCH_OVERLAY_ID)
+    }
+
+    fn trim_popup_viewport_id() -> ViewportId {
+        ViewportId::from_hash_of("trim-popup-viewport")
     }
 
     fn refresh_pitch_capture_devices(&mut self) {
@@ -1551,6 +1618,7 @@ impl SoundFxApp {
     fn handle_dropped_files(&mut self, ctx: &Context) {
         if self.app_view != AppView::Editor || self.has_modal_panel() {
             self.editor_drop_armed = false;
+            self.editor_drop_rect = None;
             return;
         }
 
@@ -1558,7 +1626,12 @@ impl SoundFxApp {
         if dropped.is_empty() {
             return;
         }
-        if !self.editor_drop_armed {
+        let pointer_pos =
+            ctx.input(|input| input.pointer.hover_pos().or(input.pointer.latest_pos()));
+        let dropped_in_rect = self
+            .editor_drop_rect
+            .is_some_and(|rect| pointer_pos.is_some_and(|pos| rect.contains(pos)));
+        if !self.editor_drop_armed && !dropped_in_rect {
             return;
         }
         self.editor_drop_armed = false;
@@ -6610,14 +6683,20 @@ impl SoundFxApp {
                     drop_response.rect.shrink(8.0),
                     Self::subtle_border_color(),
                 );
+                self.editor_drop_rect = Some(drop_response.rect);
                 let external_drag_hover =
                     ui.ctx().input(|input| !input.raw.hovered_files.is_empty());
                 if external_drag_hover {
                     self.editor_drop_armed = drop_response.hovered();
+                    ui.ctx().set_cursor_icon(if drop_response.hovered() {
+                        egui::CursorIcon::PointingHand
+                    } else {
+                        egui::CursorIcon::Default
+                    });
                 } else if !ui.ctx().input(|input| !input.raw.dropped_files.is_empty()) {
                     self.editor_drop_armed = false;
                 }
-                if drop_response.hovered() {
+                if drop_response.hovered() && !external_drag_hover {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                 }
                 if drop_response.clicked() {
@@ -8109,12 +8188,15 @@ impl SoundFxApp {
     }
 
     fn render_trim_popup(&mut self, ctx: &Context) {
+        let viewport_id = Self::trim_popup_viewport_id();
         if !self.show_trim_popup {
+            ctx.send_viewport_cmd_to(viewport_id, ViewportCommand::Close);
             return;
         }
 
         let Some(index) = self.selected_sound_index() else {
             self.show_trim_popup = false;
+            ctx.send_viewport_cmd_to(viewport_id, ViewportCommand::Close);
             return;
         };
 
@@ -8141,9 +8223,9 @@ impl SoundFxApp {
             cursor
         };
 
-        let mut open_panel = self.show_trim_popup;
         let mut close_request = false;
         let mut preview_toggle = false;
+        let mut preview_from_trim_start = false;
         let mut delete_request = false;
         let mut copy_request = false;
         let mut open_location_request = false;
@@ -8151,173 +8233,222 @@ impl SoundFxApp {
         let mut seek_request = false;
         let mut changed = false;
         let mut trim_timeline_zoom = self.trim_timeline_zoom;
+        let monitor_size = ctx.input(|input| input.viewport().monitor_size);
+        let popup_size = monitor_size
+            .map(|size| {
+                vec2(
+                    (size.x * 0.86).clamp(1180.0, 1560.0),
+                    (size.y * 0.84).clamp(760.0, 960.0),
+                )
+            })
+            .unwrap_or(vec2(1320.0, 820.0));
+        let mut builder = ViewportBuilder::default()
+            .with_title("Trim Sound")
+            .with_decorations(false)
+            .with_transparent(true)
+            .with_resizable(false)
+            .with_inner_size(popup_size)
+            .with_min_inner_size(popup_size)
+            .with_max_inner_size(popup_size)
+            .with_active(true)
+            .with_visible(true);
+        if let Some(monitor) = monitor_size {
+            builder = builder.with_position(Pos2::new(
+                ((monitor.x - popup_size.x) * 0.5).max(0.0),
+                ((monitor.y - popup_size.y) * 0.5).max(0.0),
+            ));
+        }
 
-        egui::Window::new("")
-            .id(egui::Id::new("trim-popup"))
-            .order(egui::Order::Foreground)
-            .title_bar(false)
-            .resizable(false)
-            .collapsible(false)
-            .fixed_size(vec2(1160.0, 740.0))
-            .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
-            .open(&mut open_panel)
-            .frame(
-                Frame::new()
-                    .fill(Self::overlay_panel_fill())
-                    .stroke(Stroke::new(1.0, Self::border_color()))
-                    .shadow(Shadow {
-                        offset: [0, 14],
-                        blur: 34,
-                        spread: 0,
-                        color: Color32::from_rgba_premultiplied(78, 40, 63, 24),
-                    })
-                    .corner_radius(32.0)
-                    .inner_margin(Margin::same(22)),
-            )
-            .show(ctx, |ui| {
-                let sound = &mut self.sounds[index];
-                ui.horizontal(|ui| {
-                    ui.label(Self::icon(0xe14e, 20.0, Color32::from_rgb(214, 51, 132)).strong());
-                    ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                        if Self::icon_titlebar(ui, [34.0, 28.0], 0xe5cd, false, true).clicked() {
-                            close_request = true;
-                        }
-                    });
-                });
+        ctx.show_viewport_immediate(viewport_id, builder, |popup_ctx, class| {
+            if class != ViewportClass::Immediate {
+                return;
+            }
 
-                ui.add_space(14.0);
-                let response = ui.add_sized(
-                    [ui.available_width(), 50.0],
-                    TextEdit::singleline(&mut sound.name)
-                        .font(egui::TextStyle::Heading)
-                        .desired_width(f32::INFINITY)
-                        .margin(Vec2::new(14.0, 14.0)),
-                );
-                if response.changed() {
-                    changed = true;
-                }
+            if popup_ctx.input(|input| input.viewport().close_requested()) {
+                close_request = true;
+                popup_ctx.send_viewport_cmd(ViewportCommand::CancelClose);
+            }
 
-                ui.add_space(16.0);
-                ui.horizontal(|ui| {
-                    let help = ui.add_sized(
-                        [34.0, 34.0],
-                        Button::new(Self::icon(0xe887, 16.0, Color32::from_rgb(214, 51, 132)))
-                            .fill(Self::surface_fill())
-                            .stroke(Stroke::new(1.0, Self::border_color()))
-                            .corner_radius(17.0),
-                    );
-                    if help.hovered() {
-                        ui.ctx().set_cursor_icon(egui::CursorIcon::Help);
-                    }
-                    help.on_hover_ui_at_pointer(|ui| {
-                        ui.set_max_width(250.0);
-                        ui.label("Space: preview or stop");
-                        ui.label("S: preview from the left trim");
-                        ui.label("Q / W: move left or right trim");
-                        ui.label("A / D: pan timeline");
-                        ui.label("Ctrl + wheel: zoom");
-                    });
-                    ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                        if Self::icon_action(ui, [52.0, 34.0], 0xe872, false, false).clicked() {
-                            delete_request = true;
-                        }
-                        if Self::icon_action(ui, [52.0, 34.0], 0xe14e, false, false).clicked() {
-                            commit_trim_request = true;
-                        }
-                        if Self::icon_action(ui, [64.0, 34.0], 0xe14d, false, false).clicked() {
-                            copy_request = true;
-                        }
-                        if Self::icon_action(ui, [52.0, 34.0], 0xe2c8, false, false).clicked() {
-                            open_location_request = true;
-                        }
-                        if Self::icon_action(
-                            ui,
-                            [64.0, 34.0],
-                            if is_playing { 0xe047 } else { 0xe037 },
-                            is_playing,
-                            false,
-                        )
-                        .clicked()
-                        {
-                            preview_toggle = true;
-                        }
-                    });
-                });
+            if popup_ctx
+                .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Space))
+            {
+                preview_toggle = true;
+            }
+            if popup_ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::S)) {
+                preview_from_trim_start = true;
+            }
 
-                ui.add_space(18.0);
-                Frame::new()
-                    .fill(Self::panel_fill())
-                    .stroke(Stroke::new(1.0, Self::subtle_border_color()))
-                    .corner_radius(30.0)
-                    .inner_margin(Margin::same(22))
-                    .show(ui, |ui| {
-                        let (timeline_changed, timeline_seek_request, _) = Self::draw_trim_timeline(
-                            ui,
-                            sound,
-                            &mut preview_cursor_secs,
-                            &mut trim_timeline_zoom,
-                            !is_playing,
-                            true,
-                        );
-                        changed |= timeline_changed;
-                        seek_request |= timeline_seek_request;
-                    });
+            if is_playing {
+                popup_ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
+            }
 
-                ui.add_space(18.0);
-                Frame::new()
-                    .fill(Self::panel_fill())
-                    .stroke(Stroke::new(1.0, Self::subtle_border_color()))
-                    .corner_radius(26.0)
-                    .inner_margin(Margin::same(22))
-                    .show(ui, |ui| {
-                        Self::with_slider_visuals(ui, |ui| {
+            let mut style = (*popup_ctx.style()).clone();
+            style.visuals.window_fill = Color32::TRANSPARENT;
+            style.visuals.panel_fill = Color32::TRANSPARENT;
+            popup_ctx.set_style(style);
+
+            CentralPanel::default()
+                .frame(Frame::new().fill(Color32::TRANSPARENT).inner_margin(16.0))
+                .show(popup_ctx, |ui| {
+                    Frame::new()
+                        .fill(Self::overlay_panel_fill())
+                        .stroke(Stroke::new(1.0, Self::border_color()))
+                        .shadow(Shadow {
+                            offset: [0, 14],
+                            blur: 34,
+                            spread: 0,
+                            color: Color32::from_rgba_premultiplied(78, 40, 63, 24),
+                        })
+                        .corner_radius(32.0)
+                        .inner_margin(Margin::same(22))
+                        .show(ui, |ui| {
+                            let sound = &mut self.sounds[index];
                             ui.horizontal(|ui| {
-                                ui.label(Self::icon(0xe050, 16.0, Self::muted_text_color()));
-                                let volume_response = Self::click_slider(
-                                    ui,
-                                    &mut sound.volume,
-                                    0.0..=5.0,
-                                    0.0,
-                                    vec2(260.0, 24.0),
+                                ui.label(
+                                    Self::icon(0xe14e, 20.0, Color32::from_rgb(214, 51, 132))
+                                        .strong(),
                                 );
-                                let volume_input = ui.add(
-                                    DragValue::new(&mut sound.volume)
-                                        .range(0.0..=5.0)
-                                        .speed(0.01)
-                                        .max_decimals(2)
-                                        .suffix("x"),
-                                );
-                                sound.volume = sound.volume.clamp(0.0, 5.0);
-                                ui.add_space(18.0);
-                                ui.label(Self::icon(0xe9e4, 16.0, Self::muted_text_color()));
-                                let speed_response = Self::click_slider(
-                                    ui,
-                                    &mut sound.speed,
-                                    0.25..=2.0,
-                                    0.0,
-                                    vec2(260.0, 24.0),
-                                );
-                                let speed_input = ui.add(
-                                    DragValue::new(&mut sound.speed)
-                                        .range(0.25..=2.0)
-                                        .speed(0.01)
-                                        .max_decimals(2)
-                                        .suffix("x"),
-                                );
-                                sound.speed = sound.speed.clamp(0.25, 2.0);
-                                if volume_response.changed()
-                                    || speed_response.changed()
-                                    || volume_input.changed()
-                                    || speed_input.changed()
+                                ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                                    if Self::icon_titlebar(ui, [34.0, 28.0], 0xe5cd, false, true)
+                                        .clicked()
+                                    {
+                                        close_request = true;
+                                    }
+                                });
+                            });
+
+                            ui.add_space(14.0);
+                            let response = ui.add_sized(
+                                [ui.available_width(), 50.0],
+                                TextEdit::singleline(&mut sound.name)
+                                    .font(egui::TextStyle::Heading)
+                                    .desired_width(f32::INFINITY)
+                                    .margin(Vec2::new(14.0, 14.0)),
+                            );
+                            if response.changed() {
+                                changed = true;
+                            }
+
+                            ui.add_space(16.0);
+                            ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                                if Self::icon_action(ui, [52.0, 34.0], 0xe872, false, false)
+                                    .clicked()
                                 {
-                                    changed = true;
+                                    delete_request = true;
+                                }
+                                if Self::icon_action(ui, [52.0, 34.0], 0xe14e, false, false)
+                                    .clicked()
+                                {
+                                    commit_trim_request = true;
+                                }
+                                if Self::icon_action(ui, [64.0, 34.0], 0xe14d, false, false)
+                                    .clicked()
+                                {
+                                    copy_request = true;
+                                }
+                                if Self::icon_action(ui, [52.0, 34.0], 0xe2c8, false, false)
+                                    .clicked()
+                                {
+                                    open_location_request = true;
+                                }
+                                if Self::icon_action(
+                                    ui,
+                                    [64.0, 34.0],
+                                    if is_playing { 0xe047 } else { 0xe037 },
+                                    is_playing,
+                                    false,
+                                )
+                                .clicked()
+                                {
+                                    preview_toggle = true;
                                 }
                             });
-                        });
-                    });
-            });
 
-        self.show_trim_popup = open_panel && !close_request;
+                            ui.add_space(18.0);
+                            Frame::new()
+                                .fill(Self::panel_fill())
+                                .stroke(Stroke::new(1.0, Self::subtle_border_color()))
+                                .corner_radius(30.0)
+                                .inner_margin(Margin::same(22))
+                                .show(ui, |ui| {
+                                    let (timeline_changed, timeline_seek_request, _) =
+                                        Self::draw_trim_timeline(
+                                            ui,
+                                            sound,
+                                            &mut preview_cursor_secs,
+                                            &mut trim_timeline_zoom,
+                                            !is_playing,
+                                            true,
+                                        );
+                                    changed |= timeline_changed;
+                                    seek_request |= timeline_seek_request;
+                                });
+
+                            ui.add_space(18.0);
+                            Frame::new()
+                                .fill(Self::panel_fill())
+                                .stroke(Stroke::new(1.0, Self::subtle_border_color()))
+                                .corner_radius(26.0)
+                                .inner_margin(Margin::same(22))
+                                .show(ui, |ui| {
+                                    Self::with_slider_visuals(ui, |ui| {
+                                        ui.horizontal(|ui| {
+                                            ui.label(Self::icon(
+                                                0xe050,
+                                                16.0,
+                                                Self::muted_text_color(),
+                                            ));
+                                            let volume_response = Self::click_slider(
+                                                ui,
+                                                &mut sound.volume,
+                                                0.0..=5.0,
+                                                0.0,
+                                                vec2(260.0, 24.0),
+                                            );
+                                            let volume_input = ui.add(
+                                                DragValue::new(&mut sound.volume)
+                                                    .range(0.0..=5.0)
+                                                    .speed(0.01)
+                                                    .max_decimals(2)
+                                                    .suffix("x"),
+                                            );
+                                            sound.volume = sound.volume.clamp(0.0, 5.0);
+                                            ui.add_space(18.0);
+                                            ui.label(Self::icon(
+                                                0xe9e4,
+                                                16.0,
+                                                Self::muted_text_color(),
+                                            ));
+                                            let speed_response = Self::click_slider(
+                                                ui,
+                                                &mut sound.speed,
+                                                0.25..=2.0,
+                                                0.0,
+                                                vec2(260.0, 24.0),
+                                            );
+                                            let speed_input = ui.add(
+                                                DragValue::new(&mut sound.speed)
+                                                    .range(0.25..=2.0)
+                                                    .speed(0.01)
+                                                    .max_decimals(2)
+                                                    .suffix("x"),
+                                            );
+                                            sound.speed = sound.speed.clamp(0.25, 2.0);
+                                            if volume_response.changed()
+                                                || speed_response.changed()
+                                                || volume_input.changed()
+                                                || speed_input.changed()
+                                            {
+                                                changed = true;
+                                            }
+                                        });
+                                    });
+                                });
+                        });
+                });
+        });
+
+        self.show_trim_popup = !close_request;
         let sound_duration = self.sounds[index].safe_duration();
         self.trim_timeline_zoom = trim_timeline_zoom;
         self.set_preview_cursor_secs(sound_id, preview_cursor_secs, sound_duration);
@@ -8345,7 +8476,11 @@ impl SoundFxApp {
         if commit_trim_request {
             self.show_trim_commit_panel = true;
         }
-        if preview_toggle {
+        if preview_from_trim_start {
+            let sound = self.sounds[index].clone();
+            self.set_preview_cursor_secs(sound.id, sound.trim_start_secs, sound.safe_duration());
+            self.preview_sound_from_position(sound.id, Some(sound.trim_start_secs));
+        } else if preview_toggle {
             if is_playing {
                 self.stop_preview();
             } else {
@@ -8357,6 +8492,9 @@ impl SoundFxApp {
                 }
                 self.preview_sound_from_position(sound_id, Some(cursor_secs));
             }
+        }
+        if !self.show_trim_popup {
+            ctx.send_viewport_cmd_to(viewport_id, ViewportCommand::Close);
         }
     }
 
