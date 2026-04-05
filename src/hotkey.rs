@@ -37,8 +37,11 @@ mod windows_impl {
     #[derive(Default)]
     struct HookState {
         target_vk: AtomicU32,
+        secondary_target_vk: AtomicU32,
         trigger_count: AtomicU64,
+        secondary_trigger_count: AtomicU64,
         pressed: AtomicBool,
+        secondary_pressed: AtomicBool,
         last_error: Mutex<Option<String>>,
         repaint_ctx: Mutex<Option<egui::Context>>,
     }
@@ -46,9 +49,11 @@ mod windows_impl {
     pub struct GlobalHotkeyManager {
         state: Arc<HookState>,
         last_seen: u64,
+        secondary_last_seen: u64,
         worker: Option<JoinHandle<()>>,
         thread_id: Option<u32>,
         current_key: Option<egui::Key>,
+        secondary_key: Option<egui::Key>,
     }
 
     impl GlobalHotkeyManager {
@@ -103,9 +108,11 @@ mod windows_impl {
             Self {
                 state,
                 last_seen: 0,
+                secondary_last_seen: 0,
                 worker: Some(worker),
                 thread_id: Some(thread_id),
                 current_key: None,
+                secondary_key: None,
             }
         }
 
@@ -116,6 +123,19 @@ mod windows_impl {
             self.current_key = key;
             self.state.pressed.store(false, Ordering::Relaxed);
             self.state.target_vk.store(
+                key.map(virtual_key_code).transpose()?.unwrap_or(0),
+                Ordering::Relaxed,
+            );
+            Ok(())
+        }
+
+        pub fn set_secondary_hotkey(&mut self, key: Option<egui::Key>) -> Result<()> {
+            if self.secondary_key == key {
+                return Ok(());
+            }
+            self.secondary_key = key;
+            self.state.secondary_pressed.store(false, Ordering::Relaxed);
+            self.state.secondary_target_vk.store(
                 key.map(virtual_key_code).transpose()?.unwrap_or(0),
                 Ordering::Relaxed,
             );
@@ -135,13 +155,24 @@ mod windows_impl {
             true
         }
 
+        pub fn take_secondary_triggered(&mut self) -> bool {
+            let current = self.state.secondary_trigger_count.load(Ordering::Relaxed);
+            if current == self.secondary_last_seen {
+                return false;
+            }
+            self.secondary_last_seen = current;
+            true
+        }
+
         pub fn take_error(&self) -> Option<String> {
             self.state.last_error.lock().unwrap().take()
         }
 
         fn shutdown(&mut self) {
             self.state.target_vk.store(0, Ordering::Relaxed);
+            self.state.secondary_target_vk.store(0, Ordering::Relaxed);
             self.state.pressed.store(false, Ordering::Relaxed);
+            self.state.secondary_pressed.store(false, Ordering::Relaxed);
             if let Some(thread_id) = self.thread_id.take() {
                 unsafe {
                     let _ = PostThreadMessageW(thread_id, WM_QUIT, WPARAM(0), LPARAM(0));
@@ -164,23 +195,44 @@ mod windows_impl {
             let state = HOTKEY_STATE.get().cloned();
             if let Some(state) = state {
                 let target_vk = state.target_vk.load(Ordering::Relaxed);
-                if target_vk != 0 {
+                let secondary_target_vk = state.secondary_target_vk.load(Ordering::Relaxed);
+                if target_vk != 0 || secondary_target_vk != 0 {
                     let info = unsafe { &*(lparam.0 as *const KBDLLHOOKSTRUCT) };
-                    if info.vkCode == target_vk {
+                    let matches_primary = target_vk != 0 && info.vkCode == target_vk;
+                    let matches_secondary =
+                        secondary_target_vk != 0 && info.vkCode == secondary_target_vk;
+                    if matches_primary || matches_secondary {
                         if modifier_down() {
                             return unsafe { CallNextHookEx(None, code, wparam, lparam) };
                         }
                         match wparam.0 as u32 {
                             WM_KEYDOWN | WM_SYSKEYDOWN => {
-                                state.pressed.store(true, Ordering::Relaxed);
+                                if matches_primary {
+                                    state.pressed.store(true, Ordering::Relaxed);
+                                }
+                                if matches_secondary {
+                                    state.secondary_pressed.store(true, Ordering::Relaxed);
+                                }
                                 return LRESULT(1);
                             }
                             WM_KEYUP | WM_SYSKEYUP => {
-                                if state.pressed.swap(false, Ordering::Relaxed) {
+                                let mut triggered = false;
+                                if matches_primary && state.pressed.swap(false, Ordering::Relaxed) {
                                     state.trigger_count.fetch_add(1, Ordering::Relaxed);
-                                    if let Some(ctx) = state.repaint_ctx.lock().unwrap().clone() {
-                                        ctx.request_repaint();
-                                    }
+                                    triggered = true;
+                                }
+                                if matches_secondary
+                                    && state.secondary_pressed.swap(false, Ordering::Relaxed)
+                                {
+                                    state
+                                        .secondary_trigger_count
+                                        .fetch_add(1, Ordering::Relaxed);
+                                    triggered = true;
+                                }
+                                if triggered
+                                    && let Some(ctx) = state.repaint_ctx.lock().unwrap().clone()
+                                {
+                                    ctx.request_repaint();
                                 }
                                 return LRESULT(1);
                             }
@@ -302,5 +354,13 @@ impl GlobalHotkeyManager {
 
     pub fn take_error(&self) -> Option<String> {
         None
+    }
+
+    pub fn set_secondary_hotkey(&mut self, _key: Option<egui::Key>) -> Result<()> {
+        Ok(())
+    }
+
+    pub fn take_secondary_triggered(&self) -> bool {
+        false
     }
 }

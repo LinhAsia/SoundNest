@@ -110,14 +110,17 @@ struct PreferencesFile {
     import_dir: Option<PathBuf>,
     pitch_update_hz: Option<f32>,
     overlay_animation: Option<bool>,
+    app_transition_animation: Option<bool>,
     pitch_show_sharps: Option<bool>,
     library_grid_scale: Option<f32>,
     dark_theme: Option<bool>,
     record_hotkey: Option<String>,
+    pitch_hotkey: Option<String>,
     startup_sound_name: Option<String>,
     exit_sound_name: Option<String>,
     startup_sound_cleared: Option<bool>,
     exit_sound_cleared: Option<bool>,
+    gemini_api_key: Option<String>,
 }
 
 pub struct Storage {
@@ -278,6 +281,17 @@ impl Storage {
         self.save_preferences(&preferences)
     }
 
+    pub fn load_app_transition_animation(&self) -> Result<Option<bool>> {
+        let preferences = self.load_preferences()?;
+        Ok(preferences.app_transition_animation)
+    }
+
+    pub fn save_app_transition_animation(&self, enabled: bool) -> Result<()> {
+        let mut preferences = self.load_preferences()?;
+        preferences.app_transition_animation = Some(enabled);
+        self.save_preferences(&preferences)
+    }
+
     pub fn load_pitch_show_sharps(&self) -> Result<Option<bool>> {
         let preferences = self.load_preferences()?;
         Ok(preferences.pitch_show_sharps)
@@ -321,6 +335,29 @@ impl Storage {
     pub fn save_record_hotkey(&self, hotkey: Option<&str>) -> Result<()> {
         let mut preferences = self.load_preferences()?;
         preferences.record_hotkey = hotkey.map(str::to_owned);
+        self.save_preferences(&preferences)
+    }
+
+    pub fn load_pitch_hotkey(&self) -> Result<Option<String>> {
+        let preferences = self.load_preferences()?;
+        Ok(preferences.pitch_hotkey)
+    }
+
+    pub fn save_pitch_hotkey(&self, hotkey: Option<&str>) -> Result<()> {
+        let mut preferences = self.load_preferences()?;
+        preferences.pitch_hotkey = hotkey.map(str::to_owned);
+        self.save_preferences(&preferences)
+    }
+
+    pub fn load_gemini_api_key(&self) -> Result<Option<String>> {
+        let preferences = self.load_preferences()?;
+        Ok(preferences.gemini_api_key)
+    }
+
+    pub fn save_gemini_api_key(&self, api_key: &str) -> Result<()> {
+        let mut preferences = self.load_preferences()?;
+        let trimmed = api_key.trim();
+        preferences.gemini_api_key = (!trimmed.is_empty()).then(|| trimmed.to_owned());
         self.save_preferences(&preferences)
     }
 
