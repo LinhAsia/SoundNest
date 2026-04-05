@@ -16,8 +16,7 @@ use clipboard_win::{Clipboard, Setter, formats::FileList};
 use eframe::egui::{
     self, Align, Button, CentralPanel, Color32, ComboBox, Context, CornerRadius, DragValue,
     FontFamily, Frame, Margin, Pos2, ProgressBar, Rect, RichText, ScrollArea, Sense, Stroke,
-    StrokeKind, TextEdit, TextureHandle, Ui, Vec2, ViewportBuilder, ViewportClass, ViewportCommand,
-    ViewportId, vec2,
+    StrokeKind, TextEdit, TextureHandle, Ui, Vec2, ViewportCommand, ViewportId, vec2,
 };
 use eframe::epaint::Shadow;
 use std::collections::{HashMap, HashSet};
@@ -41,9 +40,7 @@ const LIVE_UI_FADE_SEC: f32 = 0.32;
 const TRANSITION_POINT_COUNT: usize = 240;
 const MATERIAL_ICONS_FONT: &str = "material_icons";
 const PITCH_OVERLAY_ID: &str = "pitch-monitor-overlay";
-const PITCH_OVERLAY_TITLE: &str = "Sound FX Pitch Overlay";
 const RECORD_OVERLAY_ID: &str = "record-monitor-overlay";
-const RECORD_OVERLAY_TITLE: &str = "Sound FX Record Overlay";
 const ACTIVE_UI_REPAINT_MS: u64 = 33;
 const JOB_POLL_REPAINT_MS: u64 = 90;
 const DEFAULT_INTRO_DURATION_SEC: f32 = 1.35;
@@ -933,10 +930,6 @@ impl SoundFxApp {
 
     fn pitch_overlay_viewport_id() -> ViewportId {
         ViewportId::from_hash_of(PITCH_OVERLAY_ID)
-    }
-
-    fn trim_popup_viewport_id() -> ViewportId {
-        ViewportId::from_hash_of("trim-popup-viewport")
     }
 
     fn refresh_pitch_capture_devices(&mut self) {
@@ -4994,100 +4987,34 @@ impl SoundFxApp {
             return;
         }
 
-        let viewport_id = Self::pitch_overlay_viewport_id();
         let mut should_stop = false;
         let overlay_size = if self.pitch_overlay_animation {
             vec2(276.0, 276.0)
         } else {
             vec2(430.0, 104.0)
         };
-        let mut builder = ViewportBuilder::default()
-            .with_title(PITCH_OVERLAY_TITLE)
-            .with_title_shown(false)
-            .with_decorations(false)
-            .with_transparent(true)
-            .with_resizable(false)
-            .with_inner_size(overlay_size)
-            .with_min_inner_size(overlay_size)
-            .with_max_inner_size(overlay_size)
-            .with_window_level(egui::WindowLevel::AlwaysOnTop)
-            .with_visible(true)
-            .with_active(false)
-            .with_taskbar(false);
-        if self.center_pitch_overlay_next_frame
-            && let Some(monitor) = ctx.input(|input| input.viewport().monitor_size)
-        {
-            builder = builder.with_position(Pos2::new(
-                ((monitor.x - overlay_size.x) * 0.5).max(0.0),
-                ((monitor.y - overlay_size.y) * 0.5).max(0.0),
-            ));
-        }
-
-        ctx.show_viewport_immediate(viewport_id, builder, |overlay_ctx, class| {
-            if class == ViewportClass::Embedded {
-                return;
-            }
-
-            if self.pitch_overlay_animation {
-                let mut style = (*overlay_ctx.style()).clone();
-                style.visuals.window_fill = Color32::TRANSPARENT;
-                style.visuals.panel_fill = Color32::TRANSPARENT;
-                style.visuals.extreme_bg_color = Color32::TRANSPARENT;
-                style.visuals.faint_bg_color = Color32::TRANSPARENT;
-                style.visuals.code_bg_color = Color32::TRANSPARENT;
-                overlay_ctx.set_style(style);
-            }
-
-            if self.center_pitch_overlay_next_frame {
-                overlay_ctx.send_viewport_cmd(ViewportCommand::InnerSize(overlay_size));
-                if let Some(center_cmd) = ViewportCommand::center_on_screen(overlay_ctx) {
-                    overlay_ctx.send_viewport_cmd(center_cmd);
+        ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
+        egui::Window::new("")
+            .id(egui::Id::new("pitch-overlay-panel"))
+            .order(egui::Order::Foreground)
+            .title_bar(false)
+            .resizable(false)
+            .collapsible(false)
+            .fixed_size(overlay_size)
+            .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
+            .frame(Frame::new().fill(Color32::TRANSPARENT).inner_margin(0.0))
+            .show(ctx, |ui| {
+                if self.pitch_overlay_animation {
+                    self.render_pitch_blob_overlay(ui, ctx, &snapshot, &mut should_stop);
+                } else {
+                    self.render_pitch_pill_overlay(ui, ctx, &snapshot, &mut should_stop);
                 }
-            }
-            if overlay_ctx.input(|input| input.viewport().close_requested()) {
-                should_stop = true;
-            }
-
-            overlay_ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
-            CentralPanel::default()
-                .frame(
-                    Frame::new()
-                        .fill(Color32::from_rgba_premultiplied(0, 0, 0, 0))
-                        .inner_margin(0.0),
-                )
-                .show(overlay_ctx, |ui| {
-                    if self.pitch_overlay_animation {
-                        self.render_pitch_blob_overlay(
-                            ui,
-                            overlay_ctx,
-                            &snapshot,
-                            &mut should_stop,
-                        );
-                    } else {
-                        self.render_pitch_pill_overlay(
-                            ui,
-                            overlay_ctx,
-                            &snapshot,
-                            &mut should_stop,
-                        );
-                    }
-                });
-        });
+            });
         self.center_pitch_overlay_next_frame = false;
-        if !self.pitch_overlay_native_visuals_applied
-            && platform::set_overlay_window_native_visuals(
-                PITCH_OVERLAY_TITLE,
-                !self.pitch_overlay_animation,
-                self.pitch_overlay_animation,
-            )
-        {
-            self.pitch_overlay_native_visuals_applied = true;
-        }
+        self.pitch_overlay_native_visuals_applied = false;
 
         if should_stop {
             self.pitch_monitor.stop();
-            self.pitch_overlay_native_visuals_applied = false;
-            ctx.send_viewport_cmd_to(viewport_id, ViewportCommand::Close);
             self.clear_status();
         }
     }
@@ -5095,7 +5022,7 @@ impl SoundFxApp {
     fn render_pitch_pill_overlay(
         &self,
         ui: &mut Ui,
-        overlay_ctx: &Context,
+        _overlay_ctx: &Context,
         snapshot: &PitchSnapshot,
         should_stop: &mut bool,
     ) {
@@ -5134,15 +5061,11 @@ impl SoundFxApp {
                     ui.min_rect().min,
                     Pos2::new(ui.min_rect().max.x - 46.0, ui.min_rect().max.y),
                 );
-                let drag_response = ui.interact(
+                let _drag_response = ui.interact(
                     drag_rect,
                     ui.id().with("pitch-overlay-drag"),
                     Sense::click_and_drag(),
                 );
-                if drag_response.drag_started() || drag_response.is_pointer_button_down_on() {
-                    overlay_ctx.send_viewport_cmd(ViewportCommand::StartDrag);
-                }
-
                 let top_highlight = Rect::from_min_max(
                     Pos2::new(ui.min_rect().left() + 18.0, ui.min_rect().top() + 1.0),
                     Pos2::new(ui.min_rect().right() - 58.0, ui.min_rect().top() + 14.0),
@@ -5241,10 +5164,6 @@ impl SoundFxApp {
         if drag_response.dragged() || drag_response.is_pointer_button_down_on() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
         }
-        if drag_response.drag_started() || drag_response.is_pointer_button_down_on() {
-            overlay_ctx.send_viewport_cmd(ViewportCommand::StartDrag);
-        }
-
         let painter = ui.painter_at(rect);
         let center = rect.center();
         let time = overlay_ctx.input(|input| input.time) as f32;
@@ -6119,77 +6038,29 @@ impl SoundFxApp {
 
     fn render_record_overlay_viewport(&mut self, ctx: &Context) {
         let snapshot = self.recorder.snapshot();
-        let viewport_id = Self::record_overlay_viewport_id();
         if !snapshot.running {
-            if self.record_overlay_open {
-                self.record_overlay_open = false;
-                self.record_overlay_native_visuals_applied = false;
-                ctx.send_viewport_cmd_to(viewport_id, ViewportCommand::Close);
-            }
+            self.record_overlay_open = false;
+            self.record_overlay_native_visuals_applied = false;
             return;
         }
         self.record_overlay_open = true;
 
         let overlay_size = vec2(430.0, 118.0);
-        let mut builder = ViewportBuilder::default()
-            .with_title(RECORD_OVERLAY_TITLE)
-            .with_title_shown(false)
-            .with_inner_size(overlay_size)
-            .with_min_inner_size(overlay_size)
-            .with_max_inner_size(overlay_size)
-            .with_transparent(true)
-            .with_decorations(false)
-            .with_window_level(egui::WindowLevel::AlwaysOnTop)
-            .with_visible(true)
-            .with_active(false)
-            .with_taskbar(false);
-
-        if self.center_record_overlay_next_frame
-            && let Some(monitor) = ctx.input(|input| input.viewport().monitor_size)
-        {
-            builder = builder.with_position(Pos2::new(
-                ((monitor.x - overlay_size.x) * 0.5).max(0.0),
-                ((monitor.y - overlay_size.y) * 0.5).max(0.0),
-            ));
-        }
-
-        ctx.show_viewport_immediate(viewport_id, builder, |overlay_ctx, class| {
-            if class != ViewportClass::Immediate {
-                return;
-            }
-
-            let mut style = (*overlay_ctx.style()).clone();
-            style.visuals.window_fill = Color32::TRANSPARENT;
-            style.visuals.panel_fill = Color32::TRANSPARENT;
-            style.visuals.extreme_bg_color = Color32::TRANSPARENT;
-            style.visuals.faint_bg_color = Color32::TRANSPARENT;
-            style.visuals.code_bg_color = Color32::TRANSPARENT;
-            overlay_ctx.set_style(style);
-
-            if self.center_record_overlay_next_frame {
-                overlay_ctx.send_viewport_cmd(ViewportCommand::InnerSize(overlay_size));
-                if let Some(center_cmd) = ViewportCommand::center_on_screen(overlay_ctx) {
-                    overlay_ctx.send_viewport_cmd(center_cmd);
-                }
-            }
-            if overlay_ctx.input(|input| input.viewport().close_requested()) {
-                overlay_ctx.send_viewport_cmd(ViewportCommand::CancelClose);
-            }
-            overlay_ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
-
-            CentralPanel::default()
-                .frame(Frame::new().fill(Color32::TRANSPARENT).inner_margin(0.0))
-                .show(overlay_ctx, |ui| {
-                    self.render_record_blob_overlay(ui, overlay_ctx, &snapshot);
-                });
-        });
-
+        ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
+        egui::Window::new("")
+            .id(egui::Id::new("record-overlay-panel"))
+            .order(egui::Order::Foreground)
+            .title_bar(false)
+            .resizable(false)
+            .collapsible(false)
+            .fixed_size(overlay_size)
+            .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
+            .frame(Frame::new().fill(Color32::TRANSPARENT).inner_margin(0.0))
+            .show(ctx, |ui| {
+                self.render_record_blob_overlay(ui, ctx, &snapshot);
+            });
         self.center_record_overlay_next_frame = false;
-        if !self.record_overlay_native_visuals_applied
-            && platform::set_overlay_window_native_visuals(RECORD_OVERLAY_TITLE, false, true)
-        {
-            self.record_overlay_native_visuals_applied = true;
-        }
+        self.record_overlay_native_visuals_applied = false;
     }
 
     fn render_record_blob_overlay(
@@ -6199,15 +6070,11 @@ impl SoundFxApp {
         snapshot: &crate::recorder::RecorderSnapshot,
     ) {
         let rect = ui.max_rect().shrink2(vec2(8.0, 8.0));
-        let response = ui.interact(
+        let _response = ui.interact(
             rect,
             ui.id().with("record-blob-overlay-drag"),
             Sense::click_and_drag(),
         );
-        if response.drag_started() {
-            overlay_ctx.send_viewport_cmd(ViewportCommand::StartDrag);
-        }
-
         let painter = ui.painter_at(rect);
         let center = rect.center();
         let time = overlay_ctx.input(|input| input.time) as f32;
@@ -8183,15 +8050,12 @@ impl SoundFxApp {
     }
 
     fn render_trim_popup(&mut self, ctx: &Context) {
-        let viewport_id = Self::trim_popup_viewport_id();
         if !self.show_trim_popup {
-            ctx.send_viewport_cmd_to(viewport_id, ViewportCommand::Close);
             return;
         }
 
         let Some(index) = self.selected_sound_index() else {
             self.show_trim_popup = false;
-            ctx.send_viewport_cmd_to(viewport_id, ViewportCommand::Close);
             return;
         };
 
@@ -8228,225 +8092,166 @@ impl SoundFxApp {
         let mut seek_request = false;
         let mut changed = false;
         let mut trim_timeline_zoom = self.trim_timeline_zoom;
-        let monitor_size = ctx.input(|input| input.viewport().monitor_size);
-        let popup_size = monitor_size
-            .map(|size| {
-                vec2(
-                    (size.x * 0.56).clamp(860.0, 1040.0),
-                    (size.y * 0.50).clamp(500.0, 600.0),
-                )
-            })
-            .unwrap_or(vec2(940.0, 540.0));
-        let mut builder = ViewportBuilder::default()
-            .with_title("Trim Sound")
-            .with_title_shown(false)
-            .with_decorations(false)
-            .with_transparent(true)
-            .with_resizable(false)
-            .with_taskbar(false)
-            .with_inner_size(popup_size)
-            .with_min_inner_size(popup_size)
-            .with_max_inner_size(popup_size)
-            .with_active(true)
-            .with_visible(true);
-        if let Some(monitor) = monitor_size {
-            builder = builder.with_position(Pos2::new(
-                ((monitor.x - popup_size.x) * 0.5).max(0.0),
-                ((monitor.y - popup_size.y) * 0.5).max(0.0),
-            ));
+        let popup_size = vec2(960.0, 520.0);
+        let mut open_popup = self.show_trim_popup;
+        if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Space)) {
+            preview_toggle = true;
+        }
+        if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::S)) {
+            preview_from_trim_start = true;
+        }
+        if is_playing {
+            ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
         }
 
-        ctx.show_viewport_immediate(viewport_id, builder, |popup_ctx, class| {
-            if class != ViewportClass::Immediate {
-                return;
-            }
-
-            if popup_ctx.input(|input| input.viewport().close_requested()) {
-                close_request = true;
-                popup_ctx.send_viewport_cmd(ViewportCommand::CancelClose);
-            }
-
-            if popup_ctx
-                .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Space))
-            {
-                preview_toggle = true;
-            }
-            if popup_ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::S)) {
-                preview_from_trim_start = true;
-            }
-
-            if is_playing {
-                popup_ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
-            }
-
-            let mut style = (*popup_ctx.style()).clone();
-            style.visuals.window_fill = Color32::TRANSPARENT;
-            style.visuals.panel_fill = Color32::TRANSPARENT;
-            popup_ctx.set_style(style);
-
-            CentralPanel::default()
-                .frame(Frame::new().fill(Color32::TRANSPARENT).inner_margin(10.0))
-                .show(popup_ctx, |ui| {
-                    Frame::new()
-                        .fill(Self::overlay_panel_fill())
-                        .stroke(Stroke::new(1.0, Self::border_color()))
-                        .shadow(Shadow {
-                            offset: [0, 14],
-                            blur: 34,
-                            spread: 0,
-                            color: Color32::from_rgba_premultiplied(78, 40, 63, 24),
-                        })
-                        .corner_radius(30.0)
-                        .inner_margin(Margin::same(18))
-                        .show(ui, |ui| {
-                            let sound = &mut self.sounds[index];
-                            ui.horizontal(|ui| {
-                                ui.label(
-                                    Self::icon(0xe14e, 20.0, Color32::from_rgb(214, 51, 132))
-                                        .strong(),
-                                );
-                                ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                                    if Self::icon_titlebar(ui, [34.0, 28.0], 0xe5cd, false, true)
-                                        .clicked()
-                                    {
-                                        close_request = true;
-                                    }
-                                });
-                            });
-
-                            ui.add_space(10.0);
-                            let response = ui.add_sized(
-                                [ui.available_width(), 44.0],
-                                TextEdit::singleline(&mut sound.name)
-                                    .font(egui::TextStyle::Heading)
-                                    .desired_width(f32::INFINITY)
-                                    .margin(Vec2::new(12.0, 10.0)),
-                            );
-                            if response.changed() {
-                                changed = true;
-                            }
-
-                            ui.add_space(12.0);
-                            ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                                if Self::icon_action(ui, [52.0, 34.0], 0xe872, false, false)
-                                    .clicked()
-                                {
-                                    delete_request = true;
-                                }
-                                if Self::icon_action(ui, [52.0, 34.0], 0xe14e, false, false)
-                                    .clicked()
-                                {
-                                    commit_trim_request = true;
-                                }
-                                if Self::icon_action(ui, [64.0, 34.0], 0xe14d, false, false)
-                                    .clicked()
-                                {
-                                    copy_request = true;
-                                }
-                                if Self::icon_action(ui, [52.0, 34.0], 0xe2c8, false, false)
-                                    .clicked()
-                                {
-                                    open_location_request = true;
-                                }
-                                if Self::icon_action(
-                                    ui,
-                                    [64.0, 34.0],
-                                    if is_playing { 0xe047 } else { 0xe037 },
-                                    is_playing,
-                                    false,
-                                )
-                                .clicked()
-                                {
-                                    preview_toggle = true;
-                                }
-                            });
-
-                            ui.add_space(14.0);
-                            Frame::new()
-                                .fill(Self::panel_fill())
-                                .stroke(Stroke::new(1.0, Self::subtle_border_color()))
-                                .corner_radius(26.0)
-                                .inner_margin(Margin::same(18))
-                                .show(ui, |ui| {
-                                    let (timeline_changed, timeline_seek_request, _) =
-                                        Self::draw_trim_timeline(
-                                            ui,
-                                            sound,
-                                            &mut preview_cursor_secs,
-                                            &mut trim_timeline_zoom,
-                                            !is_playing,
-                                            true,
-                                        );
-                                    changed |= timeline_changed;
-                                    seek_request |= timeline_seek_request;
-                                });
-
-                            ui.add_space(14.0);
-                            Frame::new()
-                                .fill(Self::panel_fill())
-                                .stroke(Stroke::new(1.0, Self::subtle_border_color()))
-                                .corner_radius(22.0)
-                                .inner_margin(Margin::same(16))
-                                .show(ui, |ui| {
-                                    Self::with_slider_visuals(ui, |ui| {
-                                        ui.horizontal(|ui| {
-                                            ui.label(Self::icon(
-                                                0xe050,
-                                                16.0,
-                                                Self::muted_text_color(),
-                                            ));
-                                            let volume_response = Self::click_slider(
-                                                ui,
-                                                &mut sound.volume,
-                                                0.0..=5.0,
-                                                0.0,
-                                                vec2(260.0, 24.0),
-                                            );
-                                            let volume_input = ui.add(
-                                                DragValue::new(&mut sound.volume)
-                                                    .range(0.0..=5.0)
-                                                    .speed(0.01)
-                                                    .max_decimals(2)
-                                                    .suffix("x"),
-                                            );
-                                            sound.volume = sound.volume.clamp(0.0, 5.0);
-                                            ui.add_space(18.0);
-                                            ui.label(Self::icon(
-                                                0xe9e4,
-                                                16.0,
-                                                Self::muted_text_color(),
-                                            ));
-                                            let speed_response = Self::click_slider(
-                                                ui,
-                                                &mut sound.speed,
-                                                0.25..=2.0,
-                                                0.0,
-                                                vec2(260.0, 24.0),
-                                            );
-                                            let speed_input = ui.add(
-                                                DragValue::new(&mut sound.speed)
-                                                    .range(0.25..=2.0)
-                                                    .speed(0.01)
-                                                    .max_decimals(2)
-                                                    .suffix("x"),
-                                            );
-                                            sound.speed = sound.speed.clamp(0.25, 2.0);
-                                            if volume_response.changed()
-                                                || speed_response.changed()
-                                                || volume_input.changed()
-                                                || speed_input.changed()
-                                            {
-                                                changed = true;
-                                            }
-                                        });
-                                    });
-                                });
-                        });
+        egui::Window::new("")
+            .id(egui::Id::new("trim-popup-panel"))
+            .order(egui::Order::Foreground)
+            .title_bar(false)
+            .resizable(false)
+            .collapsible(false)
+            .fixed_size(popup_size)
+            .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
+            .open(&mut open_popup)
+            .frame(
+                Frame::new()
+                    .fill(Self::overlay_panel_fill())
+                    .stroke(Stroke::new(1.0, Self::border_color()))
+                    .shadow(Shadow {
+                        offset: [0, 14],
+                        blur: 34,
+                        spread: 0,
+                        color: Color32::from_rgba_premultiplied(78, 40, 63, 24),
+                    })
+                    .corner_radius(30.0)
+                    .inner_margin(Margin::same(18)),
+            )
+            .show(ctx, |ui| {
+                let sound = &mut self.sounds[index];
+                ui.horizontal(|ui| {
+                    ui.label(Self::icon(0xe14e, 20.0, Color32::from_rgb(214, 51, 132)).strong());
+                    ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                        if Self::icon_titlebar(ui, [34.0, 28.0], 0xe5cd, false, true).clicked() {
+                            close_request = true;
+                        }
+                    });
                 });
-        });
-        let _ = platform::set_overlay_window_native_visuals("Trim Sound", false, true);
 
-        self.show_trim_popup = !close_request;
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    let text_width = (ui.available_width() - 300.0).max(320.0);
+                    let response = ui.add_sized(
+                        [text_width, 44.0],
+                        TextEdit::singleline(&mut sound.name)
+                            .font(egui::TextStyle::Heading)
+                            .desired_width(f32::INFINITY)
+                            .margin(Vec2::new(12.0, 10.0)),
+                    );
+                    if response.changed() {
+                        changed = true;
+                    }
+
+                    ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                        if Self::icon_action(ui, [46.0, 34.0], 0xe872, false, false).clicked() {
+                            delete_request = true;
+                        }
+                        if Self::icon_action(ui, [46.0, 34.0], 0xe14e, false, false).clicked() {
+                            commit_trim_request = true;
+                        }
+                        if Self::icon_action(ui, [56.0, 34.0], 0xe14d, false, false).clicked() {
+                            copy_request = true;
+                        }
+                        if Self::icon_action(ui, [46.0, 34.0], 0xe2c8, false, false).clicked() {
+                            open_location_request = true;
+                        }
+                        if Self::icon_action(
+                            ui,
+                            [56.0, 34.0],
+                            if is_playing { 0xe047 } else { 0xe037 },
+                            is_playing,
+                            false,
+                        )
+                        .clicked()
+                        {
+                            preview_toggle = true;
+                        }
+                    });
+                });
+
+                ui.add_space(12.0);
+                Frame::new()
+                    .fill(Self::panel_fill())
+                    .stroke(Stroke::new(1.0, Self::subtle_border_color()))
+                    .corner_radius(26.0)
+                    .inner_margin(Margin::same(18))
+                    .show(ui, |ui| {
+                        let (timeline_changed, timeline_seek_request, _) = Self::draw_trim_timeline(
+                            ui,
+                            sound,
+                            &mut preview_cursor_secs,
+                            &mut trim_timeline_zoom,
+                            !is_playing,
+                            true,
+                        );
+                        changed |= timeline_changed;
+                        seek_request |= timeline_seek_request;
+                    });
+
+                ui.add_space(12.0);
+                Frame::new()
+                    .fill(Self::panel_fill())
+                    .stroke(Stroke::new(1.0, Self::subtle_border_color()))
+                    .corner_radius(22.0)
+                    .inner_margin(Margin::same(16))
+                    .show(ui, |ui| {
+                        Self::with_slider_visuals(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(Self::icon(0xe050, 16.0, Self::muted_text_color()));
+                                let volume_response = Self::click_slider(
+                                    ui,
+                                    &mut sound.volume,
+                                    0.0..=5.0,
+                                    0.0,
+                                    vec2(260.0, 24.0),
+                                );
+                                let volume_input = ui.add(
+                                    DragValue::new(&mut sound.volume)
+                                        .range(0.0..=5.0)
+                                        .speed(0.01)
+                                        .max_decimals(2)
+                                        .suffix("x"),
+                                );
+                                sound.volume = sound.volume.clamp(0.0, 5.0);
+                                ui.add_space(18.0);
+                                ui.label(Self::icon(0xe9e4, 16.0, Self::muted_text_color()));
+                                let speed_response = Self::click_slider(
+                                    ui,
+                                    &mut sound.speed,
+                                    0.25..=2.0,
+                                    0.0,
+                                    vec2(260.0, 24.0),
+                                );
+                                let speed_input = ui.add(
+                                    DragValue::new(&mut sound.speed)
+                                        .range(0.25..=2.0)
+                                        .speed(0.01)
+                                        .max_decimals(2)
+                                        .suffix("x"),
+                                );
+                                sound.speed = sound.speed.clamp(0.25, 2.0);
+                                if volume_response.changed()
+                                    || speed_response.changed()
+                                    || volume_input.changed()
+                                    || speed_input.changed()
+                                {
+                                    changed = true;
+                                }
+                            });
+                        });
+                    });
+            });
+
+        self.show_trim_popup = open_popup && !close_request;
         let sound_duration = self.sounds[index].safe_duration();
         self.trim_timeline_zoom = trim_timeline_zoom;
         self.set_preview_cursor_secs(sound_id, preview_cursor_secs, sound_duration);
@@ -8497,7 +8302,6 @@ impl SoundFxApp {
             }
             let reset_secs = self.sounds[index].trim_start_secs;
             self.set_preview_cursor_secs(sound_id, reset_secs, sound_duration);
-            ctx.send_viewport_cmd_to(viewport_id, ViewportCommand::Close);
         }
     }
 

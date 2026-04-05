@@ -147,6 +147,7 @@ mod windows_platform {
         }
     }
 
+    #[allow(dead_code)]
     pub fn set_overlay_window_native_visuals(
         window_title: &str,
         enabled: bool,
@@ -708,6 +709,7 @@ pub fn set_native_window_shadow(_frame: &eframe::Frame, _enabled: bool) {}
 pub fn set_native_window_topmost(_frame: &eframe::Frame, _enabled: bool) {}
 
 #[cfg(not(windows))]
+#[allow(dead_code)]
 pub fn set_overlay_window_native_visuals(
     _window_title: &str,
     _enabled: bool,
