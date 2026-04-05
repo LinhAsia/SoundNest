@@ -16,7 +16,7 @@ use clipboard_win::{Clipboard, Setter, formats::FileList};
 use eframe::egui::{
     self, Align, Button, CentralPanel, Color32, ComboBox, Context, CornerRadius, DragValue,
     FontFamily, Frame, Margin, Pos2, ProgressBar, Rect, RichText, ScrollArea, Sense, Stroke,
-    StrokeKind, TextEdit, TextureHandle, Ui, Vec2, ViewportCommand, ViewportId, vec2,
+    StrokeKind, TextEdit, TextureHandle, Ui, Vec2, ViewportCommand, vec2,
 };
 use eframe::epaint::Shadow;
 use std::collections::{HashMap, HashSet};
@@ -39,8 +39,6 @@ const APP_OUTER_MARGIN: f32 = 0.0;
 const LIVE_UI_FADE_SEC: f32 = 0.32;
 const TRANSITION_POINT_COUNT: usize = 240;
 const MATERIAL_ICONS_FONT: &str = "material_icons";
-const PITCH_OVERLAY_ID: &str = "pitch-monitor-overlay";
-const RECORD_OVERLAY_ID: &str = "record-monitor-overlay";
 const ACTIVE_UI_REPAINT_MS: u64 = 33;
 const JOB_POLL_REPAINT_MS: u64 = 90;
 const DEFAULT_INTRO_DURATION_SEC: f32 = 1.35;
@@ -179,6 +177,7 @@ pub struct SoundFxApp {
     record_export_video_fps: u32,
     center_record_overlay_next_frame: bool,
     record_overlay_native_visuals_applied: bool,
+    record_overlay_pos: Option<Pos2>,
     library_grid_scale: f32,
     video_assets: Vec<VideoAsset>,
     recording_draft: Option<RecordingDraft>,
@@ -193,6 +192,7 @@ pub struct SoundFxApp {
     selected_pitch_input_device: Option<String>,
     center_pitch_overlay_next_frame: bool,
     pitch_overlay_native_visuals_applied: bool,
+    pitch_overlay_pos: Option<Pos2>,
     startup: StartupSplashState,
     center_window_next_frame: bool,
     titlebar_drag_rect: Option<Rect>,
@@ -375,6 +375,7 @@ impl SoundFxApp {
             record_export_video_fps: record_video::STANDARD_VIDEO_FPS,
             center_record_overlay_next_frame: false,
             record_overlay_native_visuals_applied: false,
+            record_overlay_pos: None,
             library_grid_scale,
             video_assets,
             recording_draft: None,
@@ -389,6 +390,7 @@ impl SoundFxApp {
             selected_pitch_input_device,
             center_pitch_overlay_next_frame: false,
             pitch_overlay_native_visuals_applied: false,
+            pitch_overlay_pos: None,
             startup: StartupSplashState {
                 phase: if app_transition_animation {
                     TransitionPhase::Intro
@@ -476,6 +478,72 @@ impl SoundFxApp {
 
     fn desired_window_size() -> Vec2 {
         vec2(900.0, 900.0)
+    }
+
+    fn centered_overlay_pos(ctx: &Context, size: Vec2) -> Pos2 {
+        let rect = ctx.screen_rect();
+        Pos2::new(
+            rect.center().x - size.x * 0.5,
+            rect.center().y - size.y * 0.5,
+        )
+    }
+
+    fn clamp_overlay_pos(ctx: &Context, size: Vec2, pos: Pos2) -> Pos2 {
+        let rect = ctx.screen_rect();
+        let max_x = (rect.right() - size.x).max(rect.left());
+        let max_y = (rect.bottom() - size.y).max(rect.top());
+        Pos2::new(
+            pos.x.clamp(rect.left(), max_x),
+            pos.y.clamp(rect.top(), max_y),
+        )
+    }
+
+    fn update_overlay_drag_position(
+        ctx: &Context,
+        response: &egui::Response,
+        size: Vec2,
+        position: &mut Option<Pos2>,
+    ) {
+        let drag_origin_id = response.id.with("overlay-drag-origin");
+        if response.drag_started() {
+            ctx.data_mut(|data| {
+                data.insert_temp(drag_origin_id, position.unwrap_or_default());
+            });
+        }
+        if response.dragged()
+            && let Some(origin) = ctx.data(|data| data.get_temp::<Pos2>(drag_origin_id))
+        {
+            *position = Some(Self::clamp_overlay_pos(
+                ctx,
+                size,
+                origin + response.drag_delta(),
+            ));
+        }
+        if !ctx.input(|input| input.pointer.primary_down()) {
+            ctx.data_mut(|data| {
+                data.remove::<Pos2>(drag_origin_id);
+            });
+        }
+    }
+
+    fn external_drop_pointer_pos(&self, ctx: &Context) -> Option<Pos2> {
+        ctx.input(|input| input.pointer.hover_pos().or(input.pointer.latest_pos()))
+            .or_else(|| {
+                #[cfg(windows)]
+                {
+                    let cursor = platform::cursor_screen_position()?;
+                    let outer_rect = ctx.input(|input| input.viewport().outer_rect)?;
+                    let pixels_per_point = ctx.native_pixels_per_point().unwrap_or(1.0);
+                    Some(Pos2::new(
+                        cursor.x / pixels_per_point - outer_rect.min.x,
+                        cursor.y / pixels_per_point - outer_rect.min.y,
+                    ))
+                }
+                #[cfg(not(windows))]
+                {
+                    None
+                }
+            })
     }
 
     fn enforce_square_window_if_needed(&mut self, _ctx: &Context) {}
@@ -571,26 +639,23 @@ impl SoundFxApp {
         ctx.request_repaint();
     }
 
-    fn stop_recording_for_close(&mut self, ctx: &Context) {
+    fn stop_recording_for_close(&mut self, _ctx: &Context) {
         self.recorder.stop();
         self.record_overlay_open = false;
         self.record_overlay_native_visuals_applied = false;
-        ctx.send_viewport_cmd_to(Self::record_overlay_viewport_id(), ViewportCommand::Close);
         if let Some(path) = self.recorder.take_completed_path() {
             let _ = fs::remove_file(path);
         }
     }
 
-    fn finalize_close_cleanup(&mut self, ctx: &Context) {
+    fn finalize_close_cleanup(&mut self, _ctx: &Context) {
         self.show_download_panel = false;
         self.close_recording_review(true);
         self.video_viewer = None;
         self.pitch_monitor.stop();
         self.pitch_overlay_native_visuals_applied = false;
-        ctx.send_viewport_cmd_to(Self::pitch_overlay_viewport_id(), ViewportCommand::Close);
         self.record_overlay_open = false;
         self.record_overlay_native_visuals_applied = false;
-        ctx.send_viewport_cmd_to(Self::record_overlay_viewport_id(), ViewportCommand::Close);
     }
 
     fn play_file_if_exists(&mut self, path: &Path) -> Result<()> {
@@ -928,10 +993,6 @@ impl SoundFxApp {
         compact
     }
 
-    fn pitch_overlay_viewport_id() -> ViewportId {
-        ViewportId::from_hash_of(PITCH_OVERLAY_ID)
-    }
-
     fn refresh_pitch_capture_devices(&mut self) {
         match list_capture_devices() {
             Ok(devices) => {
@@ -1000,10 +1061,6 @@ impl SoundFxApp {
             format!("{stem}-{stamp}.wav")
         };
         self.storage.root_dir().join("recordings").join(file_name)
-    }
-
-    fn record_overlay_viewport_id() -> ViewportId {
-        ViewportId::from_hash_of(RECORD_OVERLAY_ID)
     }
 
     fn open_recording_review(&mut self, path: &Path) {
@@ -1194,7 +1251,7 @@ impl SoundFxApp {
         }
     }
 
-    fn start_recording(&mut self) {
+    fn start_recording(&mut self, ctx: &Context) {
         if self.record_input_source == PitchInputSource::Microphone
             && self.selected_record_input_device.is_none()
         {
@@ -1215,18 +1272,21 @@ impl SoundFxApp {
         }) {
             Ok(()) => {
                 self.center_record_overlay_next_frame = true;
+                self.record_overlay_pos = None;
                 self.record_overlay_native_visuals_applied = false;
+                self.show_record_panel = false;
+                Self::reveal_window(ctx);
                 self.clear_status();
             }
             Err(error) => self.set_error_status(error),
         }
     }
 
-    fn toggle_recording(&mut self) {
+    fn toggle_recording(&mut self, ctx: &Context) {
         if self.recorder.snapshot().running {
             self.stop_recording();
         } else {
-            self.start_recording();
+            self.start_recording(ctx);
         }
     }
 
@@ -1239,7 +1299,7 @@ impl SoundFxApp {
                 self.reveal_record_review_on_open = false;
             }
         } else {
-            self.start_recording();
+            self.start_recording(ctx);
         }
     }
 
@@ -1248,7 +1308,6 @@ impl SoundFxApp {
         if snapshot.running {
             self.pitch_monitor.stop();
             self.pitch_overlay_native_visuals_applied = false;
-            ctx.send_viewport_cmd_to(Self::pitch_overlay_viewport_id(), ViewportCommand::Close);
             self.clear_status();
             return;
         }
@@ -1271,7 +1330,9 @@ impl SoundFxApp {
         }) {
             Ok(()) => {
                 self.center_pitch_overlay_next_frame = true;
+                self.pitch_overlay_pos = None;
                 self.pitch_overlay_native_visuals_applied = false;
+                self.show_pitch_panel = false;
                 Self::reveal_window(ctx);
                 self.clear_status();
             }
@@ -1571,21 +1632,51 @@ impl SoundFxApp {
         if self.is_transition_active() {
             return;
         }
-        let local_record_trigger = !ctx.wants_keyboard_input()
-            && self.record_hotkey.is_some_and(|key| {
-                ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, key))
+        let app_focused = ctx.input(|input| input.focused);
+        let local_record_trigger = app_focused
+            && self.record_hotkey.is_some_and(|hotkey| {
+                ctx.input(|input| {
+                    input.events.iter().any(|event| {
+                        matches!(
+                            event,
+                            egui::Event::Key {
+                                key,
+                                pressed: true,
+                                repeat: false,
+                                modifiers,
+                                ..
+                            } if *key == hotkey && modifiers.is_none()
+                        )
+                    })
+                })
             });
-        let local_pitch_trigger = !ctx.wants_keyboard_input()
-            && self.pitch_hotkey.is_some_and(|key| {
-                ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, key))
+        let local_pitch_trigger = app_focused
+            && self.pitch_hotkey.is_some_and(|hotkey| {
+                ctx.input(|input| {
+                    input.events.iter().any(|event| {
+                        matches!(
+                            event,
+                            egui::Event::Key {
+                                key,
+                                pressed: true,
+                                repeat: false,
+                                modifiers,
+                                ..
+                            } if *key == hotkey && modifiers.is_none()
+                        )
+                    })
+                })
             });
         if let Some(error) = self.record_hotkey_manager.take_error() {
             self.set_error_status(error);
         }
-        if local_record_trigger || self.record_hotkey_manager.take_triggered() {
+        let global_record_trigger = !app_focused && self.record_hotkey_manager.take_triggered();
+        let global_pitch_trigger =
+            !app_focused && self.record_hotkey_manager.take_secondary_triggered();
+        if local_record_trigger || global_record_trigger {
             self.trigger_record_hotkey_action(ctx);
         }
-        if local_pitch_trigger || self.record_hotkey_manager.take_secondary_triggered() {
+        if local_pitch_trigger || global_pitch_trigger {
             self.trigger_pitch_hotkey_action(ctx);
         }
     }
@@ -1619,8 +1710,7 @@ impl SoundFxApp {
         if dropped.is_empty() {
             return;
         }
-        let pointer_pos =
-            ctx.input(|input| input.pointer.hover_pos().or(input.pointer.latest_pos()));
+        let pointer_pos = self.external_drop_pointer_pos(ctx);
         let dropped_in_rect = self
             .editor_drop_rect
             .is_some_and(|rect| pointer_pos.is_some_and(|pos| rect.contains(pos)));
@@ -3631,7 +3721,7 @@ impl SoundFxApp {
         }
 
         if toggle_record {
-            self.toggle_recording();
+            self.toggle_recording(ctx);
         }
         if use_selected_sound {
             self.open_selected_sound_for_record_export();
@@ -4963,7 +5053,9 @@ impl SoundFxApp {
                     }) {
                         Ok(()) => {
                             self.center_pitch_overlay_next_frame = true;
+                            self.pitch_overlay_pos = None;
                             self.pitch_overlay_native_visuals_applied = false;
+                            self.show_pitch_panel = false;
                             self.clear_status();
                         }
                         Err(error) => self.set_error_status(error),
@@ -4972,7 +5064,6 @@ impl SoundFxApp {
             } else {
                 self.pitch_monitor.stop();
                 self.pitch_overlay_native_visuals_applied = false;
-                ctx.send_viewport_cmd_to(Self::pitch_overlay_viewport_id(), ViewportCommand::Close);
                 self.clear_status();
             }
         }
@@ -4993,23 +5084,41 @@ impl SoundFxApp {
         } else {
             vec2(430.0, 104.0)
         };
+        let overlay_pos =
+            if self.center_pitch_overlay_next_frame || self.pitch_overlay_pos.is_none() {
+                let centered = Self::centered_overlay_pos(ctx, overlay_size);
+                self.pitch_overlay_pos = Some(centered);
+                centered
+            } else {
+                self.pitch_overlay_pos.unwrap_or_default()
+            };
         ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
-        egui::Window::new("")
-            .id(egui::Id::new("pitch-overlay-panel"))
+        let area_id = egui::Id::new("pitch-overlay-panel");
+        egui::Area::new(area_id)
             .order(egui::Order::Foreground)
-            .title_bar(false)
-            .resizable(false)
-            .collapsible(false)
-            .fixed_size(overlay_size)
-            .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
-            .frame(Frame::new().fill(Color32::TRANSPARENT).inner_margin(0.0))
+            .current_pos(overlay_pos)
+            .constrain_to(ctx.screen_rect())
+            .interactable(true)
             .show(ctx, |ui| {
-                if self.pitch_overlay_animation {
-                    self.render_pitch_blob_overlay(ui, ctx, &snapshot, &mut should_stop);
-                } else {
-                    self.render_pitch_pill_overlay(ui, ctx, &snapshot, &mut should_stop);
-                }
+                ui.allocate_ui_with_layout(
+                    overlay_size,
+                    egui::Layout::top_down(Align::Min),
+                    |ui| {
+                        if self.pitch_overlay_animation {
+                            self.render_pitch_blob_overlay(ui, ctx, &snapshot, &mut should_stop);
+                        } else {
+                            self.render_pitch_pill_overlay(ui, ctx, &snapshot, &mut should_stop);
+                        }
+                    },
+                );
             });
+        if let Some(state) = egui::AreaState::load(ctx, area_id) {
+            self.pitch_overlay_pos = Some(Self::clamp_overlay_pos(
+                ctx,
+                overlay_size,
+                state.left_top_pos(),
+            ));
+        }
         self.center_pitch_overlay_next_frame = false;
         self.pitch_overlay_native_visuals_applied = false;
 
@@ -5020,9 +5129,9 @@ impl SoundFxApp {
     }
 
     fn render_pitch_pill_overlay(
-        &self,
+        &mut self,
         ui: &mut Ui,
-        _overlay_ctx: &Context,
+        overlay_ctx: &Context,
         snapshot: &PitchSnapshot,
         should_stop: &mut bool,
     ) {
@@ -5065,6 +5174,12 @@ impl SoundFxApp {
                     drag_rect,
                     ui.id().with("pitch-overlay-drag"),
                     Sense::click_and_drag(),
+                );
+                Self::update_overlay_drag_position(
+                    overlay_ctx,
+                    &_drag_response,
+                    vec2(430.0, 104.0),
+                    &mut self.pitch_overlay_pos,
                 );
                 let top_highlight = Rect::from_min_max(
                     Pos2::new(ui.min_rect().left() + 18.0, ui.min_rect().top() + 1.0),
@@ -5157,6 +5272,12 @@ impl SoundFxApp {
             rect,
             ui.id().with("pitch-blob-overlay-drag"),
             Sense::click_and_drag(),
+        );
+        Self::update_overlay_drag_position(
+            overlay_ctx,
+            &drag_response,
+            vec2(276.0, 276.0),
+            &mut self.pitch_overlay_pos,
         );
         if drag_response.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
@@ -6046,34 +6167,56 @@ impl SoundFxApp {
         self.record_overlay_open = true;
 
         let overlay_size = vec2(430.0, 118.0);
+        let overlay_pos =
+            if self.center_record_overlay_next_frame || self.record_overlay_pos.is_none() {
+                let centered = Self::centered_overlay_pos(ctx, overlay_size);
+                self.record_overlay_pos = Some(centered);
+                centered
+            } else {
+                self.record_overlay_pos.unwrap_or_default()
+            };
         ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
-        egui::Window::new("")
-            .id(egui::Id::new("record-overlay-panel"))
+        let area_id = egui::Id::new("record-overlay-panel");
+        egui::Area::new(area_id)
             .order(egui::Order::Foreground)
-            .title_bar(false)
-            .resizable(false)
-            .collapsible(false)
-            .fixed_size(overlay_size)
-            .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
-            .frame(Frame::new().fill(Color32::TRANSPARENT).inner_margin(0.0))
+            .current_pos(overlay_pos)
+            .constrain_to(ctx.screen_rect())
+            .interactable(true)
             .show(ctx, |ui| {
-                self.render_record_blob_overlay(ui, ctx, &snapshot);
+                ui.allocate_ui_with_layout(
+                    overlay_size,
+                    egui::Layout::top_down(Align::Min),
+                    |ui| self.render_record_blob_overlay(ui, ctx, &snapshot),
+                );
             });
+        if let Some(state) = egui::AreaState::load(ctx, area_id) {
+            self.record_overlay_pos = Some(Self::clamp_overlay_pos(
+                ctx,
+                overlay_size,
+                state.left_top_pos(),
+            ));
+        }
         self.center_record_overlay_next_frame = false;
         self.record_overlay_native_visuals_applied = false;
     }
 
     fn render_record_blob_overlay(
-        &self,
+        &mut self,
         ui: &mut Ui,
         overlay_ctx: &Context,
         snapshot: &crate::recorder::RecorderSnapshot,
     ) {
         let rect = ui.max_rect().shrink2(vec2(8.0, 8.0));
-        let _response = ui.interact(
+        let response = ui.interact(
             rect,
             ui.id().with("record-blob-overlay-drag"),
             Sense::click_and_drag(),
+        );
+        Self::update_overlay_drag_position(
+            overlay_ctx,
+            &response,
+            vec2(430.0, 118.0),
+            &mut self.record_overlay_pos,
         );
         let painter = ui.painter_at(rect);
         let center = rect.center();
@@ -8092,7 +8235,7 @@ impl SoundFxApp {
         let mut seek_request = false;
         let mut changed = false;
         let mut trim_timeline_zoom = self.trim_timeline_zoom;
-        let popup_size = vec2(960.0, 520.0);
+        let popup_size = vec2(920.0, 470.0);
         let mut open_popup = self.show_trim_popup;
         if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Space)) {
             preview_toggle = true;
@@ -8138,45 +8281,52 @@ impl SoundFxApp {
                 });
 
                 ui.add_space(10.0);
-                ui.horizontal(|ui| {
-                    let text_width = (ui.available_width() - 300.0).max(320.0);
-                    let response = ui.add_sized(
-                        [text_width, 44.0],
-                        TextEdit::singleline(&mut sound.name)
-                            .font(egui::TextStyle::Heading)
-                            .desired_width(f32::INFINITY)
-                            .margin(Vec2::new(12.0, 10.0)),
-                    );
-                    if response.changed() {
-                        changed = true;
-                    }
+                Frame::new()
+                    .fill(Self::surface_fill())
+                    .stroke(Stroke::new(1.0, Self::border_color()))
+                    .corner_radius(20.0)
+                    .inner_margin(Margin::same(12))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            let button_width = 5.0 * 46.0 + 4.0 * 8.0 + 10.0;
+                            let text_width = (ui.available_width() - button_width).max(320.0);
+                            let response = ui.add_sized(
+                                [text_width, 42.0],
+                                TextEdit::singleline(&mut sound.name)
+                                    .font(egui::TextStyle::Heading)
+                                    .desired_width(f32::INFINITY)
+                                    .margin(Vec2::new(12.0, 9.0)),
+                            );
+                            if response.changed() {
+                                changed = true;
+                            }
 
-                    ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                        if Self::icon_action(ui, [46.0, 34.0], 0xe872, false, false).clicked() {
-                            delete_request = true;
-                        }
-                        if Self::icon_action(ui, [46.0, 34.0], 0xe14e, false, false).clicked() {
-                            commit_trim_request = true;
-                        }
-                        if Self::icon_action(ui, [56.0, 34.0], 0xe14d, false, false).clicked() {
-                            copy_request = true;
-                        }
-                        if Self::icon_action(ui, [46.0, 34.0], 0xe2c8, false, false).clicked() {
-                            open_location_request = true;
-                        }
-                        if Self::icon_action(
-                            ui,
-                            [56.0, 34.0],
-                            if is_playing { 0xe047 } else { 0xe037 },
-                            is_playing,
-                            false,
-                        )
-                        .clicked()
-                        {
-                            preview_toggle = true;
-                        }
+                            ui.add_space(10.0);
+                            if Self::icon_action(
+                                ui,
+                                [56.0, 34.0],
+                                if is_playing { 0xe047 } else { 0xe037 },
+                                is_playing,
+                                false,
+                            )
+                            .clicked()
+                            {
+                                preview_toggle = true;
+                            }
+                            if Self::icon_action(ui, [46.0, 34.0], 0xe2c8, false, false).clicked() {
+                                open_location_request = true;
+                            }
+                            if Self::icon_action(ui, [56.0, 34.0], 0xe14d, false, false).clicked() {
+                                copy_request = true;
+                            }
+                            if Self::icon_action(ui, [46.0, 34.0], 0xe14e, false, false).clicked() {
+                                commit_trim_request = true;
+                            }
+                            if Self::icon_action(ui, [46.0, 34.0], 0xe872, false, false).clicked() {
+                                delete_request = true;
+                            }
+                        });
                     });
-                });
 
                 ui.add_space(12.0);
                 Frame::new()
@@ -10273,8 +10423,9 @@ impl eframe::App for SoundFxApp {
             && !self.has_modal_panel()
             && ctx.input(|input| !input.raw.hovered_files.is_empty());
         if external_file_hover {
-            let pointer_over_drop = ctx
-                .input(|input| input.pointer.hover_pos().or(input.pointer.latest_pos()))
+            ctx.request_repaint_after(Duration::from_millis(16));
+            let pointer_over_drop = self
+                .external_drop_pointer_pos(ctx)
                 .zip(self.editor_drop_rect)
                 .is_some_and(|(pos, rect)| rect.contains(pos));
             self.editor_drop_armed = pointer_over_drop;

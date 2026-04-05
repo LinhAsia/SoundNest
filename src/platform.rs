@@ -697,6 +697,17 @@ mod windows_platform {
 
         Ok(())
     }
+
+    pub fn cursor_screen_position() -> Option<eframe::egui::Pos2> {
+        unsafe {
+            let mut cursor = POINT::default();
+            if GetCursorPos(&mut cursor).is_ok() {
+                Some(eframe::egui::pos2(cursor.x as f32, cursor.y as f32))
+            } else {
+                None
+            }
+        }
+    }
 }
 
 #[cfg(windows)]
@@ -724,4 +735,9 @@ pub fn drag_file_out(
     _ghost: Option<&DragGhostSpec>,
 ) -> anyhow::Result<()> {
     anyhow::bail!("Drag out is only available on Windows")
+}
+
+#[cfg(not(windows))]
+pub fn cursor_screen_position() -> Option<eframe::egui::Pos2> {
+    None
 }
