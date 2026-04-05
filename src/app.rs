@@ -162,6 +162,7 @@ pub struct SoundFxApp {
     show_pitch_panel: bool,
     show_settings_panel: bool,
     show_trim_commit_panel: bool,
+    show_trim_popup: bool,
     import_dir: PathBuf,
     import_audio_entries: Vec<PathBuf>,
     app_view: AppView,
@@ -214,6 +215,7 @@ pub struct SoundFxApp {
     settings_show_exit_sound: bool,
     library_audio_query: String,
     library_video_query: String,
+    editor_drop_armed: bool,
     pending_sound_drag: Option<Uuid>,
     ignored_drop_path: Option<PathBuf>,
     reveal_record_review_on_open: bool,
@@ -355,6 +357,7 @@ impl SoundFxApp {
             show_pitch_panel: false,
             show_settings_panel: false,
             show_trim_commit_panel: false,
+            show_trim_popup: false,
             import_dir,
             import_audio_entries: Vec::new(),
             app_view: AppView::Editor,
@@ -423,6 +426,7 @@ impl SoundFxApp {
             settings_show_exit_sound: false,
             library_audio_query: String::new(),
             library_video_query: String::new(),
+            editor_drop_armed: false,
             pending_sound_drag: None,
             ignored_drop_path: None,
             reveal_record_review_on_open: false,
@@ -518,6 +522,7 @@ impl SoundFxApp {
 
     fn request_close(&mut self, ctx: &Context) {
         if !self.app_transition_animation {
+            self.startup.close_sent = true;
             if let Some(audio) = self.audio.as_mut() {
                 audio.stop();
             }
@@ -804,14 +809,21 @@ impl SoundFxApp {
             return;
         };
         let sound = self.sounds[index].clone();
-        let source_path = sound.asset_path(self.storage.root_dir());
+        let source_path = match self.storage.drag_sound_source_path(&sound) {
+            Ok(path) => path,
+            Err(error) => {
+                self.set_error_status(error);
+                return;
+            }
+        };
+        let source_is_temporary = source_path.starts_with(self.storage.root_dir().join("exports"));
         let preview_id = sound.id;
         let preview_start = sound.trim_start_secs;
         let preview_duration = sound.safe_duration();
         self.recording_draft = Some(RecordingDraft {
             sound,
             source_path,
-            source_is_temporary: false,
+            source_is_temporary,
         });
         self.show_record_panel = false;
         self.show_record_review_panel = true;
@@ -1499,13 +1511,21 @@ impl SoundFxApp {
         if self.is_transition_active() {
             return;
         }
+        let local_record_trigger = !ctx.wants_keyboard_input()
+            && self.record_hotkey.is_some_and(|key| {
+                ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, key))
+            });
+        let local_pitch_trigger = !ctx.wants_keyboard_input()
+            && self.pitch_hotkey.is_some_and(|key| {
+                ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, key))
+            });
         if let Some(error) = self.record_hotkey_manager.take_error() {
             self.set_error_status(error);
         }
-        if self.record_hotkey_manager.take_triggered() {
+        if local_record_trigger || self.record_hotkey_manager.take_triggered() {
             self.trigger_record_hotkey_action(ctx);
         }
-        if self.record_hotkey_manager.take_secondary_triggered() {
+        if local_pitch_trigger || self.record_hotkey_manager.take_secondary_triggered() {
             self.trigger_pitch_hotkey_action(ctx);
         }
     }
@@ -1530,6 +1550,7 @@ impl SoundFxApp {
 
     fn handle_dropped_files(&mut self, ctx: &Context) {
         if self.app_view != AppView::Editor || self.has_modal_panel() {
+            self.editor_drop_armed = false;
             return;
         }
 
@@ -1537,6 +1558,10 @@ impl SoundFxApp {
         if dropped.is_empty() {
             return;
         }
+        if !self.editor_drop_armed {
+            return;
+        }
+        self.editor_drop_armed = false;
 
         let mut paths = Vec::new();
         for path in dropped.into_iter().filter_map(|file| file.path) {
@@ -2290,13 +2315,17 @@ impl SoundFxApp {
     fn with_slider_visuals<R>(ui: &mut Ui, add_contents: impl FnOnce(&mut Ui) -> R) -> R {
         ui.scope(|ui| {
             if Self::dark_theme_enabled() {
-                let widgets = &mut ui.style_mut().visuals.widgets;
+                let visuals = &mut ui.style_mut().visuals;
+                let widgets = &mut visuals.widgets;
                 widgets.inactive.bg_fill = Color32::from_rgb(244, 240, 247);
                 widgets.inactive.bg_stroke.color = Color32::from_rgb(244, 240, 247);
                 widgets.hovered.bg_fill = Color32::from_rgb(255, 248, 252);
                 widgets.hovered.bg_stroke.color = Color32::from_rgb(255, 248, 252);
                 widgets.active.bg_fill = Color32::from_rgb(255, 253, 254);
                 widgets.active.bg_stroke.color = Color32::from_rgb(255, 253, 254);
+                visuals.selection.bg_fill = Color32::from_rgb(227, 82, 149);
+                visuals.selection.stroke.color = Color32::WHITE;
+                visuals.override_text_color = Some(Color32::from_rgb(28, 22, 31));
             }
             add_contents(ui)
         })
@@ -2813,8 +2842,7 @@ impl SoundFxApp {
                     self.show_myinstants_panel = true;
                 }
 
-                let download_response =
-                    Self::icon_titlebar(ui, [48.0, 30.0], 0xe2c4, download_titlebar_active, false);
+                let download_response = Self::icon_titlebar(ui, [48.0, 30.0], 0xe2c4, false, false);
                 if download_titlebar_active {
                     let pulse = ((ctx.input(|input| input.time) as f32 * 4.2).sin() * 0.5 + 0.5)
                         .clamp(0.0, 1.0);
@@ -3649,16 +3677,20 @@ impl SoundFxApp {
                     .corner_radius(30.0)
                     .inner_margin(Margin::same(22))
                     .show(ui, |ui| {
-                        let (timeline_changed, timeline_seek_request) = Self::draw_trim_timeline(
-                            ui,
-                            &mut draft.sound,
-                            &mut preview_cursor_secs,
-                            &mut trim_timeline_zoom,
-                            !is_playing,
-                            true,
-                        );
+                        let (timeline_changed, timeline_seek_request, expand_requested) =
+                            Self::draw_trim_timeline(
+                                ui,
+                                &mut draft.sound,
+                                &mut preview_cursor_secs,
+                                &mut trim_timeline_zoom,
+                                !is_playing,
+                                true,
+                            );
                         changed |= timeline_changed;
                         seek_request |= timeline_seek_request;
+                        if expand_requested {
+                            self.show_trim_popup = true;
+                        }
                     });
 
                 ui.add_space(18.0);
@@ -4563,6 +4595,7 @@ impl SoundFxApp {
             || self.show_settings_panel
             || self.video_viewer.is_some()
             || self.show_trim_commit_panel
+            || self.show_trim_popup
     }
 
     fn render_modal_backdrop(&self, ctx: &Context) {
@@ -6475,16 +6508,20 @@ impl SoundFxApp {
                     .corner_radius(30.0)
                     .inner_margin(Margin::same(22))
                     .show(ui, |ui| {
-                        let (timeline_changed, timeline_seek_request) = Self::draw_trim_timeline(
-                            ui,
-                            sound,
-                            &mut preview_cursor_secs,
-                            &mut trim_timeline_zoom,
-                            !is_playing,
-                            editor_timeline_interactive,
-                        );
+                        let (timeline_changed, timeline_seek_request, expand_requested) =
+                            Self::draw_trim_timeline(
+                                ui,
+                                sound,
+                                &mut preview_cursor_secs,
+                                &mut trim_timeline_zoom,
+                                !is_playing,
+                                editor_timeline_interactive,
+                            );
                         changed |= timeline_changed;
                         seek_request |= timeline_seek_request;
+                        if expand_requested {
+                            self.show_trim_popup = true;
+                        }
                     });
 
                 ui.add_space(18.0);
@@ -6573,6 +6610,13 @@ impl SoundFxApp {
                     drop_response.rect.shrink(8.0),
                     Self::subtle_border_color(),
                 );
+                let external_drag_hover =
+                    ui.ctx().input(|input| !input.raw.hovered_files.is_empty());
+                if external_drag_hover {
+                    self.editor_drop_armed = drop_response.hovered();
+                } else if !ui.ctx().input(|input| !input.raw.dropped_files.is_empty()) {
+                    self.editor_drop_armed = false;
+                }
                 if drop_response.hovered() {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                 }
@@ -6660,7 +6704,7 @@ impl SoundFxApp {
         zoom: &mut f32,
         clamp_cursor_to_trim: bool,
         interactive: bool,
-    ) -> (bool, bool) {
+    ) -> (bool, bool, bool) {
         sound.clamp_trim();
         let duration = sound.safe_duration();
         *preview_cursor_secs = if clamp_cursor_to_trim {
@@ -6727,6 +6771,7 @@ impl SoundFxApp {
         let dark_theme = Self::dark_theme_enabled();
         let mut changed = false;
         let mut seek_requested = false;
+        let mut expand_requested = false;
 
         ui.allocate_ui_with_layout(
             vec2(viewport_width, timeline_size.y + 10.0),
@@ -7096,9 +7141,14 @@ impl SoundFxApp {
                         Color32::from_rgb(118, 106, 116)
                     }),
             );
+            ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                if Self::icon_action(ui, [36.0, 30.0], 0xe5d0, false, false).clicked() {
+                    expand_requested = true;
+                }
+            });
         });
 
-        (changed, seek_requested)
+        (changed, seek_requested, expand_requested)
     }
 
     fn trimmed_waveform_preview(sound: &SoundEffect) -> Vec<f32> {
@@ -8055,6 +8105,258 @@ impl SoundFxApp {
         if replace_current {
             self.show_trim_commit_panel = false;
             self.commit_selected_trimmed_sound(ctx);
+        }
+    }
+
+    fn render_trim_popup(&mut self, ctx: &Context) {
+        if !self.show_trim_popup {
+            return;
+        }
+
+        let Some(index) = self.selected_sound_index() else {
+            self.show_trim_popup = false;
+            return;
+        };
+
+        let sound_id = self.sounds[index].id;
+        let is_playing = self
+            .audio
+            .as_ref()
+            .is_some_and(|audio| audio.is_playing(sound_id));
+        let playhead_drag_active = ctx
+            .data(|data| data.get_temp::<bool>(Self::trim_playhead_drag_id(sound_id)))
+            .unwrap_or(false);
+        let playback_position_secs = self
+            .audio
+            .as_ref()
+            .and_then(|audio| audio.playback_position_secs(sound_id));
+        let mut preview_cursor_secs = {
+            let sound = &self.sounds[index];
+            let mut cursor = self.preview_cursor_secs_for(sound);
+            if let Some(position_secs) = playback_position_secs
+                && !playhead_drag_active
+            {
+                cursor = position_secs.clamp(0.0, sound.safe_duration());
+            }
+            cursor
+        };
+
+        let mut open_panel = self.show_trim_popup;
+        let mut close_request = false;
+        let mut preview_toggle = false;
+        let mut delete_request = false;
+        let mut copy_request = false;
+        let mut open_location_request = false;
+        let mut commit_trim_request = false;
+        let mut seek_request = false;
+        let mut changed = false;
+        let mut trim_timeline_zoom = self.trim_timeline_zoom;
+
+        egui::Window::new("")
+            .id(egui::Id::new("trim-popup"))
+            .order(egui::Order::Foreground)
+            .title_bar(false)
+            .resizable(false)
+            .collapsible(false)
+            .fixed_size(vec2(1160.0, 740.0))
+            .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
+            .open(&mut open_panel)
+            .frame(
+                Frame::new()
+                    .fill(Self::overlay_panel_fill())
+                    .stroke(Stroke::new(1.0, Self::border_color()))
+                    .shadow(Shadow {
+                        offset: [0, 14],
+                        blur: 34,
+                        spread: 0,
+                        color: Color32::from_rgba_premultiplied(78, 40, 63, 24),
+                    })
+                    .corner_radius(32.0)
+                    .inner_margin(Margin::same(22)),
+            )
+            .show(ctx, |ui| {
+                let sound = &mut self.sounds[index];
+                ui.horizontal(|ui| {
+                    ui.label(Self::icon(0xe14e, 20.0, Color32::from_rgb(214, 51, 132)).strong());
+                    ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                        if Self::icon_titlebar(ui, [34.0, 28.0], 0xe5cd, false, true).clicked() {
+                            close_request = true;
+                        }
+                    });
+                });
+
+                ui.add_space(14.0);
+                let response = ui.add_sized(
+                    [ui.available_width(), 50.0],
+                    TextEdit::singleline(&mut sound.name)
+                        .font(egui::TextStyle::Heading)
+                        .desired_width(f32::INFINITY)
+                        .margin(Vec2::new(14.0, 14.0)),
+                );
+                if response.changed() {
+                    changed = true;
+                }
+
+                ui.add_space(16.0);
+                ui.horizontal(|ui| {
+                    let help = ui.add_sized(
+                        [34.0, 34.0],
+                        Button::new(Self::icon(0xe887, 16.0, Color32::from_rgb(214, 51, 132)))
+                            .fill(Self::surface_fill())
+                            .stroke(Stroke::new(1.0, Self::border_color()))
+                            .corner_radius(17.0),
+                    );
+                    if help.hovered() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::Help);
+                    }
+                    help.on_hover_ui_at_pointer(|ui| {
+                        ui.set_max_width(250.0);
+                        ui.label("Space: preview or stop");
+                        ui.label("S: preview from the left trim");
+                        ui.label("Q / W: move left or right trim");
+                        ui.label("A / D: pan timeline");
+                        ui.label("Ctrl + wheel: zoom");
+                    });
+                    ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                        if Self::icon_action(ui, [52.0, 34.0], 0xe872, false, false).clicked() {
+                            delete_request = true;
+                        }
+                        if Self::icon_action(ui, [52.0, 34.0], 0xe14e, false, false).clicked() {
+                            commit_trim_request = true;
+                        }
+                        if Self::icon_action(ui, [64.0, 34.0], 0xe14d, false, false).clicked() {
+                            copy_request = true;
+                        }
+                        if Self::icon_action(ui, [52.0, 34.0], 0xe2c8, false, false).clicked() {
+                            open_location_request = true;
+                        }
+                        if Self::icon_action(
+                            ui,
+                            [64.0, 34.0],
+                            if is_playing { 0xe047 } else { 0xe037 },
+                            is_playing,
+                            false,
+                        )
+                        .clicked()
+                        {
+                            preview_toggle = true;
+                        }
+                    });
+                });
+
+                ui.add_space(18.0);
+                Frame::new()
+                    .fill(Self::panel_fill())
+                    .stroke(Stroke::new(1.0, Self::subtle_border_color()))
+                    .corner_radius(30.0)
+                    .inner_margin(Margin::same(22))
+                    .show(ui, |ui| {
+                        let (timeline_changed, timeline_seek_request, _) = Self::draw_trim_timeline(
+                            ui,
+                            sound,
+                            &mut preview_cursor_secs,
+                            &mut trim_timeline_zoom,
+                            !is_playing,
+                            true,
+                        );
+                        changed |= timeline_changed;
+                        seek_request |= timeline_seek_request;
+                    });
+
+                ui.add_space(18.0);
+                Frame::new()
+                    .fill(Self::panel_fill())
+                    .stroke(Stroke::new(1.0, Self::subtle_border_color()))
+                    .corner_radius(26.0)
+                    .inner_margin(Margin::same(22))
+                    .show(ui, |ui| {
+                        Self::with_slider_visuals(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(Self::icon(0xe050, 16.0, Self::muted_text_color()));
+                                let volume_response = Self::click_slider(
+                                    ui,
+                                    &mut sound.volume,
+                                    0.0..=5.0,
+                                    0.0,
+                                    vec2(260.0, 24.0),
+                                );
+                                let volume_input = ui.add(
+                                    DragValue::new(&mut sound.volume)
+                                        .range(0.0..=5.0)
+                                        .speed(0.01)
+                                        .max_decimals(2)
+                                        .suffix("x"),
+                                );
+                                sound.volume = sound.volume.clamp(0.0, 5.0);
+                                ui.add_space(18.0);
+                                ui.label(Self::icon(0xe9e4, 16.0, Self::muted_text_color()));
+                                let speed_response = Self::click_slider(
+                                    ui,
+                                    &mut sound.speed,
+                                    0.25..=2.0,
+                                    0.0,
+                                    vec2(260.0, 24.0),
+                                );
+                                let speed_input = ui.add(
+                                    DragValue::new(&mut sound.speed)
+                                        .range(0.25..=2.0)
+                                        .speed(0.01)
+                                        .max_decimals(2)
+                                        .suffix("x"),
+                                );
+                                sound.speed = sound.speed.clamp(0.25, 2.0);
+                                if volume_response.changed()
+                                    || speed_response.changed()
+                                    || volume_input.changed()
+                                    || speed_input.changed()
+                                {
+                                    changed = true;
+                                }
+                            });
+                        });
+                    });
+            });
+
+        self.show_trim_popup = open_panel && !close_request;
+        let sound_duration = self.sounds[index].safe_duration();
+        self.trim_timeline_zoom = trim_timeline_zoom;
+        self.set_preview_cursor_secs(sound_id, preview_cursor_secs, sound_duration);
+
+        if seek_request && is_playing {
+            self.preview_sound_from_position(sound_id, Some(preview_cursor_secs));
+        }
+        if changed {
+            self.mark_dirty(ctx);
+        }
+        if delete_request {
+            self.show_trim_popup = false;
+            self.delete_selected();
+            return;
+        }
+        if copy_request {
+            self.copy_selected_processed_sound();
+        }
+        if open_location_request {
+            let path = self.sounds[index].asset_path(self.storage.root_dir());
+            if let Err(error) = Self::reveal_in_file_explorer(&path) {
+                self.set_error_status(error);
+            }
+        }
+        if commit_trim_request {
+            self.show_trim_commit_panel = true;
+        }
+        if preview_toggle {
+            if is_playing {
+                self.stop_preview();
+            } else {
+                let sound = self.sounds[index].clone();
+                let mut cursor_secs = self.preview_cursor_secs_for(&sound);
+                if cursor_secs >= sound.trim_end_secs - 0.02 {
+                    cursor_secs = sound.trim_start_secs;
+                    self.set_preview_cursor_secs(sound_id, cursor_secs, sound_duration);
+                }
+                self.preview_sound_from_position(sound_id, Some(cursor_secs));
+            }
         }
     }
 
@@ -10019,6 +10321,7 @@ impl eframe::App for SoundFxApp {
         self.render_settings_panel(ctx);
         self.render_video_viewer_panel(ctx);
         self.render_pitch_monitor(ctx);
+        self.render_trim_popup(ctx);
         self.render_trim_commit_panel(ctx);
         self.render_pitch_overlay_viewport(ctx);
         self.render_record_overlay_viewport(ctx);

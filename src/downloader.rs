@@ -712,16 +712,11 @@ fn ensure_not_cancelled(cancel_requested: &Arc<AtomicBool>) -> Result<()> {
 }
 
 fn stop_process(pid: u32) -> Result<()> {
-    let output = Command::new("taskkill")
-        .args(["/PID", &pid.to_string(), "/T", "/F"])
-        .output()
+    let mut cmd = Command::new("taskkill");
+    cmd.args(["/PID", &pid.to_string(), "/T", "/F"])
+        .spawn()
         .context("unable to stop download process")?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!("{}", stderr.trim());
-    }
+    Ok(())
 }
 
 fn fetch_latest_ytdlp_version() -> Result<String> {

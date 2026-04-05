@@ -218,7 +218,7 @@ impl eframe::App for AlreadyRunningNoticeApp {
         let now = ctx.input(|input| input.time);
         let started_at = self.started_at.get_or_insert(now);
         let elapsed = (now - *started_at) as f32;
-        if elapsed >= 3.8 {
+        if elapsed >= 2.1 {
             ctx.send_viewport_cmd(ViewportCommand::Close);
             return;
         }
@@ -236,16 +236,16 @@ impl eframe::App for AlreadyRunningNoticeApp {
                 let rect = ui.max_rect();
                 let painter = ui.painter_at(rect);
                 let center = rect.center();
-                let aura = (1.0 - (elapsed / 3.8)).clamp(0.0, 1.0);
+                let aura = (1.0 - (elapsed / 2.1)).clamp(0.0, 1.0);
                 painter.circle_filled(
                     center,
-                    126.0,
-                    Color32::from_rgba_premultiplied(214, 79, 147, (18.0 + aura * 36.0) as u8),
+                    116.0,
+                    Color32::from_rgba_premultiplied(227, 82, 149, (26.0 + aura * 44.0) as u8),
                 );
                 painter.circle_filled(
                     Pos2::new(center.x, center.y + 6.0),
-                    96.0,
-                    Color32::from_rgba_premultiplied(255, 226, 240, (16.0 + aura * 24.0) as u8),
+                    88.0,
+                    Color32::from_rgba_premultiplied(255, 212, 233, (18.0 + aura * 30.0) as u8),
                 );
 
                 let shadow = Self::squircle_points(
@@ -263,7 +263,7 @@ impl eframe::App for AlreadyRunningNoticeApp {
                 let blob = Self::squircle_points(center, 102.0, 82.0, elapsed);
                 painter.add(egui::Shape::convex_polygon(
                     blob,
-                    Color32::from_rgba_premultiplied(255, 246, 251, 246),
+                    Color32::from_rgba_premultiplied(241, 134, 186, 246),
                     Stroke::new(1.4, Color32::from_rgb(231, 151, 188)),
                 ));
 
@@ -325,12 +325,6 @@ impl eframe::App for AlreadyRunningNoticeApp {
                                             .size(18.0)
                                             .color(Color32::from_rgb(76, 35, 59))
                                             .strong(),
-                                    );
-                                    ui.add_space(4.0);
-                                    ui.label(
-                                        RichText::new("This blob says hi, then waves goodbye.")
-                                            .size(13.0)
-                                            .color(Color32::from_rgb(132, 89, 116)),
                                     );
                                 });
                             });
