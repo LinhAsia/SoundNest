@@ -37,20 +37,6 @@ pub struct SoundEffect {
     pub trim_end_secs: f32,
     #[serde(default)]
     pub waveform: Vec<f32>,
-    #[serde(default)]
-    pub parts: Vec<SoundPart>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SoundPart {
-    pub id: Uuid,
-    pub source_start_secs: f32,
-    pub source_end_secs: f32,
-    #[serde(default)]
-    pub timeline_start_secs: f32,
-    pub volume: f32,
-    #[serde(default = "default_speed")]
-    pub speed: f32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -85,232 +71,27 @@ impl SoundEffect {
     }
 
     pub fn trimmed_length(&self) -> f32 {
-        self.timeline_length_secs()
+        (self.trim_end_secs - self.trim_start_secs).max(0.05)
     }
 
     pub fn clamp_trim(&mut self) {
         let duration = self.safe_duration();
         self.speed = self.speed.clamp(0.25, 2.0);
+        self.trim_start_secs = self.trim_start_secs.clamp(0.0, duration);
+        self.trim_end_secs = self.trim_end_secs.clamp(0.0, duration);
 
-        if self.parts.is_empty() {
-            self.trim_start_secs = self.trim_start_secs.clamp(0.0, duration);
-            self.trim_end_secs = self.trim_end_secs.clamp(0.0, duration);
-            if self.trim_end_secs <= self.trim_start_secs {
-                self.trim_end_secs = (self.trim_start_secs + 0.05).min(duration);
-                self.trim_start_secs = (self.trim_end_secs - 0.05).max(0.0);
-            }
-            self.parts.push(SoundPart::from_legacy(self));
+        if self.trim_end_secs <= self.trim_start_secs {
+            self.trim_end_secs = (self.trim_start_secs + 0.05).min(duration);
+            self.trim_start_secs = (self.trim_end_secs - 0.05).max(0.0);
         }
-
-        self.parts.sort_by(|left, right| {
-            left.timeline_start_secs
-                .total_cmp(&right.timeline_start_secs)
-        });
-        let mut cursor = 0.0f32;
-        for part in &mut self.parts {
-            part.clamp(duration);
-            part.timeline_start_secs = part.timeline_start_secs.max(cursor);
-            cursor = part.timeline_end_secs();
-        }
-        self.sync_legacy_trim_summary();
     }
 
     pub fn needs_processed_export(&self) -> bool {
         const EPSILON: f32 = 0.005;
-        if self.parts.is_empty() {
-            return (self.volume - 1.0).abs() > EPSILON
-                || (self.speed - 1.0).abs() > EPSILON
-                || self.trim_start_secs.abs() > EPSILON
-                || (self.trim_end_secs - self.safe_duration()).abs() > 0.02;
-        }
-
-        self.parts.len() != 1
-            || self
-                .parts
-                .first()
-                .is_some_and(|part| !part.is_full_default(self.safe_duration()))
-    }
-
-    pub fn timeline_length_secs(&self) -> f32 {
-        if self.parts.is_empty() {
-            return (self.trim_end_secs - self.trim_start_secs).max(0.05);
-        }
-        self.parts
-            .iter()
-            .map(SoundPart::timeline_end_secs)
-            .fold(0.05, f32::max)
-    }
-
-    pub fn selected_part_average_speed(&self, selected: &std::collections::HashSet<Uuid>) -> f32 {
-        let mut total = 0.0;
-        let mut count = 0usize;
-        for part in self.parts.iter().filter(|part| selected.contains(&part.id)) {
-            total += part.speed;
-            count += 1;
-        }
-        if count == 0 {
-            self.parts
-                .first()
-                .map(|part| part.speed)
-                .unwrap_or(self.speed)
-        } else {
-            total / count as f32
-        }
-    }
-
-    pub fn selected_part_average_volume(&self, selected: &std::collections::HashSet<Uuid>) -> f32 {
-        let mut total = 0.0;
-        let mut count = 0usize;
-        for part in self.parts.iter().filter(|part| selected.contains(&part.id)) {
-            total += part.volume;
-            count += 1;
-        }
-        if count == 0 {
-            self.parts
-                .first()
-                .map(|part| part.volume)
-                .unwrap_or(self.volume)
-        } else {
-            total / count as f32
-        }
-    }
-
-    pub fn apply_selected_speed(&mut self, selected: &std::collections::HashSet<Uuid>, speed: f32) {
-        let clamped = speed.clamp(0.25, 2.0);
-        let mut changed = false;
-        for index in 0..self.parts.len() {
-            if !selected.contains(&self.parts[index].id) {
-                continue;
-            }
-            let part_start = self.parts[index].timeline_start_secs;
-            let source_duration = self.parts[index].source_duration_secs();
-            let next_start = self
-                .parts
-                .get(index + 1)
-                .map(|part| part.timeline_start_secs);
-            let fitted_speed = if let Some(next_start) = next_start {
-                let available_duration = (next_start - part_start).max(0.05);
-                clamped.max((source_duration / available_duration).clamp(0.25, 2.0))
-            } else {
-                clamped
-            };
-            if (self.parts[index].speed - fitted_speed).abs() > f32::EPSILON {
-                self.parts[index].speed = fitted_speed;
-                changed = true;
-            }
-        }
-        if changed {
-            self.sync_legacy_trim_summary();
-        }
-    }
-
-    pub fn apply_selected_volume(
-        &mut self,
-        selected: &std::collections::HashSet<Uuid>,
-        volume: f32,
-    ) {
-        let clamped = volume.clamp(0.0, 5.0);
-        let mut changed = false;
-        for part in self
-            .parts
-            .iter_mut()
-            .filter(|part| selected.contains(&part.id))
-        {
-            if (part.volume - clamped).abs() > f32::EPSILON {
-                part.volume = clamped;
-                changed = true;
-            }
-        }
-        if changed {
-            self.sync_legacy_trim_summary();
-        }
-    }
-
-    pub fn split_part_at_timeline(&mut self, timeline_secs: f32) -> Option<Uuid> {
-        self.clamp_trim();
-        let index = self.parts.iter().position(|part| {
-            timeline_secs > part.timeline_start_secs + 0.01
-                && timeline_secs < part.timeline_end_secs() - 0.01
-        })?;
-        let part = self.parts[index].clone();
-        let split_offset_secs = timeline_secs - part.timeline_start_secs;
-        let split_source_secs = (part.source_start_secs + split_offset_secs * part.speed)
-            .clamp(part.source_start_secs, part.source_end_secs);
-        if split_source_secs <= part.source_start_secs + 0.01
-            || split_source_secs >= part.source_end_secs - 0.01
-        {
-            return None;
-        }
-
-        self.parts[index].source_end_secs = split_source_secs;
-        let right_id = Uuid::new_v4();
-        let right_part = SoundPart {
-            id: right_id,
-            source_start_secs: split_source_secs,
-            source_end_secs: part.source_end_secs,
-            timeline_start_secs: timeline_secs,
-            volume: part.volume,
-            speed: part.speed,
-        };
-        self.parts.insert(index + 1, right_part);
-        self.clamp_trim();
-        Some(right_id)
-    }
-
-    fn sync_legacy_trim_summary(&mut self) {
-        if self.parts.is_empty() {
-            return;
-        }
-        self.trim_start_secs = 0.0;
-        self.trim_end_secs = self.timeline_length_secs();
-    }
-}
-
-impl SoundPart {
-    pub fn from_legacy(sound: &SoundEffect) -> Self {
-        Self {
-            id: Uuid::new_v4(),
-            source_start_secs: sound.trim_start_secs.clamp(0.0, sound.safe_duration()),
-            source_end_secs: sound
-                .trim_end_secs
-                .clamp(sound.trim_start_secs + 0.05, sound.safe_duration()),
-            timeline_start_secs: 0.0,
-            volume: sound.volume.clamp(0.0, 5.0),
-            speed: sound.speed.clamp(0.25, 2.0),
-        }
-    }
-
-    pub fn clamp(&mut self, sound_duration_secs: f32) {
-        self.speed = self.speed.clamp(0.25, 2.0);
-        self.volume = self.volume.clamp(0.0, 5.0);
-        self.source_start_secs = self.source_start_secs.clamp(0.0, sound_duration_secs);
-        self.source_end_secs = self.source_end_secs.clamp(0.0, sound_duration_secs);
-        if self.source_end_secs <= self.source_start_secs {
-            self.source_end_secs = (self.source_start_secs + 0.05).min(sound_duration_secs);
-            self.source_start_secs = (self.source_end_secs - 0.05).max(0.0);
-        }
-        self.timeline_start_secs = self.timeline_start_secs.max(0.0);
-    }
-
-    pub fn source_duration_secs(&self) -> f32 {
-        (self.source_end_secs - self.source_start_secs).max(0.05)
-    }
-
-    pub fn timeline_duration_secs(&self) -> f32 {
-        (self.source_duration_secs() / self.speed.clamp(0.25, 2.0)).max(0.05)
-    }
-
-    pub fn timeline_end_secs(&self) -> f32 {
-        self.timeline_start_secs + self.timeline_duration_secs()
-    }
-
-    fn is_full_default(&self, sound_duration_secs: f32) -> bool {
-        const EPSILON: f32 = 0.005;
-        self.timeline_start_secs.abs() <= EPSILON
-            && self.source_start_secs.abs() <= EPSILON
-            && (self.source_end_secs - sound_duration_secs).abs() <= 0.02
-            && (self.volume - 1.0).abs() <= EPSILON
-            && (self.speed - 1.0).abs() <= EPSILON
+        (self.volume - 1.0).abs() > EPSILON
+            || (self.speed - 1.0).abs() > EPSILON
+            || self.trim_start_secs.abs() > EPSILON
+            || (self.trim_end_secs - self.safe_duration()).abs() > 0.02
     }
 }
 
@@ -766,14 +547,6 @@ impl Storage {
             trim_start_secs: 0.0,
             trim_end_secs: analysis.duration_secs,
             waveform: analysis.waveform,
-            parts: vec![SoundPart {
-                id: Uuid::new_v4(),
-                source_start_secs: 0.0,
-                source_end_secs: analysis.duration_secs,
-                timeline_start_secs: 0.0,
-                volume: 1.0,
-                speed: 1.0,
-            }],
         })
     }
 
@@ -880,14 +653,6 @@ impl Storage {
             trim_start_secs: 0.0,
             trim_end_secs: analysis.duration_secs,
             waveform: analysis.waveform,
-            parts: vec![SoundPart {
-                id: Uuid::new_v4(),
-                source_start_secs: 0.0,
-                source_end_secs: analysis.duration_secs,
-                timeline_start_secs: 0.0,
-                volume: 1.0,
-                speed: 1.0,
-            }],
         })
     }
 
@@ -976,14 +741,6 @@ impl Storage {
         sound.speed = 1.0;
         sound.trim_start_secs = 0.0;
         sound.trim_end_secs = sound.duration_secs;
-        sound.parts = vec![SoundPart {
-            id: Uuid::new_v4(),
-            source_start_secs: 0.0,
-            source_end_secs: sound.duration_secs,
-            timeline_start_secs: 0.0,
-            volume: 1.0,
-            speed: 1.0,
-        }];
         sound.clamp_trim();
         Ok(())
     }
@@ -1174,13 +931,6 @@ struct DecodedAudio {
     samples: Vec<f32>,
 }
 
-pub struct RenderedSoundTimeline {
-    pub channels: u16,
-    pub sample_rate: u32,
-    pub samples: Vec<f32>,
-    pub total_duration_secs: f32,
-}
-
 fn analyze_audio_file(path: &Path, buckets: usize) -> Result<AudioAnalysis> {
     let decoded = decode_audio_file(path)?;
     let bucket_count = buckets.max(64);
@@ -1229,97 +979,44 @@ fn decode_audio_file(path: &Path) -> Result<DecodedAudio> {
     .map_err(|_| anyhow::anyhow!("audio decoder crashed while reading {}", path_buf.display()))?
 }
 
-pub fn render_sound_timeline(
-    asset_path: &Path,
-    sound: &SoundEffect,
-) -> Result<RenderedSoundTimeline> {
-    let decoded = decode_audio_file(asset_path)?;
-    Ok(render_timeline_from_decoded(&decoded, sound))
-}
-
-fn render_timeline_from_decoded(
-    decoded: &DecodedAudio,
-    sound: &SoundEffect,
-) -> RenderedSoundTimeline {
+fn write_processed_wav(source_path: &Path, target_path: &Path, sound: &SoundEffect) -> Result<()> {
+    let decoded = decode_audio_file(source_path)?;
     let channels = decoded.channels.max(1);
     let sample_rate = decoded.sample_rate.max(1);
-    let total_source_frames = decoded.samples.len() / channels as usize;
-    let actual_duration = total_source_frames as f32 / sample_rate as f32;
+    let total_frames = decoded.samples.len() / channels as usize;
 
-    let mut parts = if sound.parts.is_empty() {
-        vec![SoundPart::from_legacy(sound)]
+    let actual_duration = total_frames as f32 / sample_rate as f32;
+    let trim_start = sound.trim_start_secs.clamp(0.0, actual_duration);
+    let trim_end = if sound.trim_end_secs >= sound.safe_duration() - 0.02 {
+        actual_duration
     } else {
-        sound.parts.clone()
+        sound.trim_end_secs.clamp(0.0, actual_duration)
     };
-    parts.sort_by(|left, right| {
-        left.timeline_start_secs
-            .total_cmp(&right.timeline_start_secs)
-    });
 
-    let mut output = Vec::new();
-    let mut written_frames = 0usize;
-    for mut part in parts {
-        part.clamp(actual_duration);
-        let part_start_frame = ((part.timeline_start_secs.max(0.0) * sample_rate as f32).round()
-            as usize)
-            .max(written_frames);
-        let gap_frames = part_start_frame.saturating_sub(written_frames);
-        if gap_frames > 0 {
-            output.resize(output.len() + gap_frames * channels as usize, 0.0);
-            written_frames += gap_frames;
-        }
-
-        let source_start_frame = ((part.source_start_secs * sample_rate as f32).floor() as usize)
-            .min(total_source_frames);
-        let source_end_frame = ((part.source_end_secs * sample_rate as f32).ceil() as usize)
-            .clamp(source_start_frame + 1, total_source_frames);
-        let source_frame_count = source_end_frame.saturating_sub(source_start_frame).max(1);
-        let output_frame_count =
-            ((source_frame_count as f32 / part.speed.clamp(0.25, 2.0)).ceil() as usize).max(1);
-        let volume = part.volume.clamp(0.0, 5.0);
-
-        for output_frame in 0..output_frame_count {
-            let source_frame_f = source_start_frame as f32 + output_frame as f32 * part.speed;
-            let base_frame = source_frame_f.floor() as usize;
-            let next_frame = (base_frame + 1).min(source_end_frame.saturating_sub(1));
-            let lerp = (source_frame_f - base_frame as f32).clamp(0.0, 1.0);
-            for channel in 0..channels as usize {
-                let base_index = base_frame * channels as usize + channel;
-                let next_index = next_frame * channels as usize + channel;
-                let left = decoded.samples.get(base_index).copied().unwrap_or(0.0);
-                let right = decoded.samples.get(next_index).copied().unwrap_or(left);
-                let sample = (left + (right - left) * lerp) * volume;
-                output.push(sample.clamp(-1.0, 1.0));
-            }
-        }
-        written_frames += output_frame_count;
-    }
-
-    soften_sample_edges(&mut output, channels, sample_rate, 12.0);
-    let total_duration_secs =
-        output.len() as f32 / channels.max(1) as f32 / sample_rate.max(1) as f32;
-    RenderedSoundTimeline {
-        channels,
-        sample_rate,
-        samples: output,
-        total_duration_secs: total_duration_secs.max(0.05),
-    }
-}
-
-fn write_processed_wav(source_path: &Path, target_path: &Path, sound: &SoundEffect) -> Result<()> {
-    let rendered = render_sound_timeline(source_path, sound)?;
+    let start_frame = ((trim_start * sample_rate as f32).floor() as usize).min(total_frames);
+    let end_frame = if trim_end >= actual_duration - 0.02 {
+        total_frames
+    } else {
+        ((trim_end * sample_rate as f32).ceil() as usize)
+            .min(total_frames)
+            .max(start_frame)
+    };
 
     let spec = WavSpec {
-        channels: rendered.channels,
-        sample_rate: rendered.sample_rate,
+        channels,
+        sample_rate: ((sample_rate as f32 * sound.speed.clamp(0.25, 2.0)).round() as u32).max(1),
         bits_per_sample: 16,
         sample_format: SampleFormat::Int,
     };
 
     let mut writer =
         WavWriter::create(target_path, spec).context("unable to create exported wav file")?;
-    for sample in &rendered.samples {
-        let scaled = (*sample).clamp(-1.0, 1.0);
+    let volume = sound.volume.clamp(0.0, 5.0);
+    let start_sample = start_frame * channels as usize;
+    let end_sample = end_frame * channels as usize;
+
+    for sample in &decoded.samples[start_sample..end_sample] {
+        let scaled = (*sample * volume).clamp(-1.0, 1.0);
         let pcm = (scaled * i16::MAX as f32).round() as i16;
         writer
             .write_sample(pcm)
@@ -1335,35 +1032,6 @@ fn write_processed_wav(source_path: &Path, target_path: &Path, sound: &SoundEffe
 fn open_decoder(path: &Path) -> Result<Decoder<BufReader<File>>> {
     let file = File::open(path).with_context(|| format!("unable to open {}", path.display()))?;
     Decoder::new(BufReader::new(file)).context("unsupported audio file")
-}
-
-fn soften_sample_edges(samples: &mut [f32], channels: u16, sample_rate: u32, fade_ms: f32) {
-    if samples.is_empty() || channels == 0 || sample_rate == 0 {
-        return;
-    }
-
-    let total_frames = samples.len() / channels as usize;
-    if total_frames < 2 {
-        return;
-    }
-
-    let fade_frames =
-        ((sample_rate as f32 * (fade_ms / 1000.0)).round() as usize).clamp(1, total_frames / 2);
-    if fade_frames == 0 {
-        return;
-    }
-
-    let denom = fade_frames.saturating_sub(1).max(1) as f32;
-    for frame in 0..fade_frames {
-        let fade_in = frame as f32 / denom;
-        let fade_out = (fade_frames.saturating_sub(1) - frame) as f32 / denom;
-        let start_base = frame * channels as usize;
-        let end_base = (total_frames - 1 - frame) * channels as usize;
-        for channel in 0..channels as usize {
-            samples[start_base + channel] *= fade_in;
-            samples[end_base + channel] *= fade_out;
-        }
-    }
 }
 
 pub fn format_time(seconds: f32) -> String {
