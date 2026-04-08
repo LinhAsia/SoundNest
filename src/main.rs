@@ -10,6 +10,7 @@ mod platform;
 mod record_video;
 mod recorder;
 mod storage;
+mod vocal_separation;
 
 use app::SoundFxApp;
 use eframe::egui::{

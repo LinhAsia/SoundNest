@@ -21,7 +21,7 @@ mod windows_platform {
     use windows::Win32::{
         Foundation::{
             COLORREF, DRAGDROP_S_CANCEL, DRAGDROP_S_DROP, DRAGDROP_S_USEDEFAULTCURSORS, HWND,
-            POINT, S_OK, SIZE,
+            POINT, RECT, S_OK, SIZE,
         },
         Graphics::Dwm::{
             DWMNCRENDERINGPOLICY, DWMNCRP_DISABLED, DWMNCRP_ENABLED, DWMWA_NCRENDERING_POLICY,
@@ -47,12 +47,13 @@ mod windows_platform {
             },
             WindowsAndMessaging::{
                 CreateWindowExW, DestroyWindow, FindWindowW, GWL_EXSTYLE, GWL_STYLE, GetCursorPos,
-                GetWindowLongW, HWND_NOTOPMOST, HWND_TOPMOST, IDC_ARROW, LoadCursorW,
-                SW_SHOWNOACTIVATE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER,
-                SWP_NOSIZE, SetCursor, SetWindowLongW, SetWindowPos, ShowWindow, ULW_ALPHA,
-                UpdateLayeredWindow, WS_CAPTION, WS_EX_APPWINDOW, WS_EX_LAYERED, WS_EX_TOOLWINDOW,
-                WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_POPUP,
-                WS_SYSMENU, WS_THICKFRAME,
+                GetWindowLongW, GetWindowRect, HWND_NOTOPMOST, HWND_TOPMOST, IDC_ARROW,
+                LoadCursorW, SW_MINIMIZE, SW_RESTORE, SW_SHOWNOACTIVATE, SWP_FRAMECHANGED,
+                SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE, SetCursor,
+                SetWindowLongW, SetWindowPos, ShowWindow, ULW_ALPHA, UpdateLayeredWindow,
+                WS_CAPTION, WS_EX_APPWINDOW, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+                WS_EX_TRANSPARENT, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_POPUP, WS_SYSMENU,
+                WS_THICKFRAME,
             },
         },
     };
@@ -144,6 +145,41 @@ mod windows_platform {
                 0,
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER,
             );
+        }
+    }
+
+    pub fn show_native_window_by_title(title: &str) {
+        let mut utf16 = title.encode_utf16().collect::<Vec<_>>();
+        utf16.push(0);
+        let hwnd = unsafe { FindWindowW(PCWSTR::null(), PCWSTR(utf16.as_ptr())) };
+        if let Ok(hwnd) = hwnd {
+            if !hwnd.0.is_null() {
+                unsafe {
+                    let _ = ShowWindow(hwnd, SW_RESTORE);
+                    let _ = SetWindowPos(
+                        hwnd,
+                        Some(HWND_TOPMOST),
+                        0,
+                        0,
+                        0,
+                        0,
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER,
+                    );
+                }
+            }
+        }
+    }
+
+    pub fn hide_native_window_by_title(title: &str) {
+        let mut utf16 = title.encode_utf16().collect::<Vec<_>>();
+        utf16.push(0);
+        let hwnd = unsafe { FindWindowW(PCWSTR::null(), PCWSTR(utf16.as_ptr())) };
+        if let Ok(hwnd) = hwnd {
+            if !hwnd.0.is_null() {
+                unsafe {
+                    let _ = ShowWindow(hwnd, SW_MINIMIZE);
+                }
+            }
         }
     }
 
@@ -698,6 +734,7 @@ mod windows_platform {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn cursor_screen_position() -> Option<eframe::egui::Pos2> {
         unsafe {
             let mut cursor = POINT::default();
@@ -708,8 +745,31 @@ mod windows_platform {
             }
         }
     }
-}
 
+    pub fn cursor_window_position(window_title: &str) -> Option<eframe::egui::Pos2> {
+        let mut utf16 = window_title.encode_utf16().collect::<Vec<_>>();
+        utf16.push(0);
+        let hwnd = unsafe { FindWindowW(PCWSTR::null(), PCWSTR(utf16.as_ptr())) }.ok()?;
+        if hwnd.0.is_null() {
+            return None;
+        }
+
+        unsafe {
+            let mut cursor = POINT::default();
+            if GetCursorPos(&mut cursor).is_err() {
+                return None;
+            }
+            let mut window_rect = RECT::default();
+            if GetWindowRect(hwnd, &mut window_rect).is_err() {
+                return None;
+            }
+            Some(eframe::egui::pos2(
+                (cursor.x - window_rect.left) as f32,
+                (cursor.y - window_rect.top) as f32,
+            ))
+        }
+    }
+}
 #[cfg(windows)]
 pub use windows_platform::*;
 
@@ -718,6 +778,9 @@ pub fn set_native_window_shadow(_frame: &eframe::Frame, _enabled: bool) {}
 
 #[cfg(not(windows))]
 pub fn set_native_window_topmost(_frame: &eframe::Frame, _enabled: bool) {}
+
+#[cfg(not(windows))]
+pub fn show_native_window(_frame: &eframe::Frame) {}
 
 #[cfg(not(windows))]
 #[allow(dead_code)]
@@ -739,5 +802,10 @@ pub fn drag_file_out(
 
 #[cfg(not(windows))]
 pub fn cursor_screen_position() -> Option<eframe::egui::Pos2> {
+    None
+}
+
+#[cfg(not(windows))]
+pub fn cursor_window_position(_window_title: &str) -> Option<eframe::egui::Pos2> {
     None
 }
