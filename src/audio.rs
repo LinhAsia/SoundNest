@@ -1,4 +1,4 @@
-use crate::storage::SoundEffect;
+use crate::storage::{SoundEffect, render_sound_timeline};
 use anyhow::{Context, Result, bail};
 use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source, buffer::SamplesBuffer};
 use std::fs::File;
@@ -108,36 +108,26 @@ impl AudioEngine {
     ) -> Result<()> {
         self.stop();
 
-        self.ensure_cached_audio(asset_path)?;
-        let cached = self
-            .cached_audio
-            .as_ref()
-            .expect("cached audio should exist after ensure_cached_audio");
-        let channels = cached.channels;
-        let sample_rate = cached.sample_rate;
-        let (trim_start_sample, trim_end_sample) =
-            trim_sample_range(sound, channels, sample_rate, cached.samples.len())?;
-        let speed = sound.speed.clamp(0.25, 2.0);
-        let total_duration_secs = (trim_end_sample - trim_start_sample) as f32
-            / channels.max(1) as f32
-            / sample_rate.max(1) as f32;
-        let total_frames = (trim_end_sample - trim_start_sample) / channels as usize;
-        let start_offset_secs =
-            (start_position_secs - sound.trim_start_secs).clamp(0.0, total_duration_secs.max(0.0));
+        let rendered = render_sound_timeline(asset_path, sound)?;
+        let channels = rendered.channels;
+        let sample_rate = rendered.sample_rate;
+        let samples = Arc::<[f32]>::from(rendered.samples);
+        let total_duration_secs = rendered.total_duration_secs.max(0.05);
+        let total_frames = samples.len() / channels as usize;
+        let start_offset_secs = start_position_secs.clamp(0.0, total_duration_secs.max(0.0));
         let start_frame = ((start_offset_secs * sample_rate as f32).floor() as usize)
             .min(total_frames.saturating_sub(1));
         let start_offset_secs = start_frame as f32 / sample_rate as f32;
-        let start_sample = trim_start_sample + start_frame * channels as usize;
+        let start_sample = start_frame * channels as usize;
 
         let preview = SharedSamplesSource {
-            samples: Arc::clone(&cached.samples),
+            samples: Arc::clone(&samples),
             index: start_sample,
-            end: trim_end_sample,
+            end: samples.len(),
             channels,
             sample_rate,
         }
-        .speed(speed)
-        .amplify(sound.volume.max(0.0));
+        .amplify(1.0);
 
         let sink = Sink::try_new(&self.handle).context("unable to create audio sink")?;
         sink.append(preview);
@@ -146,9 +136,9 @@ impl AudioEngine {
         self.current_id = Some(sound.id);
         self.current_file_path = None;
         self.current_total_duration_secs = total_duration_secs;
-        self.current_trim_start_secs = sound.trim_start_secs;
+        self.current_trim_start_secs = 0.0;
         self.current_start_offset_secs = start_offset_secs;
-        self.current_speed = speed;
+        self.current_speed = 1.0;
         self.sink = Some(sink);
         Ok(())
     }
@@ -294,38 +284,6 @@ pub fn play_file_blocking(asset_path: &Path) -> Result<()> {
     sink.append(SamplesBuffer::new(channels, sample_rate, samples));
     sink.sleep_until_end();
     Ok(())
-}
-
-fn trim_sample_range(
-    sound: &SoundEffect,
-    channels: u16,
-    sample_rate: u32,
-    sample_len: usize,
-) -> Result<(usize, usize)> {
-    if sample_len == 0 {
-        bail!("audio file is empty");
-    }
-
-    let total_frames = sample_len / channels as usize;
-    let actual_duration = total_frames as f32 / sample_rate as f32;
-    let trim_start = sound.trim_start_secs.clamp(0.0, actual_duration);
-    let trim_end = if sound.trim_end_secs >= sound.safe_duration() - 0.02 {
-        actual_duration
-    } else {
-        sound.trim_end_secs.clamp(0.0, actual_duration)
-    };
-    let start_frame = ((trim_start * sample_rate as f32).floor() as usize).min(total_frames);
-    let end_frame = if trim_end >= actual_duration - 0.02 {
-        total_frames
-    } else {
-        ((trim_end * sample_rate as f32).ceil() as usize)
-            .min(total_frames)
-            .max(start_frame + 1)
-    };
-    let start_sample = start_frame * channels as usize;
-    let end_sample = (end_frame * channels as usize).min(sample_len);
-
-    Ok((start_sample, end_sample))
 }
 
 fn decode_audio_file(asset_path: &Path) -> Result<(u16, u32, Vec<f32>)> {

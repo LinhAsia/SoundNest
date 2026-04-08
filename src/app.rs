@@ -9,7 +9,7 @@ use crate::pitch::{
 use crate::platform;
 use crate::record_video;
 use crate::recorder::{Recorder, RecorderConfig};
-use crate::storage::{SoundEffect, Storage, VideoAsset, format_time};
+use crate::storage::{SoundEffect, SoundPart, Storage, VideoAsset, format_time};
 use anyhow::{Context as _, Result};
 #[cfg(windows)]
 use clipboard_win::{Clipboard, Setter, formats::FileList};
@@ -79,6 +79,20 @@ struct VideoViewerState {
     audio_path: PathBuf,
     progress: f32,
     current_frame: Option<(usize, TextureHandle, Vec2)>,
+}
+
+struct TrimTimelineDragState {
+    sound_id: Uuid,
+    anchor_secs: f32,
+    selected_ids: Vec<Uuid>,
+    initial_starts: HashMap<Uuid, f32>,
+    min_delta_secs: f32,
+    max_delta_secs: f32,
+}
+
+struct TrimTimelineSelectionState {
+    sound_id: Uuid,
+    anchor_secs: f32,
 }
 
 struct RecordVideoExportState {
@@ -231,6 +245,10 @@ pub struct SoundFxApp {
     demucs_install_error: Option<String>,
     demucs_install_tx: Sender<Result<(), String>>,
     demucs_install_rx: Receiver<Result<(), String>>,
+    trim_selected_part_ids: HashSet<Uuid>,
+    trim_selected_sound_id: Option<Uuid>,
+    trim_timeline_drag_state: Option<TrimTimelineDragState>,
+    trim_timeline_selection_state: Option<TrimTimelineSelectionState>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -453,6 +471,10 @@ impl SoundFxApp {
             demucs_install_error: None,
             demucs_install_tx,
             demucs_install_rx,
+            trim_selected_part_ids: HashSet::new(),
+            trim_selected_sound_id: None,
+            trim_timeline_drag_state: None,
+            trim_timeline_selection_state: None,
         }
         .with_initial_selection()
     }
@@ -477,6 +499,58 @@ impl SoundFxApp {
     fn selected_sound_index(&self) -> Option<usize> {
         let selected = self.selected?;
         self.sounds.iter().position(|sound| sound.id == selected)
+    }
+
+    fn sync_trim_part_selection(&mut self, sound: &SoundEffect) {
+        if self.trim_selected_sound_id != Some(sound.id) {
+            self.trim_selected_sound_id = Some(sound.id);
+            self.trim_selected_part_ids.clear();
+        }
+        self.trim_selected_part_ids
+            .retain(|id| sound.parts.iter().any(|part| part.id == *id));
+        if self.trim_selected_part_ids.is_empty()
+            && let Some(first) = sound.parts.first()
+        {
+            self.trim_selected_part_ids.insert(first.id);
+        }
+    }
+
+    fn selected_trim_parts<'a>(&self, sound: &'a SoundEffect) -> Vec<&'a SoundPart> {
+        sound
+            .parts
+            .iter()
+            .filter(|part| self.trim_selected_part_ids.contains(&part.id))
+            .collect()
+    }
+
+    fn selected_trim_bounds(&self, sound: &SoundEffect) -> Option<(f32, f32)> {
+        let mut min_start = f32::MAX;
+        let mut max_end = 0.0f32;
+        let mut any = false;
+        for part in sound
+            .parts
+            .iter()
+            .filter(|part| self.trim_selected_part_ids.contains(&part.id))
+        {
+            min_start = min_start.min(part.timeline_start_secs);
+            max_end = max_end.max(part.timeline_end_secs());
+            any = true;
+        }
+        any.then_some((min_start, max_end))
+    }
+
+    fn selected_trim_preview_start_secs(&self, sound: &SoundEffect) -> f32 {
+        self.selected_trim_bounds(sound)
+            .map(|(start, _)| start)
+            .unwrap_or(0.0)
+            .clamp(0.0, sound.timeline_length_secs())
+    }
+
+    fn preview_cursor_secs_for(&self, sound: &SoundEffect) -> f32 {
+        self.preview_cursor
+            .and_then(|(sound_id, secs)| (sound_id == sound.id).then_some(secs))
+            .unwrap_or(0.0)
+            .clamp(0.0, sound.timeline_length_secs())
     }
 
     fn is_transition_active(&self) -> bool {
@@ -772,9 +846,9 @@ impl SoundFxApp {
                 return;
             }
             let mut cursor_secs = self.preview_cursor_secs_for(&sound);
-            if cursor_secs >= sound.trim_end_secs - 0.02 {
-                cursor_secs = sound.trim_start_secs;
-                self.set_preview_cursor_secs(sound.id, cursor_secs, sound.safe_duration());
+            if cursor_secs >= sound.timeline_length_secs() - 0.02 {
+                cursor_secs = 0.0;
+                self.set_preview_cursor_secs(sound.id, cursor_secs, sound.timeline_length_secs());
             }
             self.preview_recording_draft_from_position(Some(cursor_secs));
             return;
@@ -800,9 +874,9 @@ impl SoundFxApp {
                 return;
             }
             let mut cursor_secs = self.preview_cursor_secs_for(&sound);
-            if cursor_secs >= sound.trim_end_secs - 0.02 {
-                cursor_secs = sound.trim_start_secs;
-                self.set_preview_cursor_secs(sound.id, cursor_secs, sound.safe_duration());
+            if cursor_secs >= sound.timeline_length_secs() - 0.02 {
+                cursor_secs = 0.0;
+                self.set_preview_cursor_secs(sound.id, cursor_secs, sound.timeline_length_secs());
             }
             self.preview_sound_from_position(sound.id, Some(cursor_secs));
             return;
@@ -833,9 +907,9 @@ impl SoundFxApp {
             return;
         }
         let mut cursor_secs = self.preview_cursor_secs_for(&sound);
-        if cursor_secs >= sound.trim_end_secs - 0.02 {
-            cursor_secs = sound.trim_start_secs;
-            self.set_preview_cursor_secs(sound.id, cursor_secs, sound.safe_duration());
+        if cursor_secs >= sound.timeline_length_secs() - 0.02 {
+            cursor_secs = 0.0;
+            self.set_preview_cursor_secs(sound.id, cursor_secs, sound.timeline_length_secs());
         }
         self.preview_sound_from_position(sound.id, Some(cursor_secs));
     }
@@ -856,8 +930,9 @@ impl SoundFxApp {
             else {
                 return;
             };
-            self.set_preview_cursor_secs(sound.id, sound.trim_start_secs, sound.safe_duration());
-            self.preview_recording_draft_from_position(Some(sound.trim_start_secs));
+            let preview_start = self.selected_trim_preview_start_secs(&sound);
+            self.set_preview_cursor_secs(sound.id, preview_start, sound.timeline_length_secs());
+            self.preview_recording_draft_from_position(Some(preview_start));
             return;
         }
 
@@ -872,8 +947,9 @@ impl SoundFxApp {
                 return;
             };
             let sound = self.sounds[index].clone();
-            self.set_preview_cursor_secs(sound.id, sound.trim_start_secs, sound.safe_duration());
-            self.preview_sound_from_position(sound.id, Some(sound.trim_start_secs));
+            let preview_start = self.selected_trim_preview_start_secs(&sound);
+            self.set_preview_cursor_secs(sound.id, preview_start, sound.timeline_length_secs());
+            self.preview_sound_from_position(sound.id, Some(preview_start));
             return;
         }
 
@@ -889,8 +965,9 @@ impl SoundFxApp {
             return;
         };
         let sound = self.sounds[index].clone();
-        self.set_preview_cursor_secs(sound.id, sound.trim_start_secs, sound.safe_duration());
-        self.preview_sound_from_position(sound.id, Some(sound.trim_start_secs));
+        let preview_start = self.selected_trim_preview_start_secs(&sound);
+        self.set_preview_cursor_secs(sound.id, preview_start, sound.timeline_length_secs());
+        self.preview_sound_from_position(sound.id, Some(preview_start));
     }
 
     fn intercept_close_request(&mut self, ctx: &Context) {
@@ -963,8 +1040,8 @@ impl SoundFxApp {
             return;
         }
         let preview_id = sound.id;
-        let preview_start = sound.trim_start_secs;
-        let preview_duration = sound.safe_duration();
+        let preview_start = 0.0;
+        let preview_duration = sound.timeline_length_secs();
         self.recording_draft = Some(RecordingDraft {
             sound,
             source_path,
@@ -1097,8 +1174,8 @@ impl SoundFxApp {
             Ok(sound) => {
                 self.stop_preview();
                 let preview_id = sound.id;
-                let preview_start = sound.trim_start_secs;
-                let preview_duration = sound.safe_duration();
+                let preview_start = 0.0;
+                let preview_duration = sound.timeline_length_secs();
                 self.recording_draft = Some(RecordingDraft {
                     sound,
                     source_path: path.to_path_buf(),
@@ -1890,15 +1967,631 @@ impl SoundFxApp {
         }
     }
 
-    fn preview_cursor_secs_for(&self, sound: &SoundEffect) -> f32 {
-        self.preview_cursor
-            .and_then(|(sound_id, secs)| (sound_id == sound.id).then_some(secs))
-            .unwrap_or(sound.trim_start_secs)
-            .clamp(sound.trim_start_secs, sound.trim_end_secs)
-    }
-
     fn trim_playhead_drag_id(sound_id: Uuid) -> egui::Id {
         egui::Id::new((sound_id, "trim-playhead-drag"))
+    }
+
+    fn part_waveform_preview(
+        sound: &SoundEffect,
+        part: &SoundPart,
+        bucket_count: usize,
+    ) -> Vec<f32> {
+        if sound.waveform.is_empty() {
+            return Vec::new();
+        }
+        let total_wave = sound.waveform.len().max(1);
+        let start_index =
+            ((part.source_start_secs / sound.safe_duration()) * total_wave as f32).floor() as usize;
+        let mut end_index =
+            ((part.source_end_secs / sound.safe_duration()) * total_wave as f32).ceil() as usize;
+        end_index = end_index.clamp(start_index.saturating_add(1), total_wave);
+        let segment = &sound.waveform[start_index.min(total_wave - 1)..end_index];
+        let mut buckets = Vec::with_capacity(bucket_count.max(16));
+        let output_count = bucket_count.max(16);
+        for target_index in 0..output_count {
+            let ratio = target_index as f32 / (output_count.saturating_sub(1)).max(1) as f32;
+            let sample_index = (ratio * segment.len().saturating_sub(1) as f32).round() as usize;
+            buckets.push(segment.get(sample_index).copied().unwrap_or(0.02).max(0.02));
+        }
+        buckets
+    }
+
+    fn build_trim_part_drag_state(
+        sound: &SoundEffect,
+        selected_part_ids: &HashSet<Uuid>,
+        anchor_secs: f32,
+    ) -> TrimTimelineDragState {
+        let selected_ids = sound
+            .parts
+            .iter()
+            .filter(|part| selected_part_ids.contains(&part.id))
+            .map(|part| part.id)
+            .collect::<Vec<_>>();
+        let initial_starts = sound
+            .parts
+            .iter()
+            .filter(|part| selected_part_ids.contains(&part.id))
+            .map(|part| (part.id, part.timeline_start_secs))
+            .collect::<HashMap<_, _>>();
+        let mut min_delta_secs = -anchor_secs;
+        let mut max_delta_secs = f32::INFINITY;
+        for (index, part) in sound.parts.iter().enumerate() {
+            if !selected_part_ids.contains(&part.id) {
+                continue;
+            }
+            let previous_end = sound.parts[..index]
+                .iter()
+                .rev()
+                .find(|other| !selected_part_ids.contains(&other.id))
+                .map(|other| other.timeline_end_secs())
+                .unwrap_or(0.0);
+            min_delta_secs = min_delta_secs.max(previous_end - part.timeline_start_secs);
+            if let Some(next_part) = sound.parts[index + 1..]
+                .iter()
+                .find(|other| !selected_part_ids.contains(&other.id))
+            {
+                max_delta_secs =
+                    max_delta_secs.min(next_part.timeline_start_secs - part.timeline_end_secs());
+            }
+        }
+
+        TrimTimelineDragState {
+            sound_id: sound.id,
+            anchor_secs,
+            selected_ids,
+            initial_starts,
+            min_delta_secs,
+            max_delta_secs,
+        }
+    }
+
+    fn draw_trim_parts_timeline(
+        ui: &mut Ui,
+        sound: &mut SoundEffect,
+        selected_part_ids: &mut HashSet<Uuid>,
+        selected_sound_id: &mut Option<Uuid>,
+        drag_state: &mut Option<TrimTimelineDragState>,
+        selection_state: &mut Option<TrimTimelineSelectionState>,
+        preview_cursor_secs: &mut f32,
+        zoom: &mut f32,
+        interactive: bool,
+    ) -> (bool, bool, bool, bool) {
+        #[derive(Clone, Copy)]
+        struct PartLayout {
+            id: Uuid,
+            rect: Rect,
+        }
+
+        sound.clamp_trim();
+        if *selected_sound_id != Some(sound.id) {
+            *selected_sound_id = Some(sound.id);
+            selected_part_ids.clear();
+        }
+        selected_part_ids.retain(|id| sound.parts.iter().any(|part| part.id == *id));
+        if selected_part_ids.is_empty()
+            && let Some(first) = sound.parts.first()
+        {
+            selected_part_ids.insert(first.id);
+        }
+
+        let duration = sound.timeline_length_secs().max(0.05);
+        *preview_cursor_secs = (*preview_cursor_secs).clamp(0.0, duration);
+        *zoom = (*zoom).clamp(1.0, 8.0);
+
+        let dark_theme = Self::dark_theme_enabled();
+        let playhead_drag_id = Self::trim_playhead_drag_id(sound.id);
+        let zoom_scroll_offset_id = egui::Id::new((sound.id, "trim-parts-zoom-offset"));
+        let stored_zoom_scroll_offset = ui
+            .ctx()
+            .data(|data| data.get_temp::<f32>(zoom_scroll_offset_id));
+        let mut next_scroll_offset = stored_zoom_scroll_offset;
+        let viewport_width = ui.available_width().max(320.0);
+        let timeline_size = vec2((viewport_width * *zoom).max(viewport_width), 206.0);
+        let mut changed = false;
+        let mut seek_requested = false;
+        let mut expand_requested = false;
+        let mut preview_commit_requested = false;
+
+        ui.horizontal(|ui| {
+            ui.label(Self::icon(0xe14e, 14.0, Color32::from_rgb(118, 106, 116)));
+            ui.add_space(6.0);
+            ui.label(
+                RichText::new("Trim")
+                    .size(13.0)
+                    .color(Self::strong_text_color())
+                    .strong(),
+            );
+            ui.add_space(6.0);
+            let help = ui.add_sized(
+                [24.0, 24.0],
+                Button::new(Self::icon(0xe887, 16.0, Color32::from_rgb(214, 51, 132)))
+                    .fill(Self::surface_fill())
+                    .stroke(Stroke::new(1.0, Self::border_color()))
+                    .corner_radius(12.0),
+            );
+            if help.hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Help);
+            }
+            help.on_hover_ui_at_pointer(|ui| {
+                ui.set_max_width(280.0);
+                ui.label("Space: preview or stop");
+                ui.label("S: preview from selected part start");
+                ui.label("B: split at cursor");
+                ui.label("Top bar: move playhead");
+                ui.label("Drag across parts: select");
+                ui.label("Drag selected parts: move");
+                ui.label("Ctrl + mouse wheel: zoom");
+            });
+            ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                ui.label(
+                    RichText::new(format!("{:.1}x", *zoom))
+                        .size(12.0)
+                        .color(Self::muted_text_color()),
+                );
+            });
+        });
+        ui.add_space(8.0);
+
+        ui.allocate_ui_with_layout(
+            vec2(viewport_width, timeline_size.y + 10.0),
+            egui::Layout::top_down(Align::Min),
+            |ui| {
+                let mut scroll_area = ScrollArea::horizontal()
+                    .id_salt((sound.id, "trim-parts-scroll"))
+                    .auto_shrink([false, false]);
+                if let Some(offset) = stored_zoom_scroll_offset {
+                    scroll_area = scroll_area.horizontal_scroll_offset(offset);
+                }
+                scroll_area.show(ui, |ui| {
+                    let (rect, _) = ui.allocate_exact_size(timeline_size, Sense::hover());
+                    let viewport_rect = rect.intersect(ui.clip_rect());
+                    let painter = ui.painter_at(rect);
+                    let bar_rect = Rect::from_min_max(
+                        Pos2::new(rect.left(), rect.top()),
+                        Pos2::new(rect.right(), rect.top() + 30.0),
+                    );
+                    let parts_rect = Rect::from_min_max(
+                        Pos2::new(rect.left(), bar_rect.bottom() + 12.0),
+                        rect.right_bottom(),
+                    );
+
+                    painter.rect_filled(
+                        bar_rect,
+                        14.0,
+                        if dark_theme {
+                            Color32::from_rgb(22, 20, 28)
+                        } else {
+                            Color32::from_rgb(255, 255, 255)
+                        },
+                    );
+                    painter.rect_filled(
+                        parts_rect,
+                        18.0,
+                        if dark_theme {
+                            Color32::from_rgb(11, 10, 14)
+                        } else {
+                            Color32::from_rgb(255, 255, 255)
+                        },
+                    );
+                    painter.rect_stroke(
+                        parts_rect,
+                        18.0,
+                        Stroke::new(
+                            1.0,
+                            if dark_theme {
+                                Color32::from_rgb(74, 61, 82)
+                            } else {
+                                Color32::from_rgb(235, 223, 232)
+                            },
+                        ),
+                        StrokeKind::Outside,
+                    );
+
+                    let pointer_pos = interactive
+                        .then(|| ui.ctx().input(|input| input.pointer.hover_pos()))
+                        .flatten()
+                        .filter(|pos| viewport_rect.contains(*pos));
+                    let time_from_x = |x: f32, local_rect: Rect| {
+                        (((x - local_rect.left()) / local_rect.width()).clamp(0.0, 1.0)) * duration
+                    };
+
+                    let bar_response = ui.interact(
+                        bar_rect,
+                        ui.make_persistent_id((sound.id, "trim-playhead-bar")),
+                        Sense::click_and_drag(),
+                    );
+                    if interactive
+                        && let Some(pointer) = bar_response.interact_pointer_pos()
+                        && (bar_response.clicked() || bar_response.dragged())
+                    {
+                        *preview_cursor_secs = time_from_x(pointer.x, bar_rect);
+                        if bar_response.clicked() {
+                            seek_requested = true;
+                        }
+                        if bar_response.dragged() {
+                            ui.ctx()
+                                .data_mut(|data| data.insert_temp(playhead_drag_id, true));
+                        }
+                    }
+                    if interactive
+                        && bar_response.drag_stopped()
+                        && ui
+                            .ctx()
+                            .data(|data| data.get_temp::<bool>(playhead_drag_id))
+                            .unwrap_or(false)
+                    {
+                        preview_commit_requested = true;
+                        ui.ctx()
+                            .data_mut(|data| data.remove::<bool>(playhead_drag_id));
+                    }
+                    if !interactive || !ui.input(|input| input.pointer.primary_down()) {
+                        ui.ctx()
+                            .data_mut(|data| data.remove::<bool>(playhead_drag_id));
+                    }
+
+                    let bar_track = Rect::from_center_size(
+                        bar_rect.center(),
+                        vec2((bar_rect.width() - 24.0).max(24.0), 6.0),
+                    );
+                    painter.rect_filled(
+                        bar_track,
+                        3.0,
+                        if dark_theme {
+                            Color32::from_rgb(52, 46, 58)
+                        } else {
+                            Color32::from_rgb(231, 223, 232)
+                        },
+                    );
+                    let cursor_ratio = (*preview_cursor_secs / duration).clamp(0.0, 1.0);
+                    let cursor_x = egui::lerp(parts_rect.left()..=parts_rect.right(), cursor_ratio);
+                    let bar_cursor_x =
+                        egui::lerp(bar_track.left()..=bar_track.right(), cursor_ratio);
+                    painter.line_segment(
+                        [
+                            Pos2::new(cursor_x, parts_rect.top() + 10.0),
+                            Pos2::new(cursor_x, parts_rect.bottom() - 10.0),
+                        ],
+                        Stroke::new(2.0, Color32::from_rgb(108, 231, 255)),
+                    );
+                    painter.circle_filled(
+                        Pos2::new(bar_cursor_x, bar_track.center().y),
+                        8.0,
+                        Color32::from_rgb(108, 231, 255),
+                    );
+
+                    let mut part_layouts = Vec::with_capacity(sound.parts.len());
+                    for part in &sound.parts {
+                        let left = parts_rect.left()
+                            + parts_rect.width() * (part.timeline_start_secs / duration);
+                        let right = parts_rect.left()
+                            + parts_rect.width() * (part.timeline_end_secs() / duration);
+                        part_layouts.push(PartLayout {
+                            id: part.id,
+                            rect: Rect::from_min_max(
+                                Pos2::new(left.max(parts_rect.left()), parts_rect.top() + 12.0),
+                                Pos2::new(
+                                    right.min(parts_rect.right()).max(left + 28.0),
+                                    parts_rect.bottom() - 16.0,
+                                ),
+                            ),
+                        });
+                    }
+
+                    let pointer_time = pointer_pos
+                        .filter(|pointer| parts_rect.contains(*pointer))
+                        .map(|pointer| time_from_x(pointer.x, parts_rect));
+                    if interactive
+                        && pointer_time.is_some()
+                        && !ui.ctx().wants_keyboard_input()
+                        && ui.input(|input| input.key_pressed(egui::Key::B))
+                    {
+                        if let Some(new_part_id) =
+                            sound.split_part_at_timeline(pointer_time.unwrap_or(0.0))
+                        {
+                            selected_part_ids.clear();
+                            selected_part_ids.insert(new_part_id);
+                            changed = true;
+                        }
+                    }
+
+                    if interactive && pointer_pos.is_some() && !ui.ctx().wants_keyboard_input() {
+                        let zoom_delta = ui.input(|input| {
+                            if input.modifiers.ctrl {
+                                input.raw_scroll_delta.y
+                            } else {
+                                0.0
+                            }
+                        });
+                        if zoom_delta.abs() > 0.0 {
+                            let pointer = pointer_pos.expect("pointer checked above");
+                            let anchor_viewport_x = (pointer.x - viewport_rect.left())
+                                .clamp(0.0, viewport_rect.width());
+                            let anchor_content_x =
+                                (pointer.x - rect.left()).clamp(0.0, rect.width());
+                            let factor = if zoom_delta > 0.0 { 1.12 } else { 1.0 / 1.12 };
+                            *zoom = (*zoom * factor).clamp(1.0, 8.0);
+                            let next_timeline_width = (viewport_width * *zoom).max(viewport_width);
+                            let next_anchor_content_x =
+                                (anchor_content_x / rect.width().max(1.0)) * next_timeline_width;
+                            let max_offset = (next_timeline_width - viewport_width).max(0.0);
+                            next_scroll_offset = Some(
+                                (next_anchor_content_x - anchor_viewport_x).clamp(0.0, max_offset),
+                            );
+                            ui.ctx().request_repaint();
+                        }
+                    }
+
+                    if interactive && let Some(pointer) = pointer_pos {
+                        let primary_pressed = ui.input(|input| {
+                            input.pointer.button_pressed(egui::PointerButton::Primary)
+                        });
+                        let primary_released = ui.input(|input| {
+                            input.pointer.button_released(egui::PointerButton::Primary)
+                        });
+                        let primary_down = ui.input(|input| input.pointer.primary_down());
+
+                        if primary_pressed && parts_rect.contains(pointer) {
+                            let pointer_secs = time_from_x(pointer.x, parts_rect);
+                            let hit_layout = part_layouts
+                                .iter()
+                                .find(|layout| layout.rect.contains(pointer))
+                                .copied();
+                            if let Some(hit_layout) = hit_layout {
+                                if selected_part_ids.contains(&hit_layout.id) {
+                                    *drag_state = Some(Self::build_trim_part_drag_state(
+                                        sound,
+                                        selected_part_ids,
+                                        pointer_secs,
+                                    ));
+                                    *selection_state = None;
+                                } else {
+                                    selected_part_ids.clear();
+                                    selected_part_ids.insert(hit_layout.id);
+                                    *selection_state = Some(TrimTimelineSelectionState {
+                                        sound_id: sound.id,
+                                        anchor_secs: pointer_secs,
+                                    });
+                                    *drag_state = None;
+                                    changed = true;
+                                }
+                            } else {
+                                selected_part_ids.clear();
+                                *selection_state = Some(TrimTimelineSelectionState {
+                                    sound_id: sound.id,
+                                    anchor_secs: pointer_secs,
+                                });
+                                *drag_state = None;
+                                changed = true;
+                            }
+                        }
+
+                        if primary_down {
+                            if let Some(state) = drag_state.as_ref()
+                                && state.sound_id == sound.id
+                                && pointer_time.is_some()
+                            {
+                                let pointer_secs = pointer_time.unwrap_or(state.anchor_secs);
+                                let raw_delta = pointer_secs - state.anchor_secs;
+                                let delta = if state.max_delta_secs.is_finite() {
+                                    raw_delta.clamp(state.min_delta_secs, state.max_delta_secs)
+                                } else {
+                                    raw_delta.max(state.min_delta_secs)
+                                };
+                                for part in sound.parts.iter_mut().filter(|part| {
+                                    state.selected_ids.iter().any(|id| *id == part.id)
+                                }) {
+                                    if let Some(initial) = state.initial_starts.get(&part.id) {
+                                        part.timeline_start_secs = (*initial + delta).max(0.0);
+                                    }
+                                }
+                                changed = true;
+                            } else if let Some(state) = selection_state.as_ref()
+                                && state.sound_id == sound.id
+                                && pointer_time.is_some()
+                            {
+                                let pointer_secs = pointer_time.unwrap_or(state.anchor_secs);
+                                let min_secs = state.anchor_secs.min(pointer_secs);
+                                let max_secs = state.anchor_secs.max(pointer_secs);
+                                let next_selection = sound
+                                    .parts
+                                    .iter()
+                                    .filter(|part| {
+                                        part.timeline_end_secs() >= min_secs
+                                            && part.timeline_start_secs <= max_secs
+                                    })
+                                    .map(|part| part.id)
+                                    .collect::<HashSet<_>>();
+                                if *selected_part_ids != next_selection {
+                                    *selected_part_ids = next_selection;
+                                    if selected_part_ids.is_empty()
+                                        && let Some(first) = sound.parts.first()
+                                    {
+                                        selected_part_ids.insert(first.id);
+                                    }
+                                    changed = true;
+                                }
+                            }
+                        }
+
+                        if primary_released {
+                            if drag_state
+                                .as_ref()
+                                .is_some_and(|state| state.sound_id == sound.id)
+                            {
+                                preview_commit_requested = true;
+                                *drag_state = None;
+                            }
+                            if selection_state
+                                .as_ref()
+                                .is_some_and(|state| state.sound_id == sound.id)
+                            {
+                                *selection_state = None;
+                            }
+                        }
+                    }
+
+                    if let Some(offset) = next_scroll_offset
+                        .or_else(|| Some((viewport_rect.left() - rect.left()).max(0.0)))
+                    {
+                        ui.ctx()
+                            .data_mut(|data| data.insert_temp(zoom_scroll_offset_id, offset));
+                    }
+
+                    if let Some(pointer) =
+                        pointer_pos.filter(|pointer| parts_rect.contains(*pointer))
+                    {
+                        painter.line_segment(
+                            [
+                                Pos2::new(pointer.x, parts_rect.top() + 8.0),
+                                Pos2::new(pointer.x, parts_rect.bottom() - 8.0),
+                            ],
+                            Stroke::new(
+                                1.0,
+                                if dark_theme {
+                                    Color32::from_rgba_premultiplied(255, 255, 255, 80)
+                                } else {
+                                    Color32::from_rgba_premultiplied(34, 31, 36, 70)
+                                },
+                            ),
+                        );
+                        painter.text(
+                            Pos2::new(
+                                (pointer.x + 8.0)
+                                    .clamp(parts_rect.left() + 6.0, parts_rect.right() - 54.0),
+                                parts_rect.top() + 10.0,
+                            ),
+                            egui::Align2::LEFT_TOP,
+                            format_time(time_from_x(pointer.x, parts_rect)),
+                            egui::FontId::proportional(11.0),
+                            if dark_theme {
+                                Color32::from_rgb(208, 196, 207)
+                            } else {
+                                Color32::from_rgb(72, 64, 74)
+                            },
+                        );
+                    }
+
+                    for (part, layout) in sound.parts.iter().zip(part_layouts.iter()) {
+                        let selected = selected_part_ids.contains(&part.id);
+                        let background = if selected {
+                            if dark_theme {
+                                Color32::from_rgb(227, 82, 149)
+                            } else {
+                                Color32::from_rgb(255, 209, 231)
+                            }
+                        } else if dark_theme {
+                            Color32::from_rgb(31, 26, 36)
+                        } else {
+                            Color32::from_rgb(247, 241, 245)
+                        };
+                        painter.rect_filled(layout.rect, 18.0, background);
+                        painter.rect_stroke(
+                            layout.rect,
+                            18.0,
+                            Stroke::new(
+                                1.0,
+                                if selected {
+                                    Color32::from_rgb(214, 51, 132)
+                                } else if dark_theme {
+                                    Color32::from_rgb(80, 68, 88)
+                                } else {
+                                    Color32::from_rgb(233, 219, 228)
+                                },
+                            ),
+                            StrokeKind::Outside,
+                        );
+
+                        let part_waveform = Self::part_waveform_preview(sound, part, 96);
+                        let wave_rect = Rect::from_min_max(
+                            Pos2::new(layout.rect.left() + 10.0, layout.rect.top() + 12.0),
+                            Pos2::new(layout.rect.right() - 10.0, layout.rect.bottom() - 28.0),
+                        );
+                        Self::paint_waveform_bars(
+                            &painter,
+                            wave_rect,
+                            &part_waveform,
+                            wave_rect.left(),
+                            wave_rect.right(),
+                            None,
+                        );
+                        painter.text(
+                            Pos2::new(layout.rect.left() + 12.0, layout.rect.bottom() - 12.0),
+                            egui::Align2::LEFT_BOTTOM,
+                            format!("{:.2}x  {:.0}%", part.speed, part.volume * 100.0),
+                            egui::FontId::proportional(11.0),
+                            if selected && dark_theme {
+                                Color32::from_rgb(255, 245, 251)
+                            } else if selected {
+                                Color32::from_rgb(92, 34, 62)
+                            } else if dark_theme {
+                                Color32::from_rgb(213, 201, 211)
+                            } else {
+                                Color32::from_rgb(118, 106, 116)
+                            },
+                        );
+                    }
+                });
+            },
+        );
+
+        ui.add_space(10.0);
+        let mut selected_start = 0.0f32;
+        let mut selected_end = duration;
+        if !selected_part_ids.is_empty() {
+            selected_start = f32::MAX;
+            selected_end = 0.0;
+            for part in sound
+                .parts
+                .iter()
+                .filter(|part| selected_part_ids.contains(&part.id))
+            {
+                selected_start = selected_start.min(part.timeline_start_secs);
+                selected_end = selected_end.max(part.timeline_end_secs());
+            }
+            if selected_start == f32::MAX {
+                selected_start = 0.0;
+                selected_end = duration;
+            }
+        }
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(format_time(selected_start))
+                    .size(13.0)
+                    .color(if dark_theme {
+                        Color32::from_rgb(208, 196, 207)
+                    } else {
+                        Color32::from_rgb(118, 106, 116)
+                    }),
+            );
+            ui.separator();
+            ui.label(
+                RichText::new(format_time(duration))
+                    .size(13.0)
+                    .color(Color32::from_rgb(214, 51, 132)),
+            );
+            ui.separator();
+            ui.label(
+                RichText::new(format_time(selected_end))
+                    .size(13.0)
+                    .color(if dark_theme {
+                        Color32::from_rgb(208, 196, 207)
+                    } else {
+                        Color32::from_rgb(118, 106, 116)
+                    }),
+            );
+            ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                if Self::icon_action(ui, [36.0, 30.0], 0xe5d0, false, false).clicked() {
+                    expand_requested = true;
+                }
+            });
+        });
+
+        (
+            changed,
+            seek_requested,
+            expand_requested,
+            preview_commit_requested,
+        )
     }
 
     fn set_preview_cursor_secs(&mut self, sound_id: Uuid, secs: f32, duration_secs: f32) {
@@ -4027,7 +4720,7 @@ impl SoundFxApp {
         if let Some(position_secs) = playback_position_secs
             && !playhead_drag_active
         {
-            preview_cursor_secs = position_secs.clamp(0.0, sound_snapshot.safe_duration());
+            preview_cursor_secs = position_secs.clamp(0.0, sound_snapshot.timeline_length_secs());
         }
 
         let mut open_panel = self.show_record_review_panel;
@@ -4096,17 +4789,24 @@ impl SoundFxApp {
                     .corner_radius(30.0)
                     .inner_margin(Margin::same(22))
                     .show(ui, |ui| {
+                        let selected_part_ids = &mut self.trim_selected_part_ids;
+                        let selected_sound_id = &mut self.trim_selected_sound_id;
+                        let drag_state = &mut self.trim_timeline_drag_state;
+                        let selection_state = &mut self.trim_timeline_selection_state;
                         let (
                             timeline_changed,
                             timeline_seek_request,
                             expand_requested,
                             timeline_preview_commit,
-                        ) = Self::draw_trim_timeline(
+                        ) = Self::draw_trim_parts_timeline(
                             ui,
                             &mut draft.sound,
+                            selected_part_ids,
+                            selected_sound_id,
+                            drag_state,
+                            selection_state,
                             &mut preview_cursor_secs,
                             &mut trim_timeline_zoom,
-                            !is_playing,
                             true,
                         );
                         changed |= timeline_changed;
@@ -4126,50 +4826,63 @@ impl SoundFxApp {
                     .corner_radius(26.0)
                     .inner_margin(Margin::same(22))
                     .show(ui, |ui| {
+                        let selected_part_ids = self.trim_selected_part_ids.clone();
+                        let mut selected_volume =
+                            draft.sound.selected_part_average_volume(&selected_part_ids);
+                        let mut selected_speed =
+                            draft.sound.selected_part_average_speed(&selected_part_ids);
                         Self::with_slider_visuals(ui, |ui| {
                             ui.horizontal(|ui| {
                                 ui.label(Self::icon(0xe050, 16.0, Self::muted_text_color()));
                                 let (volume_response, volume_slider_changed) = Self::click_slider(
                                     ui,
-                                    &mut draft.sound.volume,
+                                    &mut selected_volume,
                                     0.0..=5.0,
                                     0.0,
                                     vec2(128.0, 24.0),
                                 );
                                 let volume_input = ui.add(
-                                    DragValue::new(&mut draft.sound.volume)
+                                    DragValue::new(&mut selected_volume)
                                         .range(0.0..=5.0)
                                         .speed(0.01)
                                         .max_decimals(2)
                                         .suffix("x"),
                                 );
-                                draft.sound.volume = draft.sound.volume.clamp(0.0, 5.0);
+                                selected_volume = selected_volume.clamp(0.0, 5.0);
                                 ui.add_space(10.0);
                                 ui.label(Self::icon(0xe9e4, 16.0, Self::muted_text_color()));
                                 let (speed_response, speed_slider_changed) = Self::click_slider(
                                     ui,
-                                    &mut draft.sound.speed,
+                                    &mut selected_speed,
                                     0.25..=2.0,
                                     0.0,
                                     vec2(128.0, 24.0),
                                 );
                                 let speed_input = ui.add(
-                                    DragValue::new(&mut draft.sound.speed)
+                                    DragValue::new(&mut selected_speed)
                                         .range(0.25..=2.0)
                                         .speed(0.01)
                                         .max_decimals(2)
                                         .suffix("x"),
                                 );
-                                draft.sound.speed = draft.sound.speed.clamp(0.25, 2.0);
-                                if volume_response.changed()
-                                    || speed_response.changed()
-                                    || volume_input.changed()
-                                    || speed_input.changed()
-                                    || volume_slider_changed
-                                    || speed_slider_changed
-                                {
+                                selected_speed = selected_speed.clamp(0.25, 2.0);
+                                let volume_input_commit =
+                                    Self::deferred_drag_value_commit(ui.ctx(), &volume_input);
+                                let speed_input_commit =
+                                    Self::deferred_drag_value_commit(ui.ctx(), &speed_input);
+                                if volume_slider_changed || volume_input_commit {
+                                    draft
+                                        .sound
+                                        .apply_selected_volume(&selected_part_ids, selected_volume);
                                     changed = true;
                                 }
+                                if speed_slider_changed || speed_input_commit {
+                                    draft
+                                        .sound
+                                        .apply_selected_speed(&selected_part_ids, selected_speed);
+                                    changed = true;
+                                }
+                                let _ = (&volume_response, &speed_response);
                             });
                         });
                     });
@@ -4450,7 +5163,7 @@ impl SoundFxApp {
             self.show_record_review_panel = false;
             return;
         };
-        let sound_duration = updated_sound.safe_duration();
+        let sound_duration = updated_sound.timeline_length_secs();
         self.trim_timeline_zoom = trim_timeline_zoom;
         self.set_preview_cursor_secs(sound_id, preview_cursor_secs, sound_duration);
         self.show_record_review_panel = open_panel;
@@ -4463,8 +5176,8 @@ impl SoundFxApp {
                 self.stop_preview();
             } else {
                 let mut cursor_secs = self.preview_cursor_secs_for(&updated_sound);
-                if cursor_secs >= updated_sound.trim_end_secs - 0.02 {
-                    cursor_secs = updated_sound.trim_start_secs;
+                if cursor_secs >= updated_sound.timeline_length_secs() - 0.02 {
+                    cursor_secs = 0.0;
                     self.set_preview_cursor_secs(sound_id, cursor_secs, sound_duration);
                 }
                 self.preview_recording_draft_from_position(Some(cursor_secs));
@@ -6939,7 +7652,7 @@ impl SoundFxApp {
             if let Some(position_secs) = playback_position_secs
                 && !playhead_drag_active
             {
-                cursor = position_secs.clamp(0.0, sound.safe_duration());
+                cursor = position_secs.clamp(0.0, sound.timeline_length_secs());
             }
             cursor
         };
@@ -7017,17 +7730,24 @@ impl SoundFxApp {
                     .corner_radius(30.0)
                     .inner_margin(Margin::same(22))
                     .show(ui, |ui| {
+                        let selected_part_ids = &mut self.trim_selected_part_ids;
+                        let selected_sound_id = &mut self.trim_selected_sound_id;
+                        let drag_state = &mut self.trim_timeline_drag_state;
+                        let selection_state = &mut self.trim_timeline_selection_state;
                         let (
                             timeline_changed,
                             timeline_seek_request,
                             expand_requested,
                             timeline_preview_commit,
-                        ) = Self::draw_trim_timeline(
+                        ) = Self::draw_trim_parts_timeline(
                             ui,
                             sound,
+                            selected_part_ids,
+                            selected_sound_id,
+                            drag_state,
+                            selection_state,
                             &mut preview_cursor_secs,
                             &mut trim_timeline_zoom,
-                            !is_playing,
                             editor_timeline_interactive,
                         );
                         changed |= timeline_changed;
@@ -7048,63 +7768,64 @@ impl SoundFxApp {
                     .corner_radius(26.0)
                     .inner_margin(Margin::same(22))
                     .show(ui, |ui| {
+                        let selected_part_ids = self.trim_selected_part_ids.clone();
+                        let mut selected_volume =
+                            sound.selected_part_average_volume(&selected_part_ids);
+                        let mut selected_speed =
+                            sound.selected_part_average_speed(&selected_part_ids);
                         Self::with_slider_visuals(ui, |ui| {
                             ui.horizontal(|ui| {
                                 ui.label(Self::icon(0xe050, 16.0, Self::muted_text_color()));
                                 let (volume_response, volume_slider_changed) =
                                     Self::click_slider_deferred(
                                         ui,
-                                        &mut sound.volume,
+                                        &mut selected_volume,
                                         0.0..=5.0,
                                         0.0,
                                         vec2(128.0, 24.0),
                                     );
                                 let volume_input = ui.add(
-                                    DragValue::new(&mut sound.volume)
+                                    DragValue::new(&mut selected_volume)
                                         .range(0.0..=5.0)
                                         .speed(0.01)
                                         .max_decimals(2)
                                         .suffix("x"),
                                 );
-                                sound.volume = sound.volume.clamp(0.0, 5.0);
+                                selected_volume = selected_volume.clamp(0.0, 5.0);
                                 ui.add_space(10.0);
                                 ui.label(Self::icon(0xe9e4, 16.0, Self::muted_text_color()));
                                 let (speed_response, speed_slider_changed) =
                                     Self::click_slider_deferred(
                                         ui,
-                                        &mut sound.speed,
+                                        &mut selected_speed,
                                         0.25..=2.0,
                                         0.0,
                                         vec2(128.0, 24.0),
                                     );
                                 let speed_input = ui.add(
-                                    DragValue::new(&mut sound.speed)
+                                    DragValue::new(&mut selected_speed)
                                         .range(0.25..=2.0)
                                         .speed(0.01)
                                         .max_decimals(2)
                                         .suffix("x"),
                                 );
-                                sound.speed = sound.speed.clamp(0.25, 2.0);
+                                selected_speed = selected_speed.clamp(0.25, 2.0);
                                 let volume_input_commit =
                                     Self::deferred_drag_value_commit(ui.ctx(), &volume_input);
                                 let speed_input_commit =
                                     Self::deferred_drag_value_commit(ui.ctx(), &speed_input);
-                                if volume_response.changed()
-                                    || speed_response.changed()
-                                    || volume_input.changed()
-                                    || speed_input.changed()
-                                    || volume_slider_changed
-                                    || speed_slider_changed
-                                {
+                                if volume_slider_changed || volume_input_commit {
+                                    sound
+                                        .apply_selected_volume(&selected_part_ids, selected_volume);
                                     changed = true;
-                                }
-                                if volume_slider_changed
-                                    || speed_slider_changed
-                                    || volume_input_commit
-                                    || speed_input_commit
-                                {
                                     playback_reapply_request = true;
                                 }
+                                if speed_slider_changed || speed_input_commit {
+                                    sound.apply_selected_speed(&selected_part_ids, selected_speed);
+                                    changed = true;
+                                    playback_reapply_request = true;
+                                }
+                                let _ = (&volume_response, &speed_response);
                             });
                         });
                     });
@@ -7153,7 +7874,7 @@ impl SoundFxApp {
             });
 
         let sound_id = self.sounds[index].id;
-        let sound_duration = self.sounds[index].safe_duration();
+        let sound_duration = self.sounds[index].timeline_length_secs();
         self.trim_timeline_zoom = trim_timeline_zoom;
         self.set_preview_cursor_secs(sound_id, preview_cursor_secs, sound_duration);
 
@@ -7758,39 +8479,76 @@ impl SoundFxApp {
         }
 
         let total_duration = sound.safe_duration();
-        let trim_start = sound.trim_start_secs.clamp(0.0, total_duration);
-        let trim_end = sound
-            .trim_end_secs
-            .clamp(trim_start + 0.001, total_duration);
         let source_len = sound.waveform.len();
-        if source_len <= 1 || (trim_start <= 0.001 && trim_end >= total_duration - 0.001) {
-            return sound.waveform.clone();
-        }
-
-        let start_index = ((trim_start / total_duration) * source_len as f32).floor() as usize;
-        let mut end_index = ((trim_end / total_duration) * source_len as f32).ceil() as usize;
-        end_index = end_index.clamp(start_index.saturating_add(1), source_len);
-        let segment = &sound.waveform[start_index.min(source_len - 1)..end_index];
-        if segment.len() >= source_len {
-            return segment.to_vec();
-        }
-
-        let mut preview = Vec::with_capacity(source_len);
-        for target_index in 0..source_len {
-            let start =
-                ((target_index as f32 / source_len as f32) * segment.len() as f32).floor() as usize;
-            let mut end = ((((target_index + 1) as f32) / source_len as f32) * segment.len() as f32)
-                .ceil() as usize;
-            let start = start.min(segment.len().saturating_sub(1));
-            end = end.clamp(start + 1, segment.len());
-
-            let mut peak = 0.0_f32;
-            for sample in &segment[start..end] {
-                peak = peak.max(*sample);
+        if sound.parts.is_empty() {
+            let trim_start = sound.trim_start_secs.clamp(0.0, total_duration);
+            let trim_end = sound
+                .trim_end_secs
+                .clamp(trim_start + 0.001, total_duration);
+            if source_len <= 1 || (trim_start <= 0.001 && trim_end >= total_duration - 0.001) {
+                return sound.waveform.clone();
             }
-            preview.push(peak.max(0.02));
+
+            let start_index = ((trim_start / total_duration) * source_len as f32).floor() as usize;
+            let mut end_index = ((trim_end / total_duration) * source_len as f32).ceil() as usize;
+            end_index = end_index.clamp(start_index.saturating_add(1), source_len);
+            let segment = &sound.waveform[start_index.min(source_len - 1)..end_index];
+            if segment.len() >= source_len {
+                return segment.to_vec();
+            }
+
+            let mut preview = Vec::with_capacity(source_len);
+            for target_index in 0..source_len {
+                let start = ((target_index as f32 / source_len as f32) * segment.len() as f32)
+                    .floor() as usize;
+                let mut end = ((((target_index + 1) as f32) / source_len as f32)
+                    * segment.len() as f32)
+                    .ceil() as usize;
+                let start = start.min(segment.len().saturating_sub(1));
+                end = end.clamp(start + 1, segment.len());
+
+                let mut peak = 0.0_f32;
+                for sample in &segment[start..end] {
+                    peak = peak.max(*sample);
+                }
+                preview.push(peak.max(0.02));
+            }
+            return preview;
         }
 
+        let total_timeline = sound.timeline_length_secs().max(0.05);
+        let mut preview = vec![0.0f32; source_len];
+        for part in &sound.parts {
+            let start_bucket =
+                ((part.timeline_start_secs / total_timeline) * source_len as f32).floor() as usize;
+            let mut end_bucket =
+                ((part.timeline_end_secs() / total_timeline) * source_len as f32).ceil() as usize;
+            end_bucket = end_bucket.clamp(start_bucket.saturating_add(1), source_len);
+
+            let source_start_bucket =
+                ((part.source_start_secs / total_duration) * source_len as f32).floor() as usize;
+            let mut source_end_bucket =
+                ((part.source_end_secs / total_duration) * source_len as f32).ceil() as usize;
+            source_end_bucket =
+                source_end_bucket.clamp(source_start_bucket.saturating_add(1), source_len);
+
+            let segment =
+                &sound.waveform[source_start_bucket.min(source_len - 1)..source_end_bucket];
+            for bucket in start_bucket..end_bucket {
+                let ratio =
+                    (bucket - start_bucket) as f32 / (end_bucket - start_bucket).max(1) as f32;
+                let source_index =
+                    (ratio * segment.len().saturating_sub(1) as f32).round() as usize;
+                preview[bucket] = segment.get(source_index).copied().unwrap_or(0.0).max(0.02);
+            }
+        }
+
+        let peak_max = preview.iter().copied().fold(0.0f32, f32::max);
+        if peak_max > 0.0 {
+            for peak in &mut preview {
+                *peak /= peak_max;
+            }
+        }
         preview
     }
 
@@ -8749,7 +9507,7 @@ impl SoundFxApp {
             if let Some(position_secs) = playback_position_secs
                 && !playhead_drag_active
             {
-                cursor = position_secs.clamp(0.0, sound.safe_duration());
+                cursor = position_secs.clamp(0.0, sound.timeline_length_secs());
             }
             cursor
         };
@@ -8889,13 +9647,20 @@ impl SoundFxApp {
                     .corner_radius(26.0)
                     .inner_margin(Margin::same(18))
                     .show(ui, |ui| {
+                        let selected_part_ids = &mut self.trim_selected_part_ids;
+                        let selected_sound_id = &mut self.trim_selected_sound_id;
+                        let drag_state = &mut self.trim_timeline_drag_state;
+                        let selection_state = &mut self.trim_timeline_selection_state;
                         let (timeline_changed, timeline_seek_request, _, timeline_preview_commit) =
-                            Self::draw_trim_timeline(
+                            Self::draw_trim_parts_timeline(
                                 ui,
                                 sound,
+                                selected_part_ids,
+                                selected_sound_id,
+                                drag_state,
+                                selection_state,
                                 &mut preview_cursor_secs,
                                 &mut trim_timeline_zoom,
-                                !is_playing,
                                 true,
                             );
                         changed |= timeline_changed;
@@ -8912,70 +9677,71 @@ impl SoundFxApp {
                     .corner_radius(22.0)
                     .inner_margin(Margin::same(16))
                     .show(ui, |ui| {
+                        let selected_part_ids = self.trim_selected_part_ids.clone();
+                        let mut selected_volume =
+                            sound.selected_part_average_volume(&selected_part_ids);
+                        let mut selected_speed =
+                            sound.selected_part_average_speed(&selected_part_ids);
                         Self::with_slider_visuals(ui, |ui| {
                             ui.horizontal(|ui| {
                                 ui.label(Self::icon(0xe050, 16.0, Self::muted_text_color()));
                                 let (volume_response, volume_slider_changed) =
                                     Self::click_slider_deferred(
                                         ui,
-                                        &mut sound.volume,
+                                        &mut selected_volume,
                                         0.0..=5.0,
                                         0.0,
                                         vec2(260.0, 24.0),
                                     );
                                 let volume_input = ui.add(
-                                    DragValue::new(&mut sound.volume)
+                                    DragValue::new(&mut selected_volume)
                                         .range(0.0..=5.0)
                                         .speed(0.01)
                                         .max_decimals(2)
                                         .suffix("x"),
                                 );
-                                sound.volume = sound.volume.clamp(0.0, 5.0);
+                                selected_volume = selected_volume.clamp(0.0, 5.0);
                                 ui.add_space(18.0);
                                 ui.label(Self::icon(0xe9e4, 16.0, Self::muted_text_color()));
                                 let (speed_response, speed_slider_changed) =
                                     Self::click_slider_deferred(
                                         ui,
-                                        &mut sound.speed,
+                                        &mut selected_speed,
                                         0.25..=2.0,
                                         0.0,
                                         vec2(260.0, 24.0),
                                     );
                                 let speed_input = ui.add(
-                                    DragValue::new(&mut sound.speed)
+                                    DragValue::new(&mut selected_speed)
                                         .range(0.25..=2.0)
                                         .speed(0.01)
                                         .max_decimals(2)
                                         .suffix("x"),
                                 );
-                                sound.speed = sound.speed.clamp(0.25, 2.0);
+                                selected_speed = selected_speed.clamp(0.25, 2.0);
                                 let volume_input_commit =
                                     Self::deferred_drag_value_commit(ui.ctx(), &volume_input);
                                 let speed_input_commit =
                                     Self::deferred_drag_value_commit(ui.ctx(), &speed_input);
-                                if volume_response.changed()
-                                    || speed_response.changed()
-                                    || volume_input.changed()
-                                    || speed_input.changed()
-                                    || volume_slider_changed
-                                    || speed_slider_changed
-                                {
+                                if volume_slider_changed || volume_input_commit {
+                                    sound
+                                        .apply_selected_volume(&selected_part_ids, selected_volume);
                                     changed = true;
-                                }
-                                if volume_slider_changed
-                                    || speed_slider_changed
-                                    || volume_input_commit
-                                    || speed_input_commit
-                                {
                                     playback_reapply_request = true;
                                 }
+                                if speed_slider_changed || speed_input_commit {
+                                    sound.apply_selected_speed(&selected_part_ids, selected_speed);
+                                    changed = true;
+                                    playback_reapply_request = true;
+                                }
+                                let _ = (&volume_response, &speed_response);
                             });
                         });
                     });
             });
 
         self.show_trim_popup = open_popup && !close_request;
-        let sound_duration = self.sounds[index].safe_duration();
+        let sound_duration = self.sounds[index].timeline_length_secs();
         self.trim_timeline_zoom = trim_timeline_zoom;
         self.set_preview_cursor_secs(sound_id, preview_cursor_secs, sound_duration);
 
@@ -9004,16 +9770,17 @@ impl SoundFxApp {
         }
         if preview_from_trim_start {
             let sound = self.sounds[index].clone();
-            self.set_preview_cursor_secs(sound.id, sound.trim_start_secs, sound.safe_duration());
-            self.preview_sound_from_position(sound.id, Some(sound.trim_start_secs));
+            let preview_start = self.selected_trim_preview_start_secs(&sound);
+            self.set_preview_cursor_secs(sound.id, preview_start, sound.timeline_length_secs());
+            self.preview_sound_from_position(sound.id, Some(preview_start));
         } else if preview_toggle {
             if is_playing {
                 self.stop_preview();
             } else {
                 let sound = self.sounds[index].clone();
                 let mut cursor_secs = self.preview_cursor_secs_for(&sound);
-                if cursor_secs >= sound.trim_end_secs - 0.02 {
-                    cursor_secs = sound.trim_start_secs;
+                if cursor_secs >= sound.timeline_length_secs() - 0.02 {
+                    cursor_secs = 0.0;
                     self.set_preview_cursor_secs(sound_id, cursor_secs, sound_duration);
                 }
                 self.preview_sound_from_position(sound_id, Some(cursor_secs));
@@ -9023,7 +9790,7 @@ impl SoundFxApp {
             if is_playing {
                 self.stop_preview();
             }
-            let reset_secs = self.sounds[index].trim_start_secs;
+            let reset_secs = 0.0;
             self.set_preview_cursor_secs(sound_id, reset_secs, sound_duration);
         }
     }
