@@ -153,7 +153,8 @@ pub fn preload_demucs_model(root_dir: &Path) -> Result<(), String> {
         .map_err(|error| format!("Failed to create warmup directory: {error}"))?;
 
     let input_path = warmup_dir.join("warmup.wav");
-    write_silent_wav(&input_path).map_err(|error| format!("Failed to create warmup file: {error}"))?;
+    write_silent_wav(&input_path)
+        .map_err(|error| format!("Failed to create warmup file: {error}"))?;
     let output_dir = warmup_dir.join("output");
     let result = extract_vocals(&input_path, &output_dir);
     let _ = fs::remove_dir_all(&warmup_dir);

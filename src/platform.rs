@@ -107,11 +107,7 @@ mod windows_platform {
                 std::mem::size_of_val(&policy) as u32,
             );
 
-            let corner = if enabled {
-                DWMWCP_ROUND
-            } else {
-                DWMWCP_DEFAULT
-            };
+            let corner = DWMWCP_ROUND;
             let _ = DwmSetWindowAttribute(
                 hwnd,
                 DWMWA_WINDOW_CORNER_PREFERENCE,
