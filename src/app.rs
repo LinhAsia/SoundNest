@@ -782,7 +782,7 @@ impl SoundFxApp {
             if ctx.wants_keyboard_input() {
                 return;
             }
-            if !ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::S)) {
+            if !ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Space)) {
                 return;
             }
             let Some(index) = self.selected_sound_index() else {
@@ -1272,7 +1272,7 @@ impl SoundFxApp {
         self.overlay_only_mode = false;
         if was_overlay_only {
             if let Some(ctx) = ctx {
-                Self::hide_window(ctx);
+                Self::restore_main_viewport(ctx);
             } else {
                 platform::hide_native_window_by_title("Sound FX");
             }
@@ -1310,9 +1310,7 @@ impl SoundFxApp {
                     Self::reveal_window(ctx);
                 } else {
                     Self::reveal_window(ctx);
-                    if let Some(center_cmd) = egui::ViewportCommand::center_on_screen(ctx) {
-                        ctx.send_viewport_cmd(center_cmd);
-                    }
+                    Self::apply_overlay_only_viewport(ctx, vec2(430.0, 118.0));
                     self.overlay_only_mode = true;
                     self.record_overlay_pending_visible = true;
                     ctx.request_repaint();
@@ -1350,6 +1348,7 @@ impl SoundFxApp {
             self.pitch_monitor.stop();
             self.pitch_overlay_native_visuals_applied = false;
             self.overlay_only_mode = false;
+            Self::restore_main_viewport(ctx);
             Self::hide_window(ctx);
             self.clear_status();
             return;
@@ -1377,9 +1376,12 @@ impl SoundFxApp {
                 self.pitch_overlay_native_visuals_applied = false;
                 self.show_pitch_panel = false;
                 Self::reveal_window(ctx);
-                if let Some(center_cmd) = egui::ViewportCommand::center_on_screen(ctx) {
-                    ctx.send_viewport_cmd(center_cmd);
-                }
+                let overlay_size = if self.pitch_overlay_animation {
+                    vec2(276.0, 276.0)
+                } else {
+                    vec2(430.0, 104.0)
+                };
+                Self::apply_overlay_only_viewport(ctx, overlay_size);
                 self.overlay_only_mode = true;
                 self.clear_status();
             }
@@ -1948,6 +1950,22 @@ impl SoundFxApp {
 
     fn hide_window(ctx: &Context) {
         ctx.send_viewport_cmd(ViewportCommand::Minimized(true));
+        ctx.request_repaint();
+    }
+
+    fn apply_overlay_only_viewport(ctx: &Context, size: Vec2) {
+        ctx.send_viewport_cmd(ViewportCommand::InnerSize(size));
+        if let Some(center_cmd) = egui::ViewportCommand::center_on_screen(ctx) {
+            ctx.send_viewport_cmd(center_cmd);
+        }
+        ctx.request_repaint();
+    }
+
+    fn restore_main_viewport(ctx: &Context) {
+        ctx.send_viewport_cmd(ViewportCommand::InnerSize(Self::desired_window_size()));
+        if let Some(center_cmd) = egui::ViewportCommand::center_on_screen(ctx) {
+            ctx.send_viewport_cmd(center_cmd);
+        }
         ctx.request_repaint();
     }
 
@@ -5455,6 +5473,7 @@ impl SoundFxApp {
         if should_stop {
             self.pitch_monitor.stop();
             self.overlay_only_mode = false;
+            Self::restore_main_viewport(ctx);
             Self::hide_window(ctx);
             self.clear_status();
         }
@@ -5507,12 +5526,18 @@ impl SoundFxApp {
                     ui.id().with("pitch-overlay-drag"),
                     Sense::click_and_drag(),
                 );
-                Self::update_overlay_drag_position(
-                    overlay_ctx,
-                    &_drag_response,
-                    vec2(430.0, 104.0),
-                    &mut self.pitch_overlay_pos,
-                );
+                if self.overlay_only_mode {
+                    if _drag_response.drag_started() {
+                        overlay_ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+                    }
+                } else {
+                    Self::update_overlay_drag_position(
+                        overlay_ctx,
+                        &_drag_response,
+                        vec2(430.0, 104.0),
+                        &mut self.pitch_overlay_pos,
+                    );
+                }
                 let top_highlight = Rect::from_min_max(
                     Pos2::new(ui.min_rect().left() + 18.0, ui.min_rect().top() + 1.0),
                     Pos2::new(ui.min_rect().right() - 58.0, ui.min_rect().top() + 14.0),
@@ -5605,12 +5630,18 @@ impl SoundFxApp {
             ui.id().with("pitch-blob-overlay-drag"),
             Sense::click_and_drag(),
         );
-        Self::update_overlay_drag_position(
-            overlay_ctx,
-            &drag_response,
-            vec2(276.0, 276.0),
-            &mut self.pitch_overlay_pos,
-        );
+        if self.overlay_only_mode {
+            if drag_response.drag_started() {
+                overlay_ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+            }
+        } else {
+            Self::update_overlay_drag_position(
+                overlay_ctx,
+                &drag_response,
+                vec2(276.0, 276.0),
+                &mut self.pitch_overlay_pos,
+            );
+        }
         if drag_response.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
         }
@@ -6544,12 +6575,18 @@ impl SoundFxApp {
             ui.id().with("record-blob-overlay-drag"),
             Sense::click_and_drag(),
         );
-        Self::update_overlay_drag_position(
-            overlay_ctx,
-            &response,
-            vec2(430.0, 118.0),
-            &mut self.record_overlay_pos,
-        );
+        if self.overlay_only_mode {
+            if response.drag_started() {
+                overlay_ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+            }
+        } else {
+            Self::update_overlay_drag_position(
+                overlay_ctx,
+                &response,
+                vec2(430.0, 118.0),
+                &mut self.record_overlay_pos,
+            );
+        }
         let painter = ui.painter_at(rect);
         let center = rect.center();
         let time = overlay_ctx.input(|input| input.time) as f32;
@@ -7588,12 +7625,25 @@ impl SoundFxApp {
                         }
                     }
 
+                    let trim_adjusting_active = ui
+                        .ctx()
+                        .data(|data| data.get_temp::<bool>(trim_adjusting_id))
+                        .unwrap_or(false)
+                        || ui
+                            .ctx()
+                            .data(|data| data.get_temp::<bool>(trim_hotkey_adjusting_id))
+                            .unwrap_or(false);
+
                     if clamp_cursor_to_trim {
                         let clamped_cursor = (*preview_cursor_secs)
                             .clamp(sound.trim_start_secs, sound.trim_end_secs);
                         if (clamped_cursor - *preview_cursor_secs).abs() > f32::EPSILON {
                             *preview_cursor_secs = clamped_cursor;
-                            seek_requested = true;
+                            if trim_adjusting_active {
+                                preview_commit_requested = true;
+                            } else {
+                                seek_requested = true;
+                            }
                         }
                     }
 
@@ -7930,18 +7980,28 @@ impl SoundFxApp {
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(Self::icon(0xe2c4, 20.0, Self::strong_text_color()).strong());
-                    let spacer = (ui.available_width() - 72.0).max(0.0);
-                    ui.add_space(spacer);
-                    ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                        if Self::icon_titlebar(ui, [34.0, 34.0], 0xe5cd, false, true).clicked() {
-                            clear_result = !snapshot.running;
-                            close_request = true;
-                        }
-                        if Self::icon_titlebar(ui, [34.0, 34.0], 0xe15b, false, false).clicked() {
-                            minimize_request = true;
-                        }
-                    });
+                    ui.allocate_ui_with_layout(
+                        vec2(ui.available_width(), 34.0),
+                        egui::Layout::right_to_left(Align::Center),
+                        |ui| {
+                            if Self::icon_titlebar(ui, [34.0, 34.0], 0xe5cd, false, true)
+                                .clicked()
+                            {
+                                clear_result = !snapshot.running;
+                                close_request = true;
+                            }
+                            if Self::icon_titlebar(ui, [34.0, 34.0], 0xe15b, false, false)
+                                .clicked()
+                            {
+                                minimize_request = true;
+                            }
+                        },
+                    );
                 });
+
+                if snapshot.running {
+                    ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
+                }
 
                 ui.add_space(12.0);
                 Self::render_download_site_badges(ui);
@@ -8658,7 +8718,7 @@ impl SoundFxApp {
             .app_frame_rect
             .unwrap_or_else(|| ctx.screen_rect().shrink(24.0));
         let base_width: f32 = 840.0;
-        let base_height: f32 = 440.0;
+        let base_height: f32 = 396.0;
         let popup_size = vec2(
             (app_rect.width() - 28.0).clamp(360.0, base_width),
             (app_rect.height() - 28.0).clamp(320.0, base_height),
@@ -8711,16 +8771,19 @@ impl SoundFxApp {
                 let sound = &mut self.sounds[index];
                 ui.horizontal(|ui| {
                     ui.label(Self::icon(0xe14e, 20.0, Color32::from_rgb(214, 51, 132)).strong());
-                    let spacer = (ui.available_width() - 34.0).max(0.0);
-                    ui.add_space(spacer);
-                    ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                        if Self::icon_titlebar(ui, [34.0, 34.0], 0xe5cd, false, true).clicked() {
-                            close_request = true;
-                        }
-                    });
+                    ui.allocate_ui_with_layout(
+                        vec2(ui.available_width(), 34.0),
+                        egui::Layout::right_to_left(Align::Center),
+                        |ui| {
+                            if Self::icon_titlebar(ui, [34.0, 34.0], 0xe5cd, false, true).clicked()
+                            {
+                                close_request = true;
+                            }
+                        },
+                    );
                 });
 
-                ui.add_space(10.0);
+                ui.add_space(6.0);
                 Frame::new()
                     .fill(Self::surface_fill())
                     .stroke(Stroke::new(1.0, Self::border_color()))
@@ -8768,7 +8831,7 @@ impl SoundFxApp {
                         });
                     });
 
-                ui.add_space(12.0);
+                ui.add_space(8.0);
                 Frame::new()
                     .fill(Self::panel_fill())
                     .stroke(Stroke::new(1.0, Self::subtle_border_color()))
@@ -8791,7 +8854,7 @@ impl SoundFxApp {
                         }
                     });
 
-                ui.add_space(12.0);
+                ui.add_space(8.0);
                 Frame::new()
                     .fill(Self::panel_fill())
                     .stroke(Stroke::new(1.0, Self::subtle_border_color()))

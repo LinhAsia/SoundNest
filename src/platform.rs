@@ -21,7 +21,7 @@ mod windows_platform {
     use windows::Win32::{
         Foundation::{
             COLORREF, DRAGDROP_S_CANCEL, DRAGDROP_S_DROP, DRAGDROP_S_USEDEFAULTCURSORS, HWND,
-            POINT, RECT, S_OK, SIZE,
+            POINT, S_OK, SIZE,
         },
         Graphics::Dwm::{
             DWMNCRENDERINGPOLICY, DWMNCRP_DISABLED, DWMNCRP_ENABLED, DWMWA_NCRENDERING_POLICY,
@@ -31,7 +31,7 @@ mod windows_platform {
         Graphics::Gdi::{
             AC_SRC_ALPHA, AC_SRC_OVER, BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BLENDFUNCTION,
             CreateCompatibleDC, CreateDIBSection, DIB_RGB_COLORS, DeleteDC, DeleteObject,
-            SelectObject,
+            ScreenToClient, SelectObject,
         },
         System::{
             Com::{CLSCTX_INPROC_SERVER, CoCreateInstance},
@@ -47,13 +47,12 @@ mod windows_platform {
             },
             WindowsAndMessaging::{
                 CreateWindowExW, DestroyWindow, FindWindowW, GWL_EXSTYLE, GWL_STYLE, GetCursorPos,
-                GetWindowLongW, GetWindowRect, HWND_NOTOPMOST, HWND_TOPMOST, IDC_ARROW,
-                LoadCursorW, SW_MINIMIZE, SW_RESTORE, SW_SHOWNOACTIVATE, SWP_FRAMECHANGED,
-                SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE, SetCursor,
-                SetWindowLongW, SetWindowPos, ShowWindow, ULW_ALPHA, UpdateLayeredWindow,
-                WS_CAPTION, WS_EX_APPWINDOW, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
-                WS_EX_TRANSPARENT, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_POPUP, WS_SYSMENU,
-                WS_THICKFRAME,
+                GetWindowLongW, HWND_NOTOPMOST, HWND_TOPMOST, IDC_ARROW, LoadCursorW, SW_MINIMIZE,
+                SW_RESTORE, SW_SHOWNOACTIVATE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE,
+                SWP_NOOWNERZORDER, SWP_NOSIZE, SetCursor, SetWindowLongW, SetWindowPos, ShowWindow,
+                ULW_ALPHA, UpdateLayeredWindow, WS_CAPTION, WS_EX_APPWINDOW, WS_EX_LAYERED,
+                WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_MAXIMIZEBOX, WS_MINIMIZEBOX,
+                WS_POPUP, WS_SYSMENU, WS_THICKFRAME,
             },
         },
     };
@@ -759,14 +758,10 @@ mod windows_platform {
             if GetCursorPos(&mut cursor).is_err() {
                 return None;
             }
-            let mut window_rect = RECT::default();
-            if GetWindowRect(hwnd, &mut window_rect).is_err() {
+            if !ScreenToClient(hwnd, &mut cursor).as_bool() {
                 return None;
             }
-            Some(eframe::egui::pos2(
-                (cursor.x - window_rect.left) as f32,
-                (cursor.y - window_rect.top) as f32,
-            ))
+            Some(eframe::egui::pos2(cursor.x as f32, cursor.y as f32))
         }
     }
 }
