@@ -1310,7 +1310,6 @@ impl SoundFxApp {
                 if reveal_main_window {
                     Self::reveal_window(ctx);
                 } else {
-                    Self::reveal_window(ctx);
                     Self::apply_overlay_only_viewport(ctx, vec2(430.0, 118.0));
                     self.overlay_only_mode = true;
                     self.record_overlay_pending_visible = true;
@@ -1351,7 +1350,6 @@ impl SoundFxApp {
             self.overlay_only_mode = false;
             self.center_window_next_frame = true;
             Self::restore_main_viewport(ctx);
-            Self::hide_window(ctx);
             self.clear_status();
             return;
         }
@@ -1377,7 +1375,6 @@ impl SoundFxApp {
                 self.pitch_overlay_pos = None;
                 self.pitch_overlay_native_visuals_applied = false;
                 self.show_pitch_panel = false;
-                Self::reveal_window(ctx);
                 let overlay_size = if self.pitch_overlay_animation {
                     vec2(276.0, 276.0)
                 } else {
@@ -1968,18 +1965,24 @@ impl SoundFxApp {
     }
 
     fn apply_overlay_only_viewport(ctx: &Context, size: Vec2) {
+        ctx.send_viewport_cmd(ViewportCommand::Visible(true));
+        ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
         ctx.send_viewport_cmd(ViewportCommand::InnerSize(size));
         if let Some(center_cmd) = egui::ViewportCommand::center_on_screen(ctx) {
             ctx.send_viewport_cmd(center_cmd);
         }
+        ctx.send_viewport_cmd(ViewportCommand::Focus);
         ctx.request_repaint();
     }
 
     fn restore_main_viewport(ctx: &Context) {
+        ctx.send_viewport_cmd(ViewportCommand::Visible(true));
+        ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
         ctx.send_viewport_cmd(ViewportCommand::InnerSize(Self::desired_window_size()));
         if let Some(center_cmd) = egui::ViewportCommand::center_on_screen(ctx) {
             ctx.send_viewport_cmd(center_cmd);
         }
+        ctx.send_viewport_cmd(ViewportCommand::Focus);
         ctx.request_repaint();
     }
 
@@ -5489,7 +5492,6 @@ impl SoundFxApp {
             self.overlay_only_mode = false;
             self.center_window_next_frame = true;
             Self::restore_main_viewport(ctx);
-            Self::hide_window(ctx);
             self.clear_status();
         }
     }
