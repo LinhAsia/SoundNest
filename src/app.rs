@@ -1271,6 +1271,7 @@ impl SoundFxApp {
         self.record_overlay_native_visuals_applied = false;
         self.overlay_only_mode = false;
         if was_overlay_only {
+            self.center_window_next_frame = true;
             if let Some(ctx) = ctx {
                 Self::restore_main_viewport(ctx);
             } else {
@@ -1348,6 +1349,7 @@ impl SoundFxApp {
             self.pitch_monitor.stop();
             self.pitch_overlay_native_visuals_applied = false;
             self.overlay_only_mode = false;
+            self.center_window_next_frame = true;
             Self::restore_main_viewport(ctx);
             Self::hide_window(ctx);
             self.clear_status();
@@ -5485,6 +5487,7 @@ impl SoundFxApp {
         if should_stop {
             self.pitch_monitor.stop();
             self.overlay_only_mode = false;
+            self.center_window_next_frame = true;
             Self::restore_main_viewport(ctx);
             Self::hide_window(ctx);
             self.clear_status();
@@ -8756,7 +8759,7 @@ impl SoundFxApp {
         let popup_pos = Pos2::new(
             (popup_bounds.center().x - popup_size.x * 0.5)
                 .clamp(popup_bounds.left(), popup_bounds.right() - popup_size.x),
-            (popup_bounds.center().y - popup_size.y * 0.5 - 10.0)
+            (popup_bounds.center().y - popup_size.y * 0.5 - 22.0)
                 .clamp(popup_bounds.top(), popup_bounds.bottom() - popup_size.y),
         );
         let mut open_popup = self.show_trim_popup;
@@ -10892,6 +10895,17 @@ impl eframe::App for SoundFxApp {
         }
 
         if self.overlay_only_mode {
+            if self.recorder.snapshot().running && self.center_record_overlay_next_frame {
+                Self::apply_overlay_only_viewport(ctx, vec2(430.0, 118.0));
+            } else if self.pitch_monitor.snapshot().running && self.center_pitch_overlay_next_frame
+            {
+                let overlay_size = if self.pitch_overlay_animation {
+                    vec2(276.0, 276.0)
+                } else {
+                    vec2(430.0, 104.0)
+                };
+                Self::apply_overlay_only_viewport(ctx, overlay_size);
+            }
             self.app_frame_rect = None;
             CentralPanel::default()
                 .frame(Frame::new().fill(Color32::TRANSPARENT).inner_margin(0.0))
