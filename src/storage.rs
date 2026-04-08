@@ -55,6 +55,12 @@ pub struct VideoAsset {
     pub waveform: Vec<f32>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct GeminiTtsPromptPreset {
+    pub name: String,
+    pub prompt: String,
+}
+
 impl VideoAsset {
     pub fn asset_path(&self, storage_dir: &Path) -> PathBuf {
         storage_dir.join("videos").join(&self.asset_file)
@@ -125,6 +131,8 @@ struct PreferencesFile {
     startup_sound_cleared: Option<bool>,
     exit_sound_cleared: Option<bool>,
     gemini_api_key: Option<String>,
+    #[serde(default)]
+    tts_prompt_presets: Vec<GeminiTtsPromptPreset>,
 }
 
 pub struct Storage {
@@ -362,6 +370,34 @@ impl Storage {
         let mut preferences = self.load_preferences()?;
         let trimmed = api_key.trim();
         preferences.gemini_api_key = (!trimmed.is_empty()).then(|| trimmed.to_owned());
+        self.save_preferences(&preferences)
+    }
+
+    pub fn load_tts_prompt_presets(&self) -> Result<Vec<GeminiTtsPromptPreset>> {
+        let preferences = self.load_preferences()?;
+        Ok(preferences
+            .tts_prompt_presets
+            .into_iter()
+            .filter_map(|preset| {
+                let name = preset.name.trim().to_owned();
+                let prompt = preset.prompt.trim().to_owned();
+                (!name.is_empty() && !prompt.is_empty())
+                    .then_some(GeminiTtsPromptPreset { name, prompt })
+            })
+            .collect())
+    }
+
+    pub fn save_tts_prompt_presets(&self, presets: &[GeminiTtsPromptPreset]) -> Result<()> {
+        let mut preferences = self.load_preferences()?;
+        preferences.tts_prompt_presets = presets
+            .iter()
+            .filter_map(|preset| {
+                let name = preset.name.trim().to_owned();
+                let prompt = preset.prompt.trim().to_owned();
+                (!name.is_empty() && !prompt.is_empty())
+                    .then_some(GeminiTtsPromptPreset { name, prompt })
+            })
+            .collect();
         self.save_preferences(&preferences)
     }
 

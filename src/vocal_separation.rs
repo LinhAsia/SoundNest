@@ -17,9 +17,17 @@ fn demucs_exe_path() -> PathBuf {
     demucs_install_dir().join("demucs.exe")
 }
 
+fn demucs_model_ready_marker() -> PathBuf {
+    demucs_install_dir().join(".model-ready")
+}
+
 /// Check if demucs-rs CLI is installed
 pub fn is_demucs_installed() -> bool {
     demucs_exe_path().exists()
+}
+
+pub fn is_demucs_model_ready() -> bool {
+    is_demucs_available() && demucs_model_ready_marker().exists()
 }
 
 /// Check if demucs-rs CLI is available (either installed or in PATH)
@@ -123,6 +131,38 @@ pub fn install_demucs() -> Result<(), String> {
     Ok(())
 }
 
+pub fn uninstall_demucs() -> Result<(), String> {
+    let install_dir = demucs_install_dir();
+    if install_dir.exists() {
+        fs::remove_dir_all(&install_dir)
+            .map_err(|error| format!("Failed to uninstall demucs-rs: {error}"))?;
+    }
+    Ok(())
+}
+
+pub fn preload_demucs_model(root_dir: &Path) -> Result<(), String> {
+    if !is_demucs_available() {
+        return Err("demucs-rs is not installed yet".to_owned());
+    }
+
+    let warmup_dir = root_dir.join("demucs-warmup");
+    if warmup_dir.exists() {
+        let _ = fs::remove_dir_all(&warmup_dir);
+    }
+    fs::create_dir_all(&warmup_dir)
+        .map_err(|error| format!("Failed to create warmup directory: {error}"))?;
+
+    let input_path = warmup_dir.join("warmup.wav");
+    write_silent_wav(&input_path).map_err(|error| format!("Failed to create warmup file: {error}"))?;
+    let output_dir = warmup_dir.join("output");
+    let result = extract_vocals(&input_path, &output_dir);
+    let _ = fs::remove_dir_all(&warmup_dir);
+    result?;
+    fs::write(demucs_model_ready_marker(), b"ready")
+        .map_err(|error| format!("Failed to save demucs model state: {error}"))?;
+    Ok(())
+}
+
 /// Separate audio and extract only the vocal stem using demucs-rs CLI.
 /// Returns the path to the vocal-only WAV file.
 pub fn extract_vocals(input_path: &Path, output_dir: &Path) -> Result<PathBuf, String> {
@@ -186,4 +226,18 @@ fn find_vocals_recursively(root: &Path) -> Option<PathBuf> {
         }
     }
     None
+}
+
+fn write_silent_wav(path: &Path) -> Result<(), hound::Error> {
+    let spec = hound::WavSpec {
+        channels: 1,
+        sample_rate: 44_100,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut writer = hound::WavWriter::create(path, spec)?;
+    for _ in 0..44_100 {
+        writer.write_sample::<i16>(0)?;
+    }
+    writer.finalize()
 }

@@ -10,7 +10,7 @@ use crate::pitch::{
 use crate::platform;
 use crate::record_video;
 use crate::recorder::{Recorder, RecorderConfig};
-use crate::storage::{SoundEffect, Storage, VideoAsset, format_time};
+use crate::storage::{GeminiTtsPromptPreset, SoundEffect, Storage, VideoAsset, format_time};
 use anyhow::{Context as _, Result};
 #[cfg(windows)]
 use clipboard_win::{Clipboard, Setter, formats::FileList};
@@ -135,6 +135,50 @@ enum GeminiTtsMessage {
     Finished(Result<GeminiTtsResult, String>),
 }
 
+enum DemucsModelMessage {
+    Finished(Result<(), String>),
+}
+
+struct GeminiVoiceOption {
+    name: &'static str,
+    label: &'static str,
+}
+
+const GEMINI_VOICE_OPTIONS: &[GeminiVoiceOption] = &[
+    GeminiVoiceOption {
+        name: "Kore",
+        label: "Kore",
+    },
+    GeminiVoiceOption {
+        name: "Puck",
+        label: "Puck",
+    },
+    GeminiVoiceOption {
+        name: "Charon",
+        label: "Charon",
+    },
+    GeminiVoiceOption {
+        name: "Aoede",
+        label: "Aoede",
+    },
+    GeminiVoiceOption {
+        name: "Fenrir",
+        label: "Fenrir",
+    },
+    GeminiVoiceOption {
+        name: "Leda",
+        label: "Leda",
+    },
+    GeminiVoiceOption {
+        name: "Orus",
+        label: "Orus",
+    },
+    GeminiVoiceOption {
+        name: "Zephyr",
+        label: "Zephyr",
+    },
+];
+
 #[derive(Clone, Copy)]
 struct DownloadSiteBadge {
     name: &'static str,
@@ -254,6 +298,8 @@ pub struct SoundFxApp {
     tts_text: String,
     tts_voice_name: String,
     tts_direction_prompt: String,
+    tts_prompt_presets: Vec<GeminiTtsPromptPreset>,
+    tts_preset_name: String,
     tts_output_name: String,
     tts_running: bool,
     tts_status: String,
@@ -274,6 +320,11 @@ pub struct SoundFxApp {
     demucs_install_error: Option<String>,
     demucs_install_tx: Sender<Result<(), String>>,
     demucs_install_rx: Receiver<Result<(), String>>,
+    demucs_model_loading: bool,
+    demucs_model_error: Option<String>,
+    demucs_model_ready: bool,
+    demucs_model_tx: Sender<DemucsModelMessage>,
+    demucs_model_rx: Receiver<DemucsModelMessage>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -325,6 +376,7 @@ impl SoundFxApp {
         });
         let (myinstants_waveform_tx, myinstants_waveform_rx) = mpsc::channel();
         let (demucs_install_tx, demucs_install_rx) = mpsc::channel();
+        let (demucs_model_tx, demucs_model_rx) = mpsc::channel();
         let (tts_tx, tts_rx) = mpsc::channel();
         let (vocal_separation_tx, vocal_separation_rx) = mpsc::channel();
         let video_assets = storage.load_video_library().unwrap_or_else(|error| {
@@ -375,6 +427,7 @@ impl SoundFxApp {
             .ok()
             .flatten()
             .unwrap_or_default();
+        let tts_prompt_presets = storage.load_tts_prompt_presets().unwrap_or_default();
         let resolved_startup_sound = storage.resolved_startup_sound_path().ok().flatten();
         let startup_transition_duration_sec = Self::custom_transition_duration_secs_opt(
             &storage,
@@ -498,6 +551,8 @@ impl SoundFxApp {
             tts_text: String::new(),
             tts_voice_name: "Kore".to_owned(),
             tts_direction_prompt: String::new(),
+            tts_prompt_presets,
+            tts_preset_name: String::new(),
             tts_output_name: "gemini tts".to_owned(),
             tts_running: false,
             tts_status: String::new(),
@@ -518,6 +573,11 @@ impl SoundFxApp {
             demucs_install_error: None,
             demucs_install_tx,
             demucs_install_rx,
+            demucs_model_loading: false,
+            demucs_model_error: None,
+            demucs_model_ready: crate::vocal_separation::is_demucs_model_ready(),
+            demucs_model_tx,
+            demucs_model_rx,
         }
         .with_initial_selection()
     }
@@ -1982,39 +2042,27 @@ impl SoundFxApp {
     }
 
     fn filtered_library_sounds(&self) -> Vec<SoundEffect> {
-        let mut sounds = self
+        let filtered = self
             .sounds
             .iter()
             .filter(|sound| Self::library_query_matches(&sound.name, &self.library_audio_query))
             .filter(|sound| !self.library_favorites_only_audio || sound.favorite)
             .cloned()
             .collect::<Vec<_>>();
-        sounds.sort_by(|left, right| {
-            right.favorite.cmp(&left.favorite).then_with(|| {
-                left.name
-                    .to_ascii_lowercase()
-                    .cmp(&right.name.to_ascii_lowercase())
-            })
-        });
-        sounds
+        let (favorites, regular): (Vec<_>, Vec<_>) = filtered.into_iter().partition(|sound| sound.favorite);
+        favorites.into_iter().chain(regular).collect()
     }
 
     fn filtered_library_videos(&self) -> Vec<VideoAsset> {
-        let mut videos = self
+        let filtered = self
             .video_assets
             .iter()
             .filter(|video| Self::library_query_matches(&video.name, &self.library_video_query))
             .filter(|video| !self.library_favorites_only_video || video.favorite)
             .cloned()
             .collect::<Vec<_>>();
-        videos.sort_by(|left, right| {
-            right.favorite.cmp(&left.favorite).then_with(|| {
-                left.name
-                    .to_ascii_lowercase()
-                    .cmp(&right.name.to_ascii_lowercase())
-            })
-        });
-        videos
+        let (favorites, regular): (Vec<_>, Vec<_>) = filtered.into_iter().partition(|video| video.favorite);
+        favorites.into_iter().chain(regular).collect()
     }
 
     fn trim_playhead_drag_id(sound_id: Uuid) -> egui::Id {
@@ -2241,6 +2289,57 @@ impl SoundFxApp {
         }
     }
 
+    fn selected_tts_preset_name(&self) -> Option<&str> {
+        self.tts_prompt_presets
+            .iter()
+            .find(|preset| preset.prompt == self.tts_direction_prompt)
+            .map(|preset| preset.name.as_str())
+    }
+
+    fn save_current_tts_preset(&mut self) {
+        let name = self.tts_preset_name.trim();
+        let prompt = self.tts_direction_prompt.trim();
+        if name.is_empty() || prompt.is_empty() {
+            self.tts_error = Some("Preset name and prompt are required".to_owned());
+            return;
+        }
+
+        if let Some(existing) = self
+            .tts_prompt_presets
+            .iter_mut()
+            .find(|preset| preset.name.eq_ignore_ascii_case(name))
+        {
+            existing.name = name.to_owned();
+            existing.prompt = prompt.to_owned();
+        } else {
+            self.tts_prompt_presets.push(GeminiTtsPromptPreset {
+                name: name.to_owned(),
+                prompt: prompt.to_owned(),
+            });
+            self.tts_prompt_presets.sort_by(|left, right| {
+                left.name
+                    .to_ascii_lowercase()
+                    .cmp(&right.name.to_ascii_lowercase())
+            });
+        }
+        self.tts_error = None;
+        let _ = self.storage.save_tts_prompt_presets(&self.tts_prompt_presets);
+        self.tts_status = "Preset saved".to_owned();
+    }
+
+    fn apply_tts_preset_by_name(&mut self, name: &str) {
+        if let Some(preset) = self
+            .tts_prompt_presets
+            .iter()
+            .find(|preset| preset.name == name)
+            .cloned()
+        {
+            self.tts_preset_name = preset.name;
+            self.tts_direction_prompt = preset.prompt;
+            self.tts_error = None;
+        }
+    }
+
     fn add_tts_result_to_library(&mut self, path: &Path) {
         match self.storage.import_sound(path) {
             Ok(mut sound) => {
@@ -2248,6 +2347,8 @@ impl SoundFxApp {
                 if !preferred_name.is_empty() {
                     sound.name = preferred_name.to_owned();
                 }
+                self.app_view = AppView::Library;
+                self.library_tab = LibraryTab::Sounds;
                 self.selected = Some(sound.id);
                 self.library_audio_query.clear();
                 self.library_favorites_only_audio = false;
@@ -2802,15 +2903,82 @@ impl SoundFxApp {
         }
     }
 
+    fn start_demucs_install(&mut self, ctx: &Context) {
+        if self.demucs_installing {
+            return;
+        }
+        self.demucs_installing = true;
+        self.demucs_install_error = None;
+        let tx = self.demucs_install_tx.clone();
+        thread::spawn(move || {
+            let result = crate::vocal_separation::install_demucs();
+            let _ = tx.send(result);
+        });
+        ctx.request_repaint();
+    }
+
+    fn start_demucs_model_preload(&mut self, ctx: &Context) {
+        if self.demucs_model_loading || !crate::vocal_separation::is_demucs_available() {
+            return;
+        }
+        self.demucs_model_loading = true;
+        self.demucs_model_error = None;
+        self.demucs_model_ready = false;
+        let tx = self.demucs_model_tx.clone();
+        let root_dir = self.storage.root_dir().to_path_buf();
+        thread::spawn(move || {
+            let result = crate::vocal_separation::preload_demucs_model(&root_dir);
+            let _ = tx.send(DemucsModelMessage::Finished(result));
+        });
+        ctx.request_repaint();
+    }
+
+    fn uninstall_demucs_from_settings(&mut self) {
+        match crate::vocal_separation::uninstall_demucs() {
+            Ok(()) => {
+                self.demucs_install_error = None;
+                self.demucs_model_error = None;
+                self.demucs_model_loading = false;
+                self.demucs_model_ready = false;
+                if let Some(draft) = self.recording_draft.as_mut() {
+                    draft.keep_vocal = false;
+                    draft.vocal_separated_path = None;
+                }
+                self.status = Some("demucs-rs uninstalled".to_owned());
+            }
+            Err(error) => self.set_error_status(error),
+        }
+    }
+
     fn poll_demucs_install_result(&mut self, ctx: &Context) {
         while let Ok(result) = self.demucs_install_rx.try_recv() {
             self.demucs_installing = false;
             match result {
                 Ok(()) => {
                     self.demucs_install_error = None;
+                    self.demucs_model_ready = crate::vocal_separation::is_demucs_model_ready();
+                    self.status = Some("demucs-rs installed".to_owned());
                 }
                 Err(e) => {
                     self.demucs_install_error = Some(e);
+                }
+            }
+            ctx.request_repaint();
+        }
+    }
+
+    fn poll_demucs_model_result(&mut self, ctx: &Context) {
+        while let Ok(message) = self.demucs_model_rx.try_recv() {
+            self.demucs_model_loading = false;
+            match message {
+                DemucsModelMessage::Finished(Ok(())) => {
+                    self.demucs_model_error = None;
+                    self.demucs_model_ready = true;
+                    self.status = Some("demucs model ready".to_owned());
+                }
+                DemucsModelMessage::Finished(Err(error)) => {
+                    self.demucs_model_error = Some(error);
+                    self.demucs_model_ready = crate::vocal_separation::is_demucs_model_ready();
                 }
             }
             ctx.request_repaint();
@@ -11562,6 +11730,7 @@ impl eframe::App for SoundFxApp {
         self.intercept_close_request(ctx);
         self.poll_myinstants_waveform_jobs();
         self.poll_demucs_install_result(ctx);
+        self.poll_demucs_model_result(ctx);
         self.poll_vocal_separation_jobs(ctx);
         self.poll_tts_jobs(ctx);
         self.prune_copy_feedback(ctx);
