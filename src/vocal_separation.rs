@@ -149,24 +149,15 @@ pub fn extract_vocals(input_path: &Path, output_dir: &Path) -> Result<PathBuf, S
         return Err(format!("demucs failed: {stderr}"));
     }
 
-    // demucs-rs CLI outputs to <output_dir>/<model_name>/vocals.wav
-    // Search for the vocal file in the output directory
+    // demucs-rs CLI can output directly to <output_dir>/vocals.wav or place stems in nested
+    // subdirectories depending on the build / model layout.
     let vocal_path = output_dir.join("vocals.wav");
     if vocal_path.exists() {
         return Ok(vocal_path);
     }
 
-    // Try to find it in a subdirectory (model name)
-    if let Ok(entries) = fs::read_dir(output_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                let candidate = path.join("vocals.wav");
-                if candidate.exists() {
-                    return Ok(candidate);
-                }
-            }
-        }
+    if let Some(path) = find_vocals_recursively(output_dir) {
+        return Ok(path);
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -174,4 +165,25 @@ pub fn extract_vocals(input_path: &Path, output_dir: &Path) -> Result<PathBuf, S
     Err(format!(
         "Vocal output file not found after separation. stdout: {stdout} stderr: {stderr}"
     ))
+}
+
+fn find_vocals_recursively(root: &Path) -> Option<PathBuf> {
+    let entries = fs::read_dir(root).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_file()
+            && path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .is_some_and(|name| name.eq_ignore_ascii_case("vocals.wav"))
+        {
+            return Some(path);
+        }
+        if path.is_dir()
+            && let Some(found) = find_vocals_recursively(&path)
+        {
+            return Some(found);
+        }
+    }
+    None
 }

@@ -253,6 +253,7 @@ pub struct SoundFxApp {
     download_panel_tab: DownloadPanelTab,
     tts_text: String,
     tts_voice_name: String,
+    tts_direction_prompt: String,
     tts_output_name: String,
     tts_running: bool,
     tts_status: String,
@@ -496,6 +497,7 @@ impl SoundFxApp {
             download_panel_tab: DownloadPanelTab::Download,
             tts_text: String::new(),
             tts_voice_name: "Kore".to_owned(),
+            tts_direction_prompt: String::new(),
             tts_output_name: "gemini tts".to_owned(),
             tts_running: false,
             tts_status: String::new(),
@@ -1019,8 +1021,8 @@ impl SoundFxApp {
             self.set_error_status("Pick a sound first");
             return;
         };
-        let sound = self.sounds[index].clone();
-        let source_path = match self.storage.drag_sound_source_path(&sound) {
+        let selected_sound = self.sounds[index].clone();
+        let source_path = match self.storage.drag_sound_source_path(&selected_sound) {
             Ok(path) => path,
             Err(error) => {
                 self.set_error_status(error);
@@ -1031,13 +1033,20 @@ impl SoundFxApp {
             self.set_error_status(format!("unable to open {}", source_path.display()));
             return;
         }
-        let preview_id = sound.id;
-        let preview_start = sound.trim_start_secs;
-        let preview_duration = sound.safe_duration();
-        let source_is_temporary = source_path != sound.asset_path(self.storage.root_dir());
+        let review_sound = match self.storage.analyze_sound_as_effect(&source_path, &selected_sound.name) {
+            Ok(sound) => sound,
+            Err(error) => {
+                self.set_error_status(error);
+                return;
+            }
+        };
+        let preview_id = review_sound.id;
+        let preview_start = review_sound.trim_start_secs;
+        let preview_duration = review_sound.safe_duration();
+        let source_is_temporary = source_path != selected_sound.asset_path(self.storage.root_dir());
         self.trim_timeline_zoom = 1.0;
         self.recording_draft = Some(RecordingDraft {
-            sound,
+            sound: review_sound,
             source_path,
             source_is_temporary,
             keep_vocal: false,
@@ -1467,11 +1476,6 @@ impl SoundFxApp {
             return;
         };
 
-        let Some(audio) = self.audio.as_mut() else {
-            self.set_error_status("Audio unavailable");
-            return;
-        };
-
         self.myinstants_preview_audio_url = None;
 
         let (keep_vocal, source_path, vocal_separated_path) = {
@@ -1487,11 +1491,16 @@ impl SoundFxApp {
                 existing
             } else {
                 self.start_vocal_separation_if_needed();
-                self.set_error_status("Keep Vocal is still processing");
-                return;
+                self.status = Some("Separating vocals... previewing original sound".to_owned());
+                source_path
             }
         } else {
             source_path
+        };
+
+        let Some(audio) = self.audio.as_mut() else {
+            self.set_error_status("Audio unavailable");
+            return;
         };
 
         let draft = self.recording_draft.as_ref().unwrap();
@@ -1503,7 +1512,15 @@ impl SoundFxApp {
         };
 
         match playback {
-            Ok(()) => self.clear_status(),
+            Ok(()) => {
+                if !(keep_vocal
+                    && self.recording_draft.as_ref().is_some_and(|draft| {
+                        draft.keep_vocal && draft.vocal_separated_path.is_none()
+                    }))
+                {
+                    self.clear_status();
+                }
+            }
             Err(error) => self.set_error_status(error),
         }
     }
@@ -1520,6 +1537,18 @@ impl SoundFxApp {
             if discard_audio && draft.source_is_temporary {
                 let _ = fs::remove_file(draft.source_path);
             }
+        }
+        self.show_record_review_panel = false;
+    }
+
+    fn hide_recording_review(&mut self) {
+        if let Some(draft) = self.recording_draft.as_ref()
+            && self
+                .audio
+                .as_ref()
+                .is_some_and(|audio| audio.is_playing(draft.sound.id))
+        {
+            self.stop_preview();
         }
         self.show_record_review_panel = false;
     }
@@ -2152,6 +2181,7 @@ impl SoundFxApp {
             return;
         }
         let voice = self.tts_voice_name.trim().to_owned();
+        let direction_prompt = self.tts_direction_prompt.trim().to_owned();
         let output_name = self.tts_output_name.trim().to_owned();
         let out_dir = self.storage.root_dir().join("gemini-tts");
         let tx = self.tts_tx.clone();
@@ -2166,6 +2196,7 @@ impl SoundFxApp {
                 &api_key,
                 &text,
                 &voice,
+                &direction_prompt,
                 &out_dir,
                 if output_name.is_empty() {
                     "gemini tts"
@@ -2207,6 +2238,26 @@ impl SoundFxApp {
                 }
             }
             ctx.request_repaint();
+        }
+    }
+
+    fn add_tts_result_to_library(&mut self, path: &Path) {
+        match self.storage.import_sound(path) {
+            Ok(mut sound) => {
+                let preferred_name = self.tts_output_name.trim();
+                if !preferred_name.is_empty() {
+                    sound.name = preferred_name.to_owned();
+                }
+                self.selected = Some(sound.id);
+                self.library_audio_query.clear();
+                self.library_favorites_only_audio = false;
+                self.sounds.insert(0, sound);
+                self.save_now();
+                self.tts_can_add_to_library = false;
+                self.tts_added_to_library = true;
+                self.status = Some("Added to library".to_owned());
+            }
+            Err(error) => self.set_error_status(error),
         }
     }
 
@@ -3547,13 +3598,14 @@ impl SoundFxApp {
                     }
                 }
 
-                if Self::icon_titlebar(ui, [42.0, 30.0], 0xe145, false, false).clicked() {
-                    self.add_sound();
-                }
-
                 if Self::icon_titlebar(ui, [42.0, 30.0], 0xe061, false, false).clicked() {
-                    self.refresh_record_capture_devices();
-                    self.show_record_panel = true;
+                    if self.recording_draft.is_some() && !self.recorder.snapshot().running {
+                        self.show_record_panel = false;
+                        self.show_record_review_panel = true;
+                    } else {
+                        self.refresh_record_capture_devices();
+                        self.show_record_panel = true;
+                    }
                 }
 
                 if Self::icon_titlebar(ui, [42.0, 30.0], 0xe8b6, self.show_myinstants_panel, false)
@@ -4532,7 +4584,9 @@ impl SoundFxApp {
                                     if self.vocal_separation_running && draft.keep_vocal {
                                         ui.spinner();
                                         ui.label(
-                                            RichText::new("Separating vocals...")
+                                            RichText::new(
+                                                "Separating vocals... first run can take a while",
+                                            )
                                                 .size(11.5)
                                                 .color(Self::muted_text_color()),
                                         );
@@ -4814,7 +4868,7 @@ impl SoundFxApp {
         if save_audio {
             self.save_recording_review_to_library();
         } else if close_request || !open_panel {
-            self.close_recording_review(true);
+            self.hide_recording_review();
         }
     }
 
@@ -8408,10 +8462,12 @@ impl SoundFxApp {
         }
 
         let inner = rect.shrink2(vec2(10.0, 8.0));
-        let bar_width = inner.width() / waveform.len() as f32;
+        let wave_width = (inner.width() * 0.86).clamp(inner.width().min(56.0), inner.width());
+        let wave_left = inner.center().x - wave_width * 0.5;
+        let bar_width = wave_width / waveform.len() as f32;
         for (index, level) in waveform.iter().enumerate() {
             let amplitude = level.clamp(0.06, 1.0);
-            let center_x = inner.left() + (index as f32 + 0.5) * bar_width;
+            let center_x = wave_left + (index as f32 + 0.5) * bar_width;
             let half = amplitude * inner.height() * 0.42;
             let wave_rect = Rect::from_min_max(
                 Pos2::new(
@@ -8427,7 +8483,7 @@ impl SoundFxApp {
         }
 
         if let Some(progress) = progress {
-            let play_x = egui::lerp(inner.left()..=inner.right(), progress.clamp(0.0, 1.0));
+            let play_x = egui::lerp(wave_left..=wave_left + wave_width, progress.clamp(0.0, 1.0));
             painter.line_segment(
                 [
                     Pos2::new(play_x, inner.top()),
@@ -8485,6 +8541,62 @@ impl SoundFxApp {
                             .desired_width(f32::INFINITY),
                     );
                 });
+                ui.add_space(10.0);
+                ui.label(
+                    RichText::new("Direction / accent prompt")
+                        .size(12.0)
+                        .color(Self::muted_text_color()),
+                );
+                ui.add_space(6.0);
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
+                    for (label, prompt) in [
+                        (
+                            "VN Bắc",
+                            "Accent: Northern Vietnamese from Hanoi. Style: clear, natural, warm. Pacing: conversational and steady.",
+                        ),
+                        (
+                            "VN Trung",
+                            "Accent: Central Vietnamese from Hue. Style: gentle and clear. Pacing: natural and calm.",
+                        ),
+                        (
+                            "VN Nam",
+                            "Accent: Southern Vietnamese from Ho Chi Minh City. Style: friendly and relaxed. Pacing: natural conversational pace.",
+                        ),
+                        (
+                            "Indian EN",
+                            "Accent: Indian English. Style: confident and clear. Pacing: natural professional delivery.",
+                        ),
+                        (
+                            "US EN",
+                            "Accent: American English. Style: natural and energetic. Pacing: medium and clear.",
+                        ),
+                        (
+                            "UK EN",
+                            "Accent: British English from London. Style: polished and clear. Pacing: medium.",
+                        ),
+                    ] {
+                        let response = ui.add_sized(
+                            [76.0, 28.0],
+                            Self::action_button(
+                                RichText::new(label).size(11.5),
+                                false,
+                                false,
+                            ),
+                        );
+                        Self::decorate_button_response(ui, &response);
+                        if response.clicked() {
+                            self.tts_direction_prompt = prompt.to_owned();
+                        }
+                    }
+                });
+                ui.add_space(8.0);
+                ui.add_sized(
+                    [ui.available_width(), 80.0],
+                    TextEdit::multiline(&mut self.tts_direction_prompt)
+                        .desired_width(f32::INFINITY)
+                        .hint_text("Accent / style / pacing guidance. Example: Accent: Northern Vietnamese from Hanoi. Style: calm and clear. Pacing: medium."),
+                );
                 ui.add_space(10.0);
                 ui.add_sized(
                     [ui.available_width(), 130.0],
@@ -8548,7 +8660,7 @@ impl SoundFxApp {
         } else if !self.gemini_api_key.trim().is_empty() {
             ui.add_space(10.0);
             ui.label(
-                RichText::new("Uses the Gemini API key from Settings.")
+                RichText::new("Uses the Gemini API key from Settings. Gemini TTS supports prompt-based style, accent, and pacing control.")
                     .size(12.0)
                     .color(Self::muted_text_color()),
             );
@@ -8596,9 +8708,7 @@ impl SoundFxApp {
             }
         }
         if add_to_library && let Some(path) = self.tts_last_file.clone() {
-            self.import_paths(vec![path]);
-            self.tts_can_add_to_library = false;
-            self.tts_added_to_library = true;
+            self.add_tts_result_to_library(&path);
         }
         if clear_result {
             if let Some(path) = self.tts_last_file.take() {

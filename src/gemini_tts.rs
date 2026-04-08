@@ -11,6 +11,7 @@ pub fn generate_speech_to_file(
     api_key: &str,
     text: &str,
     voice_name: &str,
+    direction_prompt: &str,
     output_dir: &Path,
     output_name: &str,
 ) -> Result<PathBuf> {
@@ -25,10 +26,12 @@ pub fn generate_speech_to_file(
     fs::create_dir_all(output_dir)
         .with_context(|| format!("unable to create {}", output_dir.display()))?;
 
+    let prompt = build_tts_prompt(text, direction_prompt);
+
     let body = json!({
         "contents": [{
             "parts": [{
-                "text": text
+                "text": prompt
             }]
         }],
         "generationConfig": {
@@ -66,6 +69,18 @@ pub fn generate_speech_to_file(
     let output_path = unique_output_path(output_dir, output_name);
     write_pcm_wave(&output_path, &pcm)?;
     Ok(output_path)
+}
+
+fn build_tts_prompt(text: &str, direction_prompt: &str) -> String {
+    let direction_prompt = direction_prompt.trim();
+    if direction_prompt.is_empty() {
+        return text.trim().to_owned();
+    }
+
+    format!(
+        "### DIRECTOR'S NOTES\n{direction_prompt}\n\n### TRANSCRIPT\n{}",
+        text.trim()
+    )
 }
 
 fn unique_output_path(output_dir: &Path, output_name: &str) -> PathBuf {
