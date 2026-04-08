@@ -3233,6 +3233,7 @@ name = "soundfx_manager"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64",
  "clipboard-win",
  "directories",
  "dirs",

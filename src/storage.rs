@@ -29,6 +29,8 @@ pub struct SoundEffect {
     pub id: Uuid,
     pub name: String,
     pub asset_file: String,
+    #[serde(default)]
+    pub favorite: bool,
     pub duration_secs: f32,
     pub volume: f32,
     #[serde(default = "default_speed")]
@@ -44,6 +46,8 @@ pub struct VideoAsset {
     pub id: Uuid,
     pub name: String,
     pub asset_file: String,
+    #[serde(default)]
+    pub favorite: bool,
     pub duration_secs: f32,
     #[serde(default = "default_video_fps")]
     pub fps: u32,
@@ -541,6 +545,7 @@ impl Storage {
             id,
             name,
             asset_file,
+            favorite: false,
             duration_secs: analysis.duration_secs,
             volume: 1.0,
             speed: 1.0,
@@ -647,6 +652,7 @@ impl Storage {
             id: Uuid::new_v4(),
             name: name.to_owned(),
             asset_file,
+            favorite: false,
             duration_secs: analysis.duration_secs,
             volume: 1.0,
             speed: 1.0,
@@ -684,6 +690,7 @@ impl Storage {
             id,
             name: name.to_owned(),
             asset_file,
+            favorite: false,
             duration_secs: duration_secs.max(0.05),
             fps: normalize_video_fps(fps),
             waveform,

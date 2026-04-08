@@ -3,6 +3,7 @@
 mod app;
 mod audio;
 mod downloader;
+mod gemini_tts;
 mod hotkey;
 mod myinstants;
 mod pitch;

@@ -1,5 +1,6 @@
 use crate::audio::AudioEngine;
 use crate::downloader::{YoutubeAudioDownloader, YoutubeSearchResult};
+use crate::gemini_tts;
 use crate::hotkey::GlobalHotkeyManager;
 use crate::myinstants::{MyinstantsClient, MyinstantsResult};
 use crate::pitch::{
@@ -65,6 +66,12 @@ enum LibraryTab {
     Videos,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DownloadPanelTab {
+    Download,
+    Tts,
+}
+
 struct RecordingDraft {
     sound: SoundEffect,
     source_path: PathBuf,
@@ -110,6 +117,22 @@ enum MyinstantsWaveformMessage {
         audio_url: String,
         error: String,
     },
+}
+
+enum VocalSeparationMessage {
+    Finished {
+        source_path: PathBuf,
+        result: Result<PathBuf, String>,
+    },
+}
+
+struct GeminiTtsResult {
+    path: PathBuf,
+    display_name: String,
+}
+
+enum GeminiTtsMessage {
+    Finished(Result<GeminiTtsResult, String>),
 }
 
 #[derive(Clone, Copy)]
@@ -219,10 +242,29 @@ pub struct SoundFxApp {
     settings_show_exit_sound: bool,
     library_audio_query: String,
     library_video_query: String,
+    library_favorites_only_audio: bool,
+    library_favorites_only_video: bool,
+    copied_sound_feedback_until: HashMap<Uuid, f64>,
+    copied_video_feedback_until: HashMap<Uuid, f64>,
     editor_drop_armed: bool,
     editor_drop_rect: Option<Rect>,
     pending_sound_drag: Option<Uuid>,
     ignored_drop_path: Option<PathBuf>,
+    download_panel_tab: DownloadPanelTab,
+    tts_text: String,
+    tts_voice_name: String,
+    tts_output_name: String,
+    tts_running: bool,
+    tts_status: String,
+    tts_error: Option<String>,
+    tts_last_file: Option<PathBuf>,
+    tts_can_add_to_library: bool,
+    tts_added_to_library: bool,
+    tts_tx: Sender<GeminiTtsMessage>,
+    tts_rx: Receiver<GeminiTtsMessage>,
+    vocal_separation_running: bool,
+    vocal_separation_tx: Sender<VocalSeparationMessage>,
+    vocal_separation_rx: Receiver<VocalSeparationMessage>,
     reveal_record_review_on_open: bool,
     startup_sound_played: bool,
     pending_save: bool,
@@ -282,6 +324,8 @@ impl SoundFxApp {
         });
         let (myinstants_waveform_tx, myinstants_waveform_rx) = mpsc::channel();
         let (demucs_install_tx, demucs_install_rx) = mpsc::channel();
+        let (tts_tx, tts_rx) = mpsc::channel();
+        let (vocal_separation_tx, vocal_separation_rx) = mpsc::channel();
         let video_assets = storage.load_video_library().unwrap_or_else(|error| {
             status = Some(error.to_string());
             Vec::new()
@@ -441,10 +485,29 @@ impl SoundFxApp {
             settings_show_exit_sound: false,
             library_audio_query: String::new(),
             library_video_query: String::new(),
+            library_favorites_only_audio: false,
+            library_favorites_only_video: false,
+            copied_sound_feedback_until: HashMap::new(),
+            copied_video_feedback_until: HashMap::new(),
             editor_drop_armed: false,
             editor_drop_rect: None,
             pending_sound_drag: None,
             ignored_drop_path: None,
+            download_panel_tab: DownloadPanelTab::Download,
+            tts_text: String::new(),
+            tts_voice_name: "Kore".to_owned(),
+            tts_output_name: "gemini tts".to_owned(),
+            tts_running: false,
+            tts_status: String::new(),
+            tts_error: None,
+            tts_last_file: None,
+            tts_can_add_to_library: false,
+            tts_added_to_library: false,
+            tts_tx,
+            tts_rx,
+            vocal_separation_running: false,
+            vocal_separation_tx,
+            vocal_separation_rx,
             reveal_record_review_on_open: false,
             startup_sound_played: false,
             pending_save: false,
@@ -957,7 +1020,13 @@ impl SoundFxApp {
             return;
         };
         let sound = self.sounds[index].clone();
-        let source_path = sound.asset_path(self.storage.root_dir());
+        let source_path = match self.storage.drag_sound_source_path(&sound) {
+            Ok(path) => path,
+            Err(error) => {
+                self.set_error_status(error);
+                return;
+            }
+        };
         if !source_path.exists() {
             self.set_error_status(format!("unable to open {}", source_path.display()));
             return;
@@ -965,10 +1034,12 @@ impl SoundFxApp {
         let preview_id = sound.id;
         let preview_start = sound.trim_start_secs;
         let preview_duration = sound.safe_duration();
+        let source_is_temporary = source_path != sound.asset_path(self.storage.root_dir());
+        self.trim_timeline_zoom = 1.0;
         self.recording_draft = Some(RecordingDraft {
             sound,
             source_path,
-            source_is_temporary: false,
+            source_is_temporary,
             keep_vocal: false,
             vocal_separated_path: None,
         });
@@ -1099,6 +1170,7 @@ impl SoundFxApp {
                 let preview_id = sound.id;
                 let preview_start = sound.trim_start_secs;
                 let preview_duration = sound.safe_duration();
+                self.trim_timeline_zoom = 1.0;
                 self.recording_draft = Some(RecordingDraft {
                     sound,
                     source_path: path.to_path_buf(),
@@ -1327,7 +1399,7 @@ impl SoundFxApp {
         if self.recorder.snapshot().running {
             self.stop_recording(Some(ctx));
         } else {
-            self.start_recording(ctx, true);
+            self.start_recording(ctx, false);
         }
     }
 
@@ -1414,19 +1486,9 @@ impl SoundFxApp {
             if let Some(existing) = vocal_separated_path {
                 existing
             } else {
-                let temp_dir = self.storage.root_dir().join("temp_vocals");
-                match crate::vocal_separation::extract_vocals(&source_path, &temp_dir) {
-                    Ok(path) => {
-                        if let Some(draft) = self.recording_draft.as_mut() {
-                            draft.vocal_separated_path = Some(path.clone());
-                        }
-                        path
-                    }
-                    Err(error) => {
-                        self.set_error_status(anyhow::anyhow!(error));
-                        return;
-                    }
-                }
+                self.start_vocal_separation_if_needed();
+                self.set_error_status("Keep Vocal is still processing");
+                return;
             }
         } else {
             source_path
@@ -1476,14 +1538,9 @@ impl SoundFxApp {
             let vocal_path = if let Some(existing) = vocal_separated_path {
                 existing
             } else {
-                let temp_dir = self.storage.root_dir().join("temp_vocals");
-                match crate::vocal_separation::extract_vocals(&source_path, &temp_dir) {
-                    Ok(path) => path,
-                    Err(error) => {
-                        self.set_error_status(anyhow::anyhow!(error));
-                        return;
-                    }
-                }
+                self.start_vocal_separation_if_needed();
+                self.set_error_status("Keep Vocal is still processing");
+                return;
             };
             match self
                 .storage
@@ -1573,9 +1630,7 @@ impl SoundFxApp {
                     if let Some(existing) = vocal_separated_path {
                         existing
                     } else {
-                        let temp_dir = root_dir.join("temp_vocals");
-                        crate::vocal_separation::extract_vocals(&source_path, &temp_dir)
-                            .map_err(|e| anyhow::anyhow!(e))?
+                        anyhow::bail!("Keep Vocal is still processing")
                     }
                 } else {
                     source_path.clone()
@@ -1897,12 +1952,262 @@ impl SoundFxApp {
             .clamp(sound.trim_start_secs, sound.trim_end_secs)
     }
 
+    fn filtered_library_sounds(&self) -> Vec<SoundEffect> {
+        let mut sounds = self
+            .sounds
+            .iter()
+            .filter(|sound| Self::library_query_matches(&sound.name, &self.library_audio_query))
+            .filter(|sound| !self.library_favorites_only_audio || sound.favorite)
+            .cloned()
+            .collect::<Vec<_>>();
+        sounds.sort_by(|left, right| {
+            right.favorite.cmp(&left.favorite).then_with(|| {
+                left.name
+                    .to_ascii_lowercase()
+                    .cmp(&right.name.to_ascii_lowercase())
+            })
+        });
+        sounds
+    }
+
+    fn filtered_library_videos(&self) -> Vec<VideoAsset> {
+        let mut videos = self
+            .video_assets
+            .iter()
+            .filter(|video| Self::library_query_matches(&video.name, &self.library_video_query))
+            .filter(|video| !self.library_favorites_only_video || video.favorite)
+            .cloned()
+            .collect::<Vec<_>>();
+        videos.sort_by(|left, right| {
+            right.favorite.cmp(&left.favorite).then_with(|| {
+                left.name
+                    .to_ascii_lowercase()
+                    .cmp(&right.name.to_ascii_lowercase())
+            })
+        });
+        videos
+    }
+
     fn trim_playhead_drag_id(sound_id: Uuid) -> egui::Id {
         egui::Id::new((sound_id, "trim-playhead-drag"))
     }
 
     fn set_preview_cursor_secs(&mut self, sound_id: Uuid, secs: f32, duration_secs: f32) {
         self.preview_cursor = Some((sound_id, secs.clamp(0.0, duration_secs)));
+    }
+
+    fn mark_sound_copied(&mut self, ctx: &Context, sound_id: Uuid) {
+        self.copied_sound_feedback_until
+            .insert(sound_id, ctx.input(|input| input.time) + 1.15);
+    }
+
+    fn mark_video_copied(&mut self, ctx: &Context, video_id: Uuid) {
+        self.copied_video_feedback_until
+            .insert(video_id, ctx.input(|input| input.time) + 1.15);
+    }
+
+    fn sound_copy_feedback_active(&self, ctx: &Context, sound_id: Uuid) -> bool {
+        self.copied_sound_feedback_until
+            .get(&sound_id)
+            .is_some_and(|until| *until > ctx.input(|input| input.time))
+    }
+
+    fn video_copy_feedback_active(&self, ctx: &Context, video_id: Uuid) -> bool {
+        self.copied_video_feedback_until
+            .get(&video_id)
+            .is_some_and(|until| *until > ctx.input(|input| input.time))
+    }
+
+    fn prune_copy_feedback(&mut self, ctx: &Context) {
+        let now = ctx.input(|input| input.time);
+        self.copied_sound_feedback_until
+            .retain(|_, until| *until > now);
+        self.copied_video_feedback_until
+            .retain(|_, until| *until > now);
+    }
+
+    fn toggle_sound_favorite(&mut self, sound_id: Uuid, ctx: &Context) {
+        if let Some(sound) = self.sounds.iter_mut().find(|sound| sound.id == sound_id) {
+            sound.favorite = !sound.favorite;
+            self.mark_dirty(ctx);
+        }
+    }
+
+    fn toggle_video_favorite(&mut self, video_id: Uuid) {
+        if let Some(video) = self
+            .video_assets
+            .iter_mut()
+            .find(|video| video.id == video_id)
+        {
+            video.favorite = !video.favorite;
+            let _ = self.storage.save_video_library(&self.video_assets);
+        }
+    }
+
+    fn favorite_button(ui: &mut Ui, active: bool) -> egui::Response {
+        let fill = if active {
+            Color32::from_rgb(247, 191, 64)
+        } else if Self::dark_theme_enabled() {
+            Color32::from_rgb(29, 25, 35)
+        } else {
+            Color32::WHITE
+        };
+        let stroke = if active {
+            Color32::from_rgb(247, 191, 64)
+        } else if Self::dark_theme_enabled() {
+            Color32::from_rgb(83, 69, 92)
+        } else {
+            Color32::from_rgb(227, 217, 226)
+        };
+        let icon = if active { 0xe838 } else { 0xe83a };
+        let icon_color = if active {
+            Color32::from_rgb(60, 48, 12)
+        } else {
+            Self::strong_text_color()
+        };
+        let response = ui.add_sized(
+            [46.0, 31.0],
+            Button::new(Self::icon(icon, 18.0, icon_color))
+                .fill(fill)
+                .stroke(Stroke::new(1.0, stroke))
+                .corner_radius(16.0),
+        );
+        Self::decorate_button_response(ui, &response);
+        response
+    }
+
+    fn start_vocal_separation_if_needed(&mut self) {
+        let Some(draft) = self.recording_draft.as_ref() else {
+            return;
+        };
+        if !draft.keep_vocal
+            || draft.vocal_separated_path.is_some()
+            || self.vocal_separation_running
+        {
+            return;
+        }
+
+        let source_path = draft.source_path.clone();
+        let output_dir = self
+            .storage
+            .root_dir()
+            .join("temp_vocals")
+            .join(draft.sound.id.to_string());
+        let tx = self.vocal_separation_tx.clone();
+        self.vocal_separation_running = true;
+        self.clear_status();
+        thread::spawn(move || {
+            let result = crate::vocal_separation::extract_vocals(&source_path, &output_dir);
+            let _ = tx.send(VocalSeparationMessage::Finished {
+                source_path,
+                result,
+            });
+        });
+    }
+
+    fn poll_vocal_separation_jobs(&mut self, ctx: &Context) {
+        while let Ok(message) = self.vocal_separation_rx.try_recv() {
+            self.vocal_separation_running = false;
+            match message {
+                VocalSeparationMessage::Finished {
+                    source_path,
+                    result: Ok(path),
+                } => {
+                    if let Some(draft) = self.recording_draft.as_mut()
+                        && draft.source_path == source_path
+                    {
+                        draft.vocal_separated_path = Some(path);
+                    }
+                    self.clear_status();
+                }
+                VocalSeparationMessage::Finished {
+                    source_path,
+                    result: Err(error),
+                } => {
+                    if let Some(draft) = self.recording_draft.as_mut()
+                        && draft.source_path == source_path
+                    {
+                        draft.keep_vocal = false;
+                        draft.vocal_separated_path = None;
+                    }
+                    self.set_error_status(error);
+                }
+            }
+            ctx.request_repaint();
+        }
+    }
+
+    fn start_tts_generation(&mut self) {
+        if self.tts_running {
+            return;
+        }
+        let api_key = self.gemini_api_key.trim().to_owned();
+        if api_key.is_empty() {
+            self.tts_error = Some("Gemini API key is empty".to_owned());
+            return;
+        }
+        let text = self.tts_text.trim().to_owned();
+        if text.is_empty() {
+            self.tts_error = Some("Text is empty".to_owned());
+            return;
+        }
+        let voice = self.tts_voice_name.trim().to_owned();
+        let output_name = self.tts_output_name.trim().to_owned();
+        let out_dir = self.storage.root_dir().join("gemini-tts");
+        let tx = self.tts_tx.clone();
+        self.tts_running = true;
+        self.tts_status = "Generating".to_owned();
+        self.tts_error = None;
+        self.tts_last_file = None;
+        self.tts_can_add_to_library = false;
+        self.tts_added_to_library = false;
+        thread::spawn(move || {
+            let result = gemini_tts::generate_speech_to_file(
+                &api_key,
+                &text,
+                &voice,
+                &out_dir,
+                if output_name.is_empty() {
+                    "gemini tts"
+                } else {
+                    &output_name
+                },
+            )
+            .map(|path| GeminiTtsResult {
+                path,
+                display_name: if output_name.is_empty() {
+                    "gemini tts".to_owned()
+                } else {
+                    output_name
+                },
+            })
+            .map_err(|error| error.to_string());
+            let _ = tx.send(GeminiTtsMessage::Finished(result));
+        });
+    }
+
+    fn poll_tts_jobs(&mut self, ctx: &Context) {
+        while let Ok(message) = self.tts_rx.try_recv() {
+            self.tts_running = false;
+            match message {
+                GeminiTtsMessage::Finished(Ok(result)) => {
+                    self.tts_status = "Done".to_owned();
+                    self.tts_last_file = Some(result.path);
+                    if self.tts_output_name.trim().is_empty() {
+                        self.tts_output_name = result.display_name;
+                    }
+                    self.tts_error = None;
+                    self.tts_can_add_to_library = true;
+                }
+                GeminiTtsMessage::Finished(Err(error)) => {
+                    self.tts_status = "Error".to_owned();
+                    self.tts_error = Some(error);
+                    self.tts_last_file = None;
+                    self.tts_can_add_to_library = false;
+                }
+            }
+            ctx.request_repaint();
+        }
     }
 
     fn stop_preview(&mut self) {
@@ -4037,6 +4342,7 @@ impl SoundFxApp {
         let mut preview_toggle = false;
         let mut seek_request = false;
         let mut changed = false;
+        let mut start_vocal_job = false;
         let mut trim_timeline_zoom = self.trim_timeline_zoom;
         let export_progress = self
             .active_record_video_export
@@ -4199,11 +4505,37 @@ impl SoundFxApp {
                                             .color(Self::muted_text_color()),
                                     );
                                 } else if demucs_available {
-                                    let vocal_toggle =
-                                        ui.add(Checkbox::new(&mut draft.keep_vocal, ""));
+                                    let vocal_toggle = ui
+                                        .scope(|ui| {
+                                            let visuals = &mut ui.style_mut().visuals;
+                                            let border = if self.dark_theme {
+                                                Color32::WHITE
+                                            } else {
+                                                Color32::BLACK
+                                            };
+                                            visuals.widgets.inactive.bg_stroke.color = border;
+                                            visuals.widgets.hovered.bg_stroke.color = border;
+                                            visuals.widgets.active.bg_stroke.color = border;
+                                            ui.add(Checkbox::new(&mut draft.keep_vocal, ""))
+                                        })
+                                        .inner;
                                     if vocal_toggle.changed() {
                                         changed = true;
                                         ctx.request_repaint();
+                                        if draft.keep_vocal {
+                                            draft.vocal_separated_path = None;
+                                            start_vocal_job = true;
+                                        } else {
+                                            draft.vocal_separated_path = None;
+                                        }
+                                    }
+                                    if self.vocal_separation_running && draft.keep_vocal {
+                                        ui.spinner();
+                                        ui.label(
+                                            RichText::new("Separating vocals...")
+                                                .size(11.5)
+                                                .color(Self::muted_text_color()),
+                                        );
                                     }
                                     if draft.keep_vocal {
                                         ui.label(
@@ -4454,6 +4786,9 @@ impl SoundFxApp {
         self.trim_timeline_zoom = trim_timeline_zoom;
         self.set_preview_cursor_secs(sound_id, preview_cursor_secs, sound_duration);
         self.show_record_review_panel = open_panel;
+        if start_vocal_job {
+            self.start_vocal_separation_if_needed();
+        }
 
         if seek_request && is_playing {
             self.preview_recording_draft_from_position(Some(preview_cursor_secs));
@@ -5441,6 +5776,13 @@ impl SoundFxApp {
                             self.pitch_overlay_pos = None;
                             self.pitch_overlay_native_visuals_applied = false;
                             self.show_pitch_panel = false;
+                            let overlay_size = if self.pitch_overlay_animation {
+                                vec2(276.0, 276.0)
+                            } else {
+                                vec2(430.0, 104.0)
+                            };
+                            Self::apply_overlay_only_viewport(ctx, overlay_size);
+                            self.overlay_only_mode = true;
                             self.clear_status();
                         }
                         Err(error) => self.set_error_status(error),
@@ -6046,6 +6388,50 @@ impl SoundFxApp {
             }
 
             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                let favorites_active = if self.library_tab == LibraryTab::Videos {
+                    self.library_favorites_only_video
+                } else {
+                    self.library_favorites_only_audio
+                };
+                let favorite_filter = ui.add_sized(
+                    [40.0, 30.0],
+                    Button::new(Self::icon(
+                        if favorites_active { 0xe838 } else { 0xe83a },
+                        18.0,
+                        if favorites_active {
+                            Color32::from_rgb(82, 58, 0)
+                        } else {
+                            Self::strong_text_color()
+                        },
+                    ))
+                    .fill(if favorites_active {
+                        Color32::from_rgb(247, 191, 64)
+                    } else if self.dark_theme {
+                        Color32::from_rgba_premultiplied(41, 34, 47, 224)
+                    } else {
+                        Color32::from_rgba_premultiplied(237, 231, 238, 198)
+                    })
+                    .stroke(Stroke::new(
+                        1.0,
+                        if favorites_active {
+                            Color32::from_rgb(247, 191, 64)
+                        } else if self.dark_theme {
+                            Color32::from_rgb(84, 69, 92)
+                        } else {
+                            Color32::from_rgb(221, 212, 222)
+                        },
+                    ))
+                    .corner_radius(9.0),
+                );
+                Self::decorate_button_response(ui, &favorite_filter);
+                if favorite_filter.clicked() {
+                    if self.library_tab == LibraryTab::Videos {
+                        self.library_favorites_only_video = !self.library_favorites_only_video;
+                    } else {
+                        self.library_favorites_only_audio = !self.library_favorites_only_audio;
+                    }
+                }
+                ui.add_space(8.0);
                 Self::with_slider_visuals(ui, |ui| {
                     let (scale_response, scale_slider_changed) = Self::click_slider(
                         ui,
@@ -6106,14 +6492,7 @@ impl SoundFxApp {
                 let spacing = 16.0;
                 let available_width = ui.available_width().max(180.0);
                 let target_card = (204.0 * self.library_grid_scale).clamp(150.0, 220.0);
-                let sounds = self
-                    .sounds
-                    .iter()
-                    .filter(|sound| {
-                        Self::library_query_matches(&sound.name, &self.library_audio_query)
-                    })
-                    .cloned()
-                    .collect::<Vec<_>>();
+                let sounds = self.filtered_library_sounds();
                 if sounds.is_empty() {
                     Self::draw_empty_editor(ui);
                     return;
@@ -6122,6 +6501,7 @@ impl SoundFxApp {
                 let mut preview_sound = None;
                 let mut copy_sound = None;
                 let mut drag_sound = None;
+                let mut favorite_sound = None;
 
                 let columns = (((available_width + spacing) / (target_card + spacing)).floor()
                     as usize)
@@ -6269,6 +6649,11 @@ impl SoundFxApp {
                                             );
                                             ui.add_space(8.0);
                                             ui.horizontal(|ui| {
+                                                if Self::favorite_button(ui, sound.favorite)
+                                                    .clicked()
+                                                {
+                                                    favorite_sound = Some(sound.id);
+                                                }
                                                 if Self::icon_action(
                                                     ui,
                                                     [46.0, 31.0],
@@ -6284,14 +6669,28 @@ impl SoundFxApp {
                                                     ui,
                                                     [46.0, 31.0],
                                                     0xe14d,
-                                                    false,
-                                                    true,
+                                                    self.sound_copy_feedback_active(
+                                                        ui.ctx(),
+                                                        sound.id,
+                                                    ),
+                                                    self.sound_copy_feedback_active(
+                                                        ui.ctx(),
+                                                        sound.id,
+                                                    ),
                                                 )
                                                 .clicked()
                                                 {
                                                     copy_sound = Some(sound.id);
                                                 }
                                             });
+                                            if self.sound_copy_feedback_active(ui.ctx(), sound.id) {
+                                                ui.add_space(6.0);
+                                                ui.label(
+                                                    RichText::new("Copied")
+                                                        .size(11.0)
+                                                        .color(meta_color),
+                                                );
+                                            }
                                         });
                                     });
                             });
@@ -6334,8 +6733,14 @@ impl SoundFxApp {
                     {
                         if let Err(error) = self.copy_sound_file_to_clipboard(&sound) {
                             self.set_error_status(error);
+                        } else {
+                            self.mark_sound_copied(ui.ctx(), sound_id);
+                            self.status = Some("Copied to clipboard".to_owned());
                         }
                     }
+                }
+                if let Some(sound_id) = favorite_sound {
+                    self.toggle_sound_favorite(sound_id, ui.ctx());
                 }
                 if let Some(sound_id) = open_sound {
                     self.open_sound_from_library(sound_id);
@@ -6345,12 +6750,7 @@ impl SoundFxApp {
 
     fn draw_video_library_grid(&mut self, ui: &mut Ui) {
         let modal_open = self.has_modal_panel();
-        let videos = self
-            .video_assets
-            .iter()
-            .filter(|video| Self::library_query_matches(&video.name, &self.library_video_query))
-            .cloned()
-            .collect::<Vec<_>>();
+        let videos = self.filtered_library_videos();
         if videos.is_empty() {
             Frame::new()
                 .fill(Self::surface_fill())
@@ -6379,6 +6779,7 @@ impl SoundFxApp {
         let mut open_video: Option<VideoAsset> = None;
         let mut copy_video: Option<VideoAsset> = None;
         let mut delete_video: Option<Uuid> = None;
+        let mut favorite_video: Option<Uuid> = None;
 
         for (row_index, row) in videos.chunks(columns).enumerate() {
             ui.horizontal_top(|ui| {
@@ -6506,13 +6907,22 @@ impl SoundFxApp {
                                     );
                                     ui.add_space(10.0);
                                     ui.horizontal(|ui| {
+                                        if Self::favorite_button(ui, video.favorite).clicked() {
+                                            favorite_video = Some(video.id);
+                                        }
                                         if Self::icon_action(ui, [46.0, 31.0], 0xe89e, false, false)
                                             .clicked()
                                         {
                                             open_video = Some(video.clone());
                                         }
-                                        if Self::icon_action(ui, [46.0, 31.0], 0xe14d, false, false)
-                                            .clicked()
+                                        if Self::icon_action(
+                                            ui,
+                                            [46.0, 31.0],
+                                            0xe14d,
+                                            self.video_copy_feedback_active(ui.ctx(), video.id),
+                                            self.video_copy_feedback_active(ui.ctx(), video.id),
+                                        )
+                                        .clicked()
                                         {
                                             copy_video = Some(video.clone());
                                         }
@@ -6522,6 +6932,12 @@ impl SoundFxApp {
                                             delete_video = Some(video.id);
                                         }
                                     });
+                                    if self.video_copy_feedback_active(ui.ctx(), video.id) {
+                                        ui.add_space(6.0);
+                                        ui.label(
+                                            RichText::new("Copied").size(11.0).color(meta_color),
+                                        );
+                                    }
                                 });
                             });
                     });
@@ -6547,7 +6963,13 @@ impl SoundFxApp {
         if let Some(video) = copy_video {
             if let Err(error) = self.copy_video_file_to_clipboard(&video) {
                 self.set_error_status(error);
+            } else {
+                self.mark_video_copied(ui.ctx(), video.id);
+                self.status = Some("Copied to clipboard".to_owned());
             }
+        }
+        if let Some(video_id) = favorite_video {
+            self.toggle_video_favorite(video_id);
         }
         if let Some(video_id) = delete_video
             && let Some(index) = self
@@ -6572,6 +6994,7 @@ impl SoundFxApp {
             return;
         }
         self.record_overlay_open = true;
+        let mut should_stop = false;
 
         let overlay_size = vec2(430.0, 118.0);
         let overlay_pos =
@@ -6593,7 +7016,7 @@ impl SoundFxApp {
                 ui.allocate_ui_with_layout(
                     overlay_size,
                     egui::Layout::top_down(Align::Min),
-                    |ui| self.render_record_blob_overlay(ui, ctx, &snapshot),
+                    |ui| self.render_record_blob_overlay(ui, ctx, &snapshot, &mut should_stop),
                 );
             });
         if let Some(state) = egui::AreaState::load(ctx, area_id) {
@@ -6605,6 +7028,9 @@ impl SoundFxApp {
         }
         self.center_record_overlay_next_frame = false;
         self.record_overlay_native_visuals_applied = false;
+        if should_stop {
+            self.stop_recording(Some(ctx));
+        }
     }
 
     fn render_record_blob_overlay(
@@ -6612,6 +7038,7 @@ impl SoundFxApp {
         ui: &mut Ui,
         overlay_ctx: &Context,
         snapshot: &crate::recorder::RecorderSnapshot,
+        should_stop: &mut bool,
     ) {
         let rect = ui.max_rect().shrink2(vec2(8.0, 8.0));
         let response = ui.interact(
@@ -6688,6 +7115,34 @@ impl SoundFxApp {
             Color32::from_rgb(219, 185, 206),
         );
 
+        let stop_rect = Rect::from_center_size(
+            Pos2::new(rect.right() - 22.0, rect.top() + 22.0),
+            vec2(28.0, 28.0),
+        );
+        let stop_response = ui.interact(
+            stop_rect,
+            ui.id().with("record-blob-overlay-stop"),
+            Sense::click(),
+        );
+        if stop_response.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        painter.rect_filled(
+            stop_rect,
+            14.0,
+            Color32::from_rgba_premultiplied(255, 255, 255, 16),
+        );
+        painter.text(
+            stop_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            char::from_u32(0xe047).unwrap_or(' '),
+            egui::FontId::new(18.0, FontFamily::Name(MATERIAL_ICONS_FONT.into())),
+            Color32::from_rgb(255, 234, 244),
+        );
+        if stop_response.clicked() {
+            *should_stop = true;
+        }
+
         let wave_rect =
             Rect::from_center_size(Pos2::new(rect.right() - 132.0, center.y), vec2(210.0, 44.0));
         painter.rect_filled(
@@ -6736,14 +7191,7 @@ impl SoundFxApp {
             ScrollArea::vertical()
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
-                    let visible_sounds = self
-                        .sounds
-                        .iter()
-                        .filter(|sound| {
-                            Self::library_query_matches(&sound.name, &self.library_audio_query)
-                        })
-                        .cloned()
-                        .collect::<Vec<_>>();
+                    let visible_sounds = self.filtered_library_sounds();
                     if visible_sounds.is_empty() {
                         Frame::new()
                             .fill(Self::surface_fill())
@@ -7990,6 +8438,179 @@ impl SoundFxApp {
         }
     }
 
+    fn render_tts_download_tab(&mut self, ui: &mut Ui, ctx: &Context) {
+        let mut generate_request = false;
+        let mut preview_request = false;
+        let mut add_to_library = false;
+        let mut clear_result = false;
+
+        if self.tts_running {
+            ctx.request_repaint_after(Duration::from_millis(JOB_POLL_REPAINT_MS));
+        }
+
+        ui.label(
+            RichText::new("Gemini TTS")
+                .size(14.0)
+                .color(Self::strong_text_color())
+                .strong(),
+        );
+        ui.add_space(10.0);
+
+        Frame::new()
+            .fill(Self::surface_fill())
+            .stroke(Stroke::new(1.0, Self::border_color()))
+            .corner_radius(18.0)
+            .inner_margin(Margin::same(12))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new("Voice")
+                            .size(12.0)
+                            .color(Self::muted_text_color()),
+                    );
+                    ui.add_sized(
+                        [120.0, 30.0],
+                        TextEdit::singleline(&mut self.tts_voice_name).desired_width(120.0),
+                    );
+                    ui.add_space(10.0);
+                    ui.label(
+                        RichText::new("Name")
+                            .size(12.0)
+                            .color(Self::muted_text_color()),
+                    );
+                    ui.add_sized(
+                        [ui.available_width().max(120.0), 30.0],
+                        TextEdit::singleline(&mut self.tts_output_name)
+                            .hint_text("gemini tts")
+                            .desired_width(f32::INFINITY),
+                    );
+                });
+                ui.add_space(10.0);
+                ui.add_sized(
+                    [ui.available_width(), 130.0],
+                    TextEdit::multiline(&mut self.tts_text)
+                        .desired_width(f32::INFINITY)
+                        .hint_text("Enter text to speak"),
+                );
+            });
+
+        ui.add_space(12.0);
+        ui.horizontal(|ui| {
+            let generate = ui.add_enabled(
+                !self.tts_running
+                    && !self.tts_text.trim().is_empty()
+                    && !self.gemini_api_key.trim().is_empty(),
+                Self::action_button(RichText::new("Generate").size(13.0), false, true),
+            );
+            Self::decorate_button_response(ui, &generate);
+            if generate.clicked() {
+                generate_request = true;
+            }
+
+            let preview = ui.add_enabled(
+                self.tts_last_file.is_some() && !self.tts_running,
+                Self::action_button(RichText::new("Preview").size(13.0), false, false),
+            );
+            Self::decorate_button_response(ui, &preview);
+            if preview.clicked() {
+                preview_request = true;
+            }
+
+            let add = ui.add_enabled(
+                self.tts_can_add_to_library,
+                Self::action_button(RichText::new("Add to library").size(13.0), false, false),
+            );
+            Self::decorate_button_response(ui, &add);
+            if add.clicked() {
+                add_to_library = true;
+            }
+
+            let clear = ui.add_enabled(
+                self.tts_last_file.is_some() && !self.tts_running,
+                Self::action_button(RichText::new("Clear").size(13.0), false, false),
+            );
+            Self::decorate_button_response(ui, &clear);
+            if clear.clicked() {
+                clear_result = true;
+            }
+        });
+
+        if self.tts_running {
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                ui.add(egui::Spinner::new().size(18.0));
+                ui.label(
+                    RichText::new("Generating speech...")
+                        .size(12.5)
+                        .color(Self::muted_text_color()),
+                );
+            });
+        } else if !self.gemini_api_key.trim().is_empty() {
+            ui.add_space(10.0);
+            ui.label(
+                RichText::new("Uses the Gemini API key from Settings.")
+                    .size(12.0)
+                    .color(Self::muted_text_color()),
+            );
+        }
+
+        if self.gemini_api_key.trim().is_empty() {
+            ui.add_space(10.0);
+            ui.label(
+                RichText::new("Gemini API key is empty in Settings.")
+                    .size(12.5)
+                    .color(Color32::from_rgb(171, 54, 91)),
+            );
+        } else if let Some(path) = &self.tts_last_file {
+            ui.add_space(12.0);
+            ui.label(
+                RichText::new(
+                    path.file_name()
+                        .and_then(|value| value.to_str())
+                        .unwrap_or("audio"),
+                )
+                .size(13.5)
+                .color(Self::strong_text_color())
+                .strong(),
+            );
+        }
+
+        if let Some(error) = &self.tts_error {
+            ui.add_space(10.0);
+            ui.label(
+                RichText::new(error)
+                    .size(12.5)
+                    .color(Color32::from_rgb(171, 54, 91)),
+            );
+        }
+
+        if generate_request {
+            self.start_tts_generation();
+        }
+        if preview_request
+            && let Some(path) = self.tts_last_file.clone()
+            && let Some(audio) = self.audio.as_mut()
+        {
+            if let Err(error) = audio.play_file(&path) {
+                self.set_error_status(error);
+            }
+        }
+        if add_to_library && let Some(path) = self.tts_last_file.clone() {
+            self.import_paths(vec![path]);
+            self.tts_can_add_to_library = false;
+            self.tts_added_to_library = true;
+        }
+        if clear_result {
+            if let Some(path) = self.tts_last_file.take() {
+                let _ = fs::remove_file(path);
+            }
+            self.tts_status.clear();
+            self.tts_error = None;
+            self.tts_can_add_to_library = false;
+            self.tts_added_to_library = false;
+        }
+    }
+
     fn render_download_panel(&mut self, ctx: &Context) {
         if !self.show_download_panel {
             return;
@@ -8012,7 +8633,7 @@ impl SoundFxApp {
             .title_bar(false)
             .resizable(false)
             .collapsible(false)
-            .fixed_size(vec2(520.0, 260.0))
+            .fixed_size(vec2(520.0, 420.0))
             .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
             .open(&mut open_panel)
             .frame(
@@ -8050,150 +8671,182 @@ impl SoundFxApp {
                     );
                 });
 
-                if snapshot.running {
-                    ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
-                }
-
                 ui.add_space(12.0);
-                Self::render_download_site_badges(ui);
-
-                ui.add_space(10.0);
-
                 ui.horizontal(|ui| {
-                    let response = ui.add_sized(
-                        [ui.available_width() - 32.0, 42.0],
-                        TextEdit::singleline(&mut self.download_url)
-                            .hint_text("https://youtube.com/watch?v=... or soundcloud / tiktok / facebook")
-                            .desired_width(f32::INFINITY)
-                            .margin(Vec2::new(14.0, 12.0)),
-                    );
-                    if response.lost_focus()
-                        && ui.input(|input| input.key_pressed(egui::Key::Enter))
-                        && !snapshot.running
-                    {
-                        should_start_download = true;
-                    }
-
-                    let help = ui.add_sized(
-                        [24.0, 24.0],
-                        Button::new(Self::icon(0xe887, 16.0, Color32::from_rgb(214, 51, 132)))
-                            .fill(Self::surface_fill())
-                            .stroke(Stroke::new(1.0, Self::border_color()))
-                            .corner_radius(12.0),
-                    );
-                    if help.hovered() {
-                        ui.ctx().set_cursor_icon(egui::CursorIcon::Help);
-                    }
-                    help.on_hover_ui_at_pointer(|ui| {
-                        ui.set_max_width(300.0);
-                        ui.label(
-                            RichText::new("Supported websites")
-                                .size(13.0)
-                                .color(Self::strong_text_color())
-                                .strong(),
-                        );
-                        ui.add_space(4.0);
-                        ui.label("Works through yt-dlp, so it supports many sites.");
-                        ui.label("Common examples: YouTube, SoundCloud, Bandcamp, TikTok, Facebook, Instagram, X/Twitter, Vimeo, Dailymotion, Bilibili, Twitch, Google Drive, direct media links.");
-                        ui.add_space(4.0);
-                        ui.label("Some sites can still fail because of login, region lock, cookies, or DRM.");
-                        ui.label("Spotify album / track links are usually DRM-protected and will not download.");
-                    });
-                });
-
-                ui.add_space(10.0);
-
-                ui.horizontal(|ui| {
-                    let start_button = ui.add_enabled(
-                        !snapshot.running && !self.download_url.trim().is_empty(),
+                    let download_tab = ui.add_sized(
+                        [120.0, 32.0],
                         Self::action_button(
-                            RichText::new("Download sound").size(13.0),
+                            RichText::new("Download").size(12.5),
+                            self.download_panel_tab == DownloadPanelTab::Download,
                             false,
-                            true,
                         ),
                     );
-                    Self::decorate_button_response(ui, &start_button);
-                    if start_button.clicked() {
-                        should_start_download = true;
+                    Self::decorate_button_response(ui, &download_tab);
+                    if download_tab.clicked() {
+                        self.download_panel_tab = DownloadPanelTab::Download;
                     }
-
-                    if snapshot.running {
-                        if Self::icon_action(ui, [42.0, 32.0], 0xe047, false, true).clicked() {
-                            should_stop_download = true;
-                        }
-                        ui.label(
-                            RichText::new(snapshot.stage.clone())
-                                .size(13.0)
-                                .color(Self::muted_text_color()),
-                        );
+                    let tts_tab = ui.add_sized(
+                        [120.0, 32.0],
+                        Self::action_button(
+                            RichText::new("Gemini TTS").size(12.5),
+                            self.download_panel_tab == DownloadPanelTab::Tts,
+                            false,
+                        ),
+                    );
+                    Self::decorate_button_response(ui, &tts_tab);
+                    if tts_tab.clicked() {
+                        self.download_panel_tab = DownloadPanelTab::Tts;
                     }
                 });
 
-                if let Some(progress) = snapshot.progress {
-                    ui.add_space(8.0);
-                    ui.add(
-                        egui::ProgressBar::new(progress)
-                            .desired_width(ui.available_width())
-                            .fill(Color32::from_rgb(227, 82, 149)),
-                    );
-                } else if snapshot.running {
-                    ui.add_space(8.0);
-                    ui.horizontal(|ui| {
-                        ui.add(egui::Spinner::new().size(18.0));
-                        ui.label(
-                            RichText::new("Working...")
-                                .size(12.5)
-                                .color(Self::muted_text_color()),
-                        );
-                    });
-                }
+                ui.add_space(12.0);
+                if self.download_panel_tab == DownloadPanelTab::Tts {
+                    self.render_tts_download_tab(ui, ctx);
+                } else {
+                    if snapshot.running {
+                        ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
+                    }
 
-                if let Some(error) = &snapshot.error {
-                    ui.add_space(12.0);
-                    ui.label(
-                        RichText::new(error)
-                            .size(13.0)
-                            .color(Color32::from_rgb(171, 54, 91)),
-                    );
-                }
-
-                if let Some(path) = &snapshot.last_file {
-                    ui.add_space(14.0);
-                    ui.label(
-                        RichText::new(
-                            path.file_name()
-                                .and_then(|value| value.to_str())
-                                .unwrap_or("audio"),
-                        )
-                        .size(14.0)
-                        .color(Self::strong_text_color())
-                        .strong(),
-                    );
+                    Self::render_download_site_badges(ui);
 
                     ui.add_space(10.0);
+
                     ui.horizontal(|ui| {
-                        let add_response = ui.add_enabled(
-                            snapshot.can_add_to_library,
+                        let response = ui.add_sized(
+                            [ui.available_width() - 32.0, 42.0],
+                            TextEdit::singleline(&mut self.download_url)
+                                .hint_text("https://youtube.com/watch?v=... or soundcloud / tiktok / facebook")
+                                .desired_width(f32::INFINITY)
+                                .margin(Vec2::new(14.0, 12.0)),
+                        );
+                        if response.lost_focus()
+                            && ui.input(|input| input.key_pressed(egui::Key::Enter))
+                            && !snapshot.running
+                        {
+                            should_start_download = true;
+                        }
+
+                        let help = ui.add_sized(
+                            [24.0, 24.0],
+                            Button::new(Self::icon(0xe887, 16.0, Color32::from_rgb(214, 51, 132)))
+                                .fill(Self::surface_fill())
+                                .stroke(Stroke::new(1.0, Self::border_color()))
+                                .corner_radius(12.0),
+                        );
+                        if help.hovered() {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::Help);
+                        }
+                        help.on_hover_ui_at_pointer(|ui| {
+                            ui.set_max_width(300.0);
+                            ui.label(
+                                RichText::new("Supported websites")
+                                    .size(13.0)
+                                    .color(Self::strong_text_color())
+                                    .strong(),
+                            );
+                            ui.add_space(4.0);
+                            ui.label("Works through yt-dlp, so it supports many sites.");
+                            ui.label("Common examples: YouTube, SoundCloud, Bandcamp, TikTok, Facebook, Instagram, X/Twitter, Vimeo, Dailymotion, Bilibili, Twitch, Google Drive, direct media links.");
+                            ui.add_space(4.0);
+                            ui.label("Some sites can still fail because of login, region lock, cookies, or DRM.");
+                            ui.label("Spotify album / track links are usually DRM-protected and will not download.");
+                        });
+                    });
+
+                    ui.add_space(10.0);
+
+                    ui.horizontal(|ui| {
+                        let start_button = ui.add_enabled(
+                            !snapshot.running && !self.download_url.trim().is_empty(),
                             Self::action_button(
-                                Self::icon(0xe02e, 18.0, Color32::WHITE),
+                                RichText::new("Download sound").size(13.0),
                                 false,
                                 true,
                             ),
                         );
-                        Self::decorate_button_response(ui, &add_response);
-                        if add_response.clicked() {
-                            add_to_library = true;
+                        Self::decorate_button_response(ui, &start_button);
+                        if start_button.clicked() {
+                            should_start_download = true;
                         }
-                        if Self::icon_action(ui, [52.0, 34.0], 0xe89e, false, false).clicked() {
-                            open_file = true;
-                        }
-                        if Self::icon_action(ui, [52.0, 34.0], 0xe2c8, false, false).clicked() {
-                            open_folder = true;
-                        }
-                        if Self::icon_action(ui, [52.0, 34.0], 0xe14c, false, false).clicked() {
-                            clear_result = true;
+
+                        if snapshot.running {
+                            if Self::icon_action(ui, [42.0, 32.0], 0xe047, false, true).clicked() {
+                                should_stop_download = true;
+                            }
+                            ui.label(
+                                RichText::new(snapshot.stage.clone())
+                                    .size(13.0)
+                                    .color(Self::muted_text_color()),
+                            );
                         }
                     });
+
+                    if let Some(progress) = snapshot.progress {
+                        ui.add_space(8.0);
+                        ui.add(
+                            egui::ProgressBar::new(progress)
+                                .desired_width(ui.available_width())
+                                .fill(Color32::from_rgb(227, 82, 149)),
+                        );
+                    } else if snapshot.running {
+                        ui.add_space(8.0);
+                        ui.horizontal(|ui| {
+                            ui.add(egui::Spinner::new().size(18.0));
+                            ui.label(
+                                RichText::new("Working...")
+                                    .size(12.5)
+                                    .color(Self::muted_text_color()),
+                            );
+                        });
+                    }
+
+                    if let Some(error) = &snapshot.error {
+                        ui.add_space(12.0);
+                        ui.label(
+                            RichText::new(error)
+                                .size(13.0)
+                                .color(Color32::from_rgb(171, 54, 91)),
+                        );
+                    }
+
+                    if let Some(path) = &snapshot.last_file {
+                        ui.add_space(14.0);
+                        ui.label(
+                            RichText::new(
+                                path.file_name()
+                                    .and_then(|value| value.to_str())
+                                    .unwrap_or("audio"),
+                            )
+                            .size(14.0)
+                            .color(Self::strong_text_color())
+                            .strong(),
+                        );
+
+                        ui.add_space(10.0);
+                        ui.horizontal(|ui| {
+                            let add_response = ui.add_enabled(
+                                snapshot.can_add_to_library,
+                                Self::action_button(
+                                    Self::icon(0xe02e, 18.0, Color32::WHITE),
+                                    false,
+                                    true,
+                                ),
+                            );
+                            Self::decorate_button_response(ui, &add_response);
+                            if add_response.clicked() {
+                                add_to_library = true;
+                            }
+                            if Self::icon_action(ui, [52.0, 34.0], 0xe89e, false, false).clicked() {
+                                open_file = true;
+                            }
+                            if Self::icon_action(ui, [52.0, 34.0], 0xe2c8, false, false).clicked() {
+                                open_folder = true;
+                            }
+                            if Self::icon_action(ui, [52.0, 34.0], 0xe14c, false, false).clicked() {
+                                clear_result = true;
+                            }
+                        });
+                    }
                 }
             });
 
@@ -10799,6 +11452,9 @@ impl eframe::App for SoundFxApp {
         self.intercept_close_request(ctx);
         self.poll_myinstants_waveform_jobs();
         self.poll_demucs_install_result(ctx);
+        self.poll_vocal_separation_jobs(ctx);
+        self.poll_tts_jobs(ctx);
+        self.prune_copy_feedback(ctx);
         if !ctx.input(|input| input.pointer.primary_down()) {
             self.pending_sound_drag = None;
         }
@@ -10812,7 +11468,7 @@ impl eframe::App for SoundFxApp {
             platform::set_native_window_shadow(frame, wants_shadow);
             self.native_shadow_applied = wants_shadow;
         }
-        let wants_transition_topmost = self.is_transition_active();
+        let wants_transition_topmost = self.is_transition_active() || self.overlay_only_mode;
         if self.transition_window_topmost_applied != wants_transition_topmost {
             platform::set_native_window_topmost(frame, wants_transition_topmost);
             self.transition_window_topmost_applied = wants_transition_topmost;
@@ -10844,6 +11500,9 @@ impl eframe::App for SoundFxApp {
         self.download_was_running = download_snapshot.running;
 
         if download_snapshot.running {
+            ctx.request_repaint_after(Duration::from_millis(JOB_POLL_REPAINT_MS));
+        }
+        if self.tts_running || self.vocal_separation_running {
             ctx.request_repaint_after(Duration::from_millis(JOB_POLL_REPAINT_MS));
         }
 
