@@ -1941,6 +1941,18 @@ impl SoundFxApp {
         })
     }
 
+    fn titlebar_drag_active(&self, ctx: &Context) -> bool {
+        self.titlebar_drag_rect.is_some_and(|rect| {
+            ctx.input(|input| {
+                input.pointer.primary_down()
+                    && input
+                        .pointer
+                        .press_origin()
+                        .is_some_and(|pos| rect.contains(pos))
+            })
+        })
+    }
+
     fn reveal_window(ctx: &Context) {
         ctx.send_viewport_cmd(ViewportCommand::Visible(true));
         ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
@@ -5978,6 +5990,7 @@ impl SoundFxApp {
 
     fn draw_library_grid(&mut self, ui: &mut Ui) {
         let modal_open = self.has_modal_panel();
+        let titlebar_drag_active = self.titlebar_drag_active(ui.ctx());
         let mut scale_changed = false;
         ui.horizontal(|ui| {
             let sounds_tab = ui.add_sized(
@@ -6119,12 +6132,17 @@ impl SoundFxApp {
                             if hovered {
                                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
                             }
+                            if titlebar_drag_active {
+                                self.pending_sound_drag = None;
+                            }
                             if !modal_open
+                                && !titlebar_drag_active
                                 && Self::pointer_primary_pressed_within(ui.ctx(), tile_rect)
                             {
                                 self.pending_sound_drag = Some(sound.id);
                             }
                             if !modal_open
+                                && !titlebar_drag_active
                                 && self.pending_sound_drag == Some(sound.id)
                                 && pointer_hover
                                 && ui.ctx().input(|input| input.pointer.primary_down())
@@ -6132,6 +6150,7 @@ impl SoundFxApp {
                                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
                             }
                             if !modal_open
+                                && !titlebar_drag_active
                                 && self.pending_sound_drag == Some(sound.id)
                                 && Self::pointer_primary_drag_ready(ui.ctx())
                             {
@@ -6723,6 +6742,7 @@ impl SoundFxApp {
                     }
 
                     let modal_open = self.has_modal_panel();
+                    let titlebar_drag_active = self.titlebar_drag_active(ui.ctx());
                     let mut preview_request = None;
                     let mut drag_request = None;
 
@@ -6818,7 +6838,11 @@ impl SoundFxApp {
                             .ctx()
                             .input(|input| input.pointer.hover_pos())
                             .is_some_and(|pos| frame.response.rect.contains(pos));
+                        if titlebar_drag_active {
+                            self.pending_sound_drag = None;
+                        }
                         if !modal_open
+                            && !titlebar_drag_active
                             && Self::pointer_primary_pressed_within(ui.ctx(), frame.response.rect)
                         {
                             self.pending_sound_drag = Some(sound.id);
@@ -6827,6 +6851,7 @@ impl SoundFxApp {
                             ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
                         }
                         if !modal_open
+                            && !titlebar_drag_active
                             && self.pending_sound_drag == Some(sound.id)
                             && pointer_hover
                             && ui.ctx().input(|input| input.pointer.primary_down())
@@ -6834,6 +6859,7 @@ impl SoundFxApp {
                             ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
                         }
                         if !modal_open
+                            && !titlebar_drag_active
                             && self.pending_sound_drag == Some(sound.id)
                             && Self::pointer_primary_drag_ready(ui.ctx())
                         {
@@ -8717,21 +8743,21 @@ impl SoundFxApp {
         let app_rect = self
             .app_frame_rect
             .unwrap_or_else(|| ctx.screen_rect().shrink(24.0));
+        let popup_bounds = Rect::from_min_max(
+            Pos2::new(app_rect.left() + 12.0, app_rect.top() + 52.0),
+            Pos2::new(app_rect.right() - 12.0, app_rect.bottom() - 12.0),
+        );
         let base_width: f32 = 840.0;
         let base_height: f32 = 396.0;
         let popup_size = vec2(
-            (app_rect.width() - 28.0).clamp(360.0, base_width),
-            (app_rect.height() - 28.0).clamp(320.0, base_height),
+            (popup_bounds.width() - 12.0).clamp(360.0, base_width),
+            (popup_bounds.height() - 12.0).clamp(320.0, base_height),
         );
         let popup_pos = Pos2::new(
-            (app_rect.center().x - popup_size.x * 0.5).clamp(
-                app_rect.left() + 14.0,
-                app_rect.right() - popup_size.x - 14.0,
-            ),
-            (app_rect.center().y - popup_size.y * 0.5).clamp(
-                app_rect.top() + 14.0,
-                app_rect.bottom() - popup_size.y - 14.0,
-            ),
+            (popup_bounds.center().x - popup_size.x * 0.5)
+                .clamp(popup_bounds.left(), popup_bounds.right() - popup_size.x),
+            (popup_bounds.center().y - popup_size.y * 0.5 - 10.0)
+                .clamp(popup_bounds.top(), popup_bounds.bottom() - popup_size.y),
         );
         let mut open_popup = self.show_trim_popup;
         if !ctx.wants_keyboard_input()
@@ -8751,7 +8777,7 @@ impl SoundFxApp {
             .collapsible(false)
             .fixed_size(popup_size)
             .fixed_pos(popup_pos)
-            .constrain_to(app_rect)
+            .constrain_to(popup_bounds)
             .movable(false)
             .open(&mut open_popup)
             .frame(
@@ -10962,7 +10988,6 @@ impl eframe::App for SoundFxApp {
         self.render_trim_popup(ctx);
         self.render_trim_commit_panel(ctx);
         self.render_pitch_overlay_viewport(ctx);
-        self.render_titlebar_drag_zone(ctx);
         self.render_custom_window_resize_handles(ctx);
 
         let external_file_hover = self.app_view == AppView::Editor
