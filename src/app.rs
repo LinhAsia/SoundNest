@@ -7207,7 +7207,7 @@ impl SoundFxApp {
         }
         ui.add_space(12.0);
 
-        let library_clip = ui.max_rect().shrink2(vec2(10.0, 8.0));
+        let library_clip = ui.max_rect().shrink2(vec2(24.0, 8.0));
         ScrollArea::vertical()
             .drag_to_scroll(false)
             .auto_shrink([false, false])
@@ -7224,7 +7224,7 @@ impl SoundFxApp {
                 }
 
                 let spacing = 16.0;
-                let side_padding = 18.0;
+                let side_padding = 30.0;
                 let available_width = (ui.available_width() - side_padding * 2.0).max(180.0);
                 let target_card = (204.0 * self.library_grid_scale).clamp(150.0, 220.0);
                 let sounds = self.filtered_library_sounds();
@@ -7508,7 +7508,7 @@ impl SoundFxApp {
         }
 
         let spacing = 16.0;
-        let side_padding = 18.0;
+        let side_padding = 30.0;
         let available_width = (ui.available_width() - side_padding * 2.0).max(180.0);
         let target_card = (204.0 * self.library_grid_scale).clamp(150.0, 220.0);
         let columns =
@@ -10921,6 +10921,127 @@ impl SoundFxApp {
                     (16, 10, 14)
                 };
 
+                if blob_only_transition {
+                    let pulse = 1.0 + audio_level * 0.14 + (time * 2.2).sin() * 0.03;
+                    let phase_scale = match phase {
+                        TransitionPhase::Intro => egui::lerp(0.84..=1.02, t),
+                        TransitionPhase::Outro => egui::lerp(1.0..=0.86, progress),
+                        TransitionPhase::Live => 1.0,
+                    };
+                    let blob_alpha = match phase {
+                        TransitionPhase::Intro => egui::lerp(1.0..=0.9, t),
+                        TransitionPhase::Outro => egui::lerp(1.0..=0.0, progress),
+                        TransitionPhase::Live => 1.0,
+                    };
+                    let outer_points = Self::squircle_points(
+                        center,
+                        base * 0.34 * phase_scale * pulse,
+                        base * 0.28 * phase_scale * pulse,
+                        2.9,
+                        0.12 + audio_level * 0.08,
+                        time,
+                    );
+                    let middle_points = Self::squircle_points(
+                        Pos2::new(center.x, center.y + 4.0),
+                        base * 0.27 * phase_scale,
+                        base * 0.22 * phase_scale,
+                        3.2,
+                        0.08 + audio_level * 0.06,
+                        time + 0.45,
+                    );
+                    let core_points = Self::squircle_points(
+                        center,
+                        base * 0.16 * phase_scale,
+                        base * 0.13 * phase_scale,
+                        3.8,
+                        0.05,
+                        time + 0.2,
+                    );
+                    let outer_fill = if self.dark_theme {
+                        Color32::from_rgba_premultiplied(242, 170, 207, 226)
+                    } else {
+                        Color32::from_rgba_premultiplied(246, 208, 230, 236)
+                    };
+                    let middle_fill = if self.dark_theme {
+                        Color32::from_rgba_premultiplied(255, 236, 246, 176)
+                    } else {
+                        Color32::from_rgba_premultiplied(255, 245, 250, 200)
+                    };
+                    let core_fill = if self.dark_theme {
+                        Color32::from_rgb(28, 18, 30)
+                    } else {
+                        Color32::from_rgb(50, 29, 45)
+                    };
+                    painter.add(egui::Shape::convex_polygon(
+                        outer_points,
+                        Self::with_alpha(outer_fill, blob_alpha),
+                        Stroke::new(
+                            1.3,
+                            Self::with_alpha(Color32::from_rgb(239, 124, 190), blob_alpha),
+                        ),
+                    ));
+                    painter.add(egui::Shape::convex_polygon(
+                        middle_points,
+                        Self::with_alpha(middle_fill, blob_alpha * 0.92),
+                        Stroke::NONE,
+                    ));
+                    painter.add(egui::Shape::convex_polygon(
+                        core_points,
+                        Self::with_alpha(core_fill, blob_alpha),
+                        Stroke::NONE,
+                    ));
+
+                    let bar_rect = Rect::from_center_size(
+                        center,
+                        vec2(base * 0.18 * phase_scale, base * 0.075 * phase_scale),
+                    );
+                    let clip = painter.with_clip_rect(bar_rect.expand2(vec2(8.0, 8.0)));
+                    let bar_width = bar_rect.width() / wave_bars.len().max(1) as f32;
+                    for (index, bar) in wave_bars.iter().enumerate() {
+                        let x = bar_rect.left() + (index as f32 + 0.5) * bar_width;
+                        let half = bar_rect.height() * (0.12 + *bar * 0.42);
+                        let wave_rect = Rect::from_min_max(
+                            Pos2::new(x - bar_width * 0.18, bar_rect.center().y - half),
+                            Pos2::new(x + bar_width * 0.18, bar_rect.center().y + half),
+                        );
+                        clip.rect_filled(
+                            wave_rect,
+                            3.0,
+                            Self::with_alpha(Color32::from_rgb(255, 231, 242), blob_alpha * 0.98),
+                        );
+                    }
+
+                    for index in 0..6 {
+                        let angle = time * 0.7 + index as f32 * 1.05;
+                        let orbit = base * 0.18 + (index % 3) as f32 * 10.0;
+                        let note_pos = Pos2::new(
+                            center.x + angle.cos() * orbit,
+                            center.y + angle.sin() * orbit * 0.8,
+                        );
+                        Self::paint_glowing_music_note(
+                            &painter,
+                            note_pos,
+                            0.8 + ((index % 2) as f32 * 0.12),
+                            (index as f32 * 0.17).sin() * 0.18,
+                            if index % 2 == 0 {
+                                Self::with_alpha(note_base, blob_alpha)
+                            } else {
+                                Self::with_alpha(note_alt, blob_alpha)
+                            },
+                            Self::with_alpha(
+                                Color32::from_rgba_premultiplied(
+                                    note_glow_rgb.0,
+                                    note_glow_rgb.1,
+                                    note_glow_rgb.2,
+                                    72,
+                                ),
+                                blob_alpha,
+                            ),
+                        );
+                    }
+                    return;
+                }
+
                 if !blob_only_transition && self.dark_theme {
                     painter.circle_filled(
                         center,
@@ -12273,7 +12394,7 @@ impl eframe::App for SoundFxApp {
 
         let transition = self.transition_progress(ctx);
         let download_snapshot = self.downloader.snapshot();
-        let wants_shadow = true;
+        let wants_shadow = false;
         if self.native_shadow_applied != wants_shadow {
             platform::set_native_window_shadow(frame, wants_shadow);
             self.native_shadow_applied = wants_shadow;
@@ -12414,19 +12535,7 @@ impl eframe::App for SoundFxApp {
                 let frame_response = Frame::new()
                     .fill(Self::page_fill())
                     .stroke(Stroke::new(1.0, Self::border_color()))
-                    .shadow(Shadow {
-                        offset: [0, 14],
-                        blur: 30,
-                        spread: 0,
-                        color: Self::with_alpha(
-                            if self.dark_theme {
-                                Color32::from_rgba_premultiplied(0, 0, 0, 72)
-                            } else {
-                                Color32::from_rgba_premultiplied(78, 40, 63, 20)
-                            },
-                            live_ui_reveal,
-                        ),
-                    })
+                    .shadow(Shadow::NONE)
                     .corner_radius(CornerRadius::same(APP_FRAME_RADIUS as u8))
                     .outer_margin(Margin::same(APP_OUTER_MARGIN as i8))
                     .inner_margin(Margin::same(16))

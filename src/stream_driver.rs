@@ -215,6 +215,16 @@ mod windows_impl {
         }
     }
 
+    fn ensure_vbcable_extract_dir() -> Result<PathBuf, String> {
+        let zip_path = cable_zip_path();
+        if !zip_path.exists() {
+            download_vbcable_package(&zip_path)?;
+        }
+        let extract_dir = cable_extract_dir();
+        expand_vbcable_package(&zip_path, &extract_dir)?;
+        Ok(extract_dir)
+    }
+
     fn ensure_vbcable_setup_exe() -> Result<PathBuf, String> {
         if let Some(path) = find_registry_uninstall_exe(CABLE_TERM) {
             return Ok(path);
@@ -225,18 +235,7 @@ mod windows_impl {
         ) {
             return Ok(path);
         }
-        let extract_dir = cable_extract_dir();
-        if let Some(path) = recursive_find_named_file(
-            &extract_dir,
-            &["VBCABLE_Setup_x64.exe", "VBCABLE_Setup.exe"],
-        ) {
-            return Ok(path);
-        }
-        let zip_path = cable_zip_path();
-        if !zip_path.exists() {
-            download_vbcable_package(&zip_path)?;
-        }
-        expand_vbcable_package(&zip_path, &extract_dir)?;
+        let extract_dir = ensure_vbcable_extract_dir()?;
         recursive_find_named_file(
             &extract_dir,
             &["VBCABLE_Setup_x64.exe", "VBCABLE_Setup.exe"],
@@ -244,6 +243,24 @@ mod windows_impl {
         .ok_or_else(|| {
             "Downloaded VB-CABLE package but could not find setup executable.".to_owned()
         })
+    }
+
+    fn ensure_vbcable_driver_inf() -> Result<PathBuf, String> {
+        let extract_dir = ensure_vbcable_extract_dir()?;
+        recursive_find_named_file(
+            &extract_dir,
+            &[
+                "vbMmeCable64_win10.inf",
+                "vbMmeCable64_win7.inf",
+                "vbMmeCable64_vista.inf",
+                "vbMmeCable64_2003.inf",
+                "vbMmeCable_win7.inf",
+                "vbMmeCable_vista.inf",
+                "vbMmeCable_2003.inf",
+                "vbMmeCable_xp.inf",
+            ],
+        )
+        .ok_or_else(|| "Downloaded VB-CABLE package but could not find driver inf.".to_owned())
     }
 
     fn parse_driver_entries() -> Result<Vec<DriverEntry>, String> {
@@ -357,6 +374,17 @@ mod windows_impl {
         }
     }
 
+    fn run_elevated_pnputil(args: &[&str]) -> Result<(), String> {
+        let (stdout, stderr, code) = run_elevated_command("pnputil", args)?;
+        if code == 0 || code == 3010 {
+            Ok(())
+        } else if stderr.trim().is_empty() {
+            Err(stdout)
+        } else {
+            Err(stderr)
+        }
+    }
+
     fn uninstall_legacy_voicemeeter() -> Result<(), String> {
         let mut candidates = Vec::new();
         if let Some(exe) = find_registry_uninstall_exe(VOICEMEETER_TERM) {
@@ -413,9 +441,16 @@ mod windows_impl {
                 cleanup_errors.push(error);
             }
         }
+        if has_vbcable_traces()
+            && let Err(error) = purge_matching_driver_traces(is_cable_driver_entry)
+        {
+            cleanup_errors.push(error);
+        }
 
-        let setup = ensure_vbcable_setup_exe()?;
-        run_setup(&setup, &["-h", "-i"])?;
+        let inf = ensure_vbcable_driver_inf()?;
+        let inf_string = inf.display().to_string();
+        run_elevated_pnputil(&["/add-driver", &inf_string, "/install"])?;
+        let _ = run_elevated_pnputil(&["/scan-devices"]);
 
         if is_stream_driver_installed() {
             Ok(())
@@ -449,6 +484,7 @@ mod windows_impl {
         {
             errors.push(error);
         }
+        let _ = run_elevated_pnputil(&["/scan-devices"]);
 
         if has_voicemeeter_traces() {
             if let Err(error) = uninstall_legacy_voicemeeter() {
