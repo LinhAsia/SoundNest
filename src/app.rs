@@ -145,6 +145,10 @@ enum TransitionAnalysisMessage {
     StartupReady { waveform: Vec<f32>, duration_sec: f32 },
 }
 
+enum LibraryHydrationMessage {
+    Ready(Vec<SoundEffect>),
+}
+
 enum StreamDriverMessage {
     ProbeFinished(Result<bool, String>),
     Finished(Result<bool, String>),
@@ -337,6 +341,8 @@ pub struct SoundFxApp {
     demucs_model_cancel: Option<Arc<AtomicBool>>,
     demucs_model_tx: Sender<DemucsModelMessage>,
     demucs_model_rx: Receiver<DemucsModelMessage>,
+    library_hydration_tx: Sender<LibraryHydrationMessage>,
+    library_hydration_rx: Receiver<LibraryHydrationMessage>,
     transition_analysis_tx: Sender<TransitionAnalysisMessage>,
     transition_analysis_rx: Receiver<TransitionAnalysisMessage>,
     stream_driver_busy: bool,
@@ -368,20 +374,10 @@ impl SoundFxApp {
     pub fn new() -> Self {
         let storage = Storage::new().unwrap_or_else(|error| panic!("Storage init failed: {error}"));
         let mut status = None;
-        let mut sounds = storage.load_library().unwrap_or_else(|error| {
+        let sounds = storage.load_library().unwrap_or_else(|error| {
             status = Some(error.to_string());
             Vec::new()
         });
-
-        let mut hydrated = false;
-        for sound in &mut sounds {
-            if let Ok(changed) = storage.hydrate_sound(sound) {
-                hydrated |= changed;
-            }
-        }
-        if hydrated {
-            let _ = storage.save_library(&sounds);
-        }
 
         let audio = AudioEngine::new().ok();
         if audio.is_none() && status.is_none() {
@@ -398,6 +394,7 @@ impl SoundFxApp {
         let (demucs_install_tx, demucs_install_rx) = mpsc::channel();
         let (demucs_model_tx, demucs_model_rx) = mpsc::channel();
         let (tts_tx, tts_rx) = mpsc::channel();
+        let (library_hydration_tx, library_hydration_rx) = mpsc::channel();
         let (transition_analysis_tx, transition_analysis_rx) = mpsc::channel();
         let (stream_driver_tx, stream_driver_rx) = mpsc::channel();
         let (vocal_separation_tx, vocal_separation_rx) = mpsc::channel();
@@ -594,6 +591,8 @@ impl SoundFxApp {
             demucs_model_cancel: None,
             demucs_model_tx,
             demucs_model_rx,
+            library_hydration_tx,
+            library_hydration_rx,
             transition_analysis_tx,
             transition_analysis_rx,
             stream_driver_busy: false,
@@ -603,6 +602,7 @@ impl SoundFxApp {
             stream_driver_tx,
             stream_driver_rx,
         };
+        app.begin_async_library_hydration();
         app.begin_async_transition_analysis(resolved_startup_sound);
         app.begin_async_stream_driver_probe();
         app.with_initial_selection()
@@ -637,6 +637,62 @@ impl SoundFxApp {
                 let _ = tx.send(message);
             }
         });
+    }
+
+    fn begin_async_library_hydration(&mut self) {
+        if self
+            .sounds
+            .iter()
+            .all(|sound| !sound.waveform.is_empty() && sound.duration_secs > 0.0)
+        {
+            return;
+        }
+
+        let tx = self.library_hydration_tx.clone();
+        let mut sounds = self.sounds.clone();
+        thread::spawn(move || {
+            let result = Storage::new().and_then(|storage| {
+                let mut changed = false;
+                for sound in &mut sounds {
+                    if storage.hydrate_sound(sound)? {
+                        changed = true;
+                    }
+                }
+                if changed {
+                    let _ = storage.save_library(&sounds);
+                }
+                Ok::<_, anyhow::Error>(sounds)
+            });
+            if let Ok(sounds) = result {
+                let _ = tx.send(LibraryHydrationMessage::Ready(sounds));
+            }
+        });
+    }
+
+    fn poll_library_hydration_jobs(&mut self, ctx: &Context) {
+        while let Ok(message) = self.library_hydration_rx.try_recv() {
+            match message {
+                LibraryHydrationMessage::Ready(hydrated_sounds) => {
+                    for hydrated in hydrated_sounds {
+                        if let Some(existing) =
+                            self.sounds.iter_mut().find(|sound| sound.id == hydrated.id)
+                        {
+                            if existing.waveform.is_empty() {
+                                existing.waveform = hydrated.waveform.clone();
+                            }
+                            if existing.duration_secs <= 0.0 {
+                                existing.duration_secs = hydrated.duration_secs;
+                            }
+                            if existing.trim_end_secs <= 0.0 {
+                                existing.trim_end_secs = hydrated.trim_end_secs;
+                            }
+                            existing.clamp_trim();
+                        }
+                    }
+                }
+            }
+            ctx.request_repaint();
+        }
     }
 
     fn poll_transition_analysis_jobs(&mut self, ctx: &Context) {
@@ -1157,7 +1213,7 @@ impl SoundFxApp {
             self.set_error_status(format!("unable to open {}", source_path.display()));
             return;
         }
-        let review_sound = match self
+        let mut review_sound = match self
             .storage
             .analyze_sound_as_effect(&source_path, &selected_sound.name)
         {
@@ -1167,6 +1223,7 @@ impl SoundFxApp {
                 return;
             }
         };
+        review_sound.waveform = Self::center_waveform_visual(&review_sound.waveform);
         let preview_id = review_sound.id;
         let preview_start = review_sound.trim_start_secs;
         let preview_duration = review_sound.safe_duration();
@@ -7160,7 +7217,8 @@ impl SoundFxApp {
                 }
 
                 let spacing = 16.0;
-                let available_width = ui.available_width().max(180.0);
+                let side_padding = 10.0;
+                let available_width = (ui.available_width() - side_padding * 2.0).max(180.0);
                 let target_card = (204.0 * self.library_grid_scale).clamp(150.0, 220.0);
                 let sounds = self.filtered_library_sounds();
                 if sounds.is_empty() {
@@ -7184,6 +7242,9 @@ impl SoundFxApp {
                 for (row_index, row) in sounds.chunks(columns).enumerate() {
                     ui.horizontal_top(|ui| {
                         ui.spacing_mut().item_spacing = vec2(spacing, spacing);
+                        if side_padding > 0.0 {
+                            ui.add_space(side_padding);
+                        }
 
                         for sound in row {
                             let (tile_rect, _tile_response) =
@@ -7370,6 +7431,9 @@ impl SoundFxApp {
                         }
                         for _ in row.len()..columns {
                             ui.allocate_exact_size(vec2(card_size, card_size), Sense::hover());
+                        }
+                        if side_padding > 0.0 {
+                            ui.add_space(side_padding);
                         }
                     });
 
@@ -10672,6 +10736,13 @@ impl SoundFxApp {
                     0.0
                 };
                 let target_rect = Self::transition_target_rect(rect);
+                painter.rect(
+                    target_rect,
+                    CornerRadius::same(APP_FRAME_RADIUS as u8),
+                    Self::page_fill(),
+                    Stroke::new(1.0, Self::border_color()),
+                    StrokeKind::Outside,
+                );
                 let base = rect.width().min(rect.height()).clamp(260.0, 440.0);
                 let half_w = egui::lerp((base * 0.17)..=(target_rect.width() * 0.5), t);
                 let half_h = egui::lerp((base * 0.13)..=(target_rect.height() * 0.5), t);
@@ -12274,6 +12345,7 @@ impl eframe::App for SoundFxApp {
         ctx.set_cursor_icon(egui::CursorIcon::Default);
         self.center_window_if_needed(ctx);
         self.intercept_close_request(ctx);
+        self.poll_library_hydration_jobs(ctx);
         self.poll_transition_analysis_jobs(ctx);
         self.poll_myinstants_waveform_jobs();
         self.poll_demucs_install_result(ctx);
@@ -12423,7 +12495,7 @@ impl eframe::App for SoundFxApp {
             return;
         }
 
-        let root_fill = Color32::TRANSPARENT;
+        let root_fill = Self::page_fill();
 
         CentralPanel::default()
             .frame(Frame::new().fill(root_fill).inner_margin(0.0))

@@ -31,6 +31,38 @@ mod windows_impl {
         Ok((stdout, stderr, output.status.code().unwrap_or(-1)))
     }
 
+    fn quote_for_powershell(value: &str) -> String {
+        value.replace('\'', "''")
+    }
+
+    fn run_elevated_command(program: &str, args: &[&str]) -> Result<(String, String, i32), String> {
+        let argument_list = if args.is_empty() {
+            "@()".to_owned()
+        } else {
+            let joined = args
+                .iter()
+                .map(|arg| format!("'{}'", quote_for_powershell(arg)))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("@({joined})")
+        };
+        let script = format!(
+            "$p = Start-Process -FilePath '{}' -ArgumentList {} -Verb RunAs -WindowStyle Hidden -Wait -PassThru; exit $p.ExitCode",
+            quote_for_powershell(program),
+            argument_list,
+        );
+        let mut command = hidden_program_command("powershell");
+        command.args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            &script,
+        ]);
+        run_and_capture(command)
+    }
+
     fn voicemeeter_install_dir() -> PathBuf {
         PathBuf::from(r"C:\Program Files (x86)\VB\Voicemeeter")
     }
@@ -105,9 +137,8 @@ mod windows_impl {
     }
 
     fn run_setup(exe_path: &Path, args: &[&str]) -> Result<(), String> {
-        let mut command = hidden_command(exe_path);
-        command.args(args);
-        let (stdout, stderr, code) = run_and_capture(command)?;
+        let (stdout, stderr, code) =
+            run_elevated_command(&exe_path.display().to_string(), args)?;
         if code == 0 || code == 1 {
             Ok(())
         } else {
@@ -120,8 +151,7 @@ mod windows_impl {
     }
 
     fn run_winget_install() -> Result<(), String> {
-        let mut command = hidden_program_command("winget");
-        command.args([
+        let args = [
             "install",
             "--id",
             PACKAGE_ID,
@@ -132,8 +162,8 @@ mod windows_impl {
             "--disable-interactivity",
             "--accept-package-agreements",
             "--accept-source-agreements",
-        ]);
-        let (stdout, stderr, code) = run_and_capture(command)?;
+        ];
+        let (stdout, stderr, code) = run_elevated_command("winget", &args)?;
         if code == 0 {
             Ok(())
         } else {
@@ -146,8 +176,7 @@ mod windows_impl {
     }
 
     fn run_winget_uninstall() -> Result<(), String> {
-        let mut command = hidden_program_command("winget");
-        command.args([
+        let args = [
             "uninstall",
             "--id",
             PACKAGE_ID,
@@ -157,8 +186,8 @@ mod windows_impl {
             "--silent",
             "--disable-interactivity",
             "--accept-source-agreements",
-        ]);
-        let (stdout, stderr, code) = run_and_capture(command)?;
+        ];
+        let (stdout, stderr, code) = run_elevated_command("winget", &args)?;
         if code == 0 {
             Ok(())
         } else {
@@ -207,9 +236,11 @@ mod windows_impl {
 
         let mut failures = Vec::new();
         for inf in published {
-            let mut delete_command = hidden_program_command("pnputil");
-            delete_command.args(["/delete-driver", &inf, "/uninstall", "/force"]);
-            if let Err(error) = run_and_capture(delete_command).and_then(|(_, stderr, code)| {
+            if let Err(error) = run_elevated_command(
+                "pnputil",
+                &["/delete-driver", &inf, "/uninstall", "/force"],
+            )
+            .and_then(|(_, stderr, code)| {
                 if code == 0 {
                     Ok((String::new(), stderr, code))
                 } else {
