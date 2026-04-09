@@ -141,7 +141,12 @@ enum DemucsModelMessage {
     Cancelled,
 }
 
+enum TransitionAnalysisMessage {
+    StartupReady { waveform: Vec<f32>, duration_sec: f32 },
+}
+
 enum StreamDriverMessage {
+    ProbeFinished(Result<bool, String>),
     Finished(Result<bool, String>),
 }
 
@@ -332,7 +337,10 @@ pub struct SoundFxApp {
     demucs_model_cancel: Option<Arc<AtomicBool>>,
     demucs_model_tx: Sender<DemucsModelMessage>,
     demucs_model_rx: Receiver<DemucsModelMessage>,
+    transition_analysis_tx: Sender<TransitionAnalysisMessage>,
+    transition_analysis_rx: Receiver<TransitionAnalysisMessage>,
     stream_driver_busy: bool,
+    stream_driver_checked: bool,
     stream_driver_error: Option<String>,
     stream_driver_installed: bool,
     stream_driver_tx: Sender<StreamDriverMessage>,
@@ -390,6 +398,7 @@ impl SoundFxApp {
         let (demucs_install_tx, demucs_install_rx) = mpsc::channel();
         let (demucs_model_tx, demucs_model_rx) = mpsc::channel();
         let (tts_tx, tts_rx) = mpsc::channel();
+        let (transition_analysis_tx, transition_analysis_rx) = mpsc::channel();
         let (stream_driver_tx, stream_driver_rx) = mpsc::channel();
         let (vocal_separation_tx, vocal_separation_rx) = mpsc::channel();
         let video_assets = storage.load_video_library().unwrap_or_else(|error| {
@@ -442,15 +451,8 @@ impl SoundFxApp {
             .unwrap_or_default();
         let tts_prompt_presets = storage.load_tts_prompt_presets().unwrap_or_default();
         let resolved_startup_sound = storage.resolved_startup_sound_path().ok().flatten();
-        let startup_transition_duration_sec = Self::custom_transition_duration_secs_opt(
-            &storage,
-            resolved_startup_sound.as_deref(),
-            DEFAULT_INTRO_DURATION_SEC,
-        );
-        let startup_transition_sound =
-            Self::load_transition_sound_visual(&storage, resolved_startup_sound);
 
-        Self {
+        let mut app = Self {
             storage,
             audio,
             sounds,
@@ -523,13 +525,13 @@ impl SoundFxApp {
                 started_at: None,
                 live_started_at: None,
                 duration_sec: if app_transition_animation {
-                    startup_transition_duration_sec
+                    DEFAULT_INTRO_DURATION_SEC
                 } else {
                     0.0
                 },
                 close_sent: false,
-                sound_waveform: startup_transition_sound.0,
-                sound_duration_sec: startup_transition_sound.1,
+                sound_waveform: Vec::new(),
+                sound_duration_sec: 0.0,
             },
             center_window_next_frame: true,
             titlebar_drag_rect: None,
@@ -592,13 +594,18 @@ impl SoundFxApp {
             demucs_model_cancel: None,
             demucs_model_tx,
             demucs_model_rx,
+            transition_analysis_tx,
+            transition_analysis_rx,
             stream_driver_busy: false,
+            stream_driver_checked: false,
             stream_driver_error: None,
-            stream_driver_installed: crate::stream_driver::is_stream_driver_installed(),
+            stream_driver_installed: false,
             stream_driver_tx,
             stream_driver_rx,
-        }
-        .with_initial_selection()
+        };
+        app.begin_async_transition_analysis(resolved_startup_sound);
+        app.begin_async_stream_driver_probe();
+        app.with_initial_selection()
     }
 
     fn with_initial_selection(mut self) -> Self {
@@ -612,6 +619,42 @@ impl SoundFxApp {
 
     fn clear_status(&mut self) {
         self.status = None;
+    }
+
+    fn begin_async_transition_analysis(&mut self, startup_sound_path: Option<PathBuf>) {
+        let Some(path) = startup_sound_path else {
+            return;
+        };
+        let tx = self.transition_analysis_tx.clone();
+        thread::spawn(move || {
+            let result = Storage::new()
+                .and_then(|storage| storage.analyze_audio_preview(&path, TRANSITION_WAVE_BUCKETS))
+                .map(|(waveform, duration_sec)| TransitionAnalysisMessage::StartupReady {
+                    waveform,
+                    duration_sec,
+                });
+            if let Ok(message) = result {
+                let _ = tx.send(message);
+            }
+        });
+    }
+
+    fn poll_transition_analysis_jobs(&mut self, ctx: &Context) {
+        while let Ok(message) = self.transition_analysis_rx.try_recv() {
+            match message {
+                TransitionAnalysisMessage::StartupReady {
+                    waveform,
+                    duration_sec,
+                } => {
+                    self.startup.sound_waveform = waveform;
+                    self.startup.sound_duration_sec = duration_sec;
+                    if self.startup.phase == TransitionPhase::Intro {
+                        self.startup.duration_sec = duration_sec.max(DEFAULT_INTRO_DURATION_SEC);
+                    }
+                }
+            }
+            ctx.request_repaint();
+        }
     }
 
     fn set_error_status(&mut self, error: impl ToString) {
@@ -695,7 +738,9 @@ impl SoundFxApp {
             .or_else(|| {
                 #[cfg(windows)]
                 {
+                    let scale = ctx.pixels_per_point().max(1.0);
                     platform::cursor_window_position("Sound FX")
+                        .map(|pos| Pos2::new(pos.x / scale, pos.y / scale))
                 }
                 #[cfg(not(windows))]
                 {
@@ -1182,11 +1227,16 @@ impl SoundFxApp {
             return waveform.to_vec();
         }
 
-        let threshold = 0.08;
-        let Some(first) = waveform.iter().position(|level| *level > threshold) else {
+        let peak = waveform.iter().copied().fold(0.0f32, f32::max);
+        if peak <= f32::EPSILON {
+            return waveform.to_vec();
+        }
+
+        let threshold = (peak * 0.035).clamp(0.006, 0.04);
+        let Some(first) = waveform.iter().position(|level| *level >= threshold) else {
             return waveform.to_vec();
         };
-        let Some(last) = waveform.iter().rposition(|level| *level > threshold) else {
+        let Some(last) = waveform.iter().rposition(|level| *level >= threshold) else {
             return waveform.to_vec();
         };
         let active = &waveform[first..=last];
@@ -2344,6 +2394,20 @@ impl SoundFxApp {
             .map(|preset| preset.name.as_str())
     }
 
+    fn gemini_voice_label(name: &str) -> &str {
+        match name {
+            "Kore" => "Kore (Female)",
+            "Puck" => "Puck (Male)",
+            "Charon" => "Charon (Male)",
+            "Aoede" => "Aoede (Female)",
+            "Fenrir" => "Fenrir (Male)",
+            "Leda" => "Leda (Female)",
+            "Orus" => "Orus (Male)",
+            "Zephyr" => "Zephyr (Female)",
+            _ => "Custom voice",
+        }
+    }
+
     fn save_current_tts_preset(&mut self) {
         let name = self.tts_preset_name.trim();
         let prompt = self.tts_direction_prompt.trim();
@@ -2388,6 +2452,19 @@ impl SoundFxApp {
             self.tts_direction_prompt = preset.prompt;
             self.tts_error = None;
         }
+    }
+
+    fn delete_selected_tts_preset(&mut self) {
+        let Some(selected_name) = self.selected_tts_preset_name().map(str::to_owned) else {
+            return;
+        };
+        self.tts_prompt_presets
+            .retain(|preset| !preset.name.eq_ignore_ascii_case(&selected_name));
+        let _ = self
+            .storage
+            .save_tts_prompt_presets(&self.tts_prompt_presets);
+        self.tts_preset_name.clear();
+        self.tts_status = "Preset removed".to_owned();
     }
 
     fn add_tts_result_to_library(&mut self, path: &Path) {
@@ -3072,6 +3149,15 @@ impl SoundFxApp {
         }
     }
 
+    fn begin_async_stream_driver_probe(&mut self) {
+        self.stream_driver_checked = false;
+        let tx = self.stream_driver_tx.clone();
+        thread::spawn(move || {
+            let result = Ok(crate::stream_driver::is_stream_driver_installed());
+            let _ = tx.send(StreamDriverMessage::ProbeFinished(result));
+        });
+    }
+
     fn start_stream_driver_install(&mut self, ctx: &Context) {
         if self.stream_driver_busy || self.stream_driver_installed {
             return;
@@ -3088,7 +3174,7 @@ impl SoundFxApp {
     }
 
     fn start_stream_driver_uninstall(&mut self, ctx: &Context) {
-        if self.stream_driver_busy || !self.stream_driver_installed {
+        if self.stream_driver_busy {
             return;
         }
         self.stream_driver_busy = true;
@@ -3103,9 +3189,19 @@ impl SoundFxApp {
 
     fn poll_stream_driver_result(&mut self, ctx: &Context) {
         while let Ok(message) = self.stream_driver_rx.try_recv() {
-            self.stream_driver_busy = false;
             match message {
+                StreamDriverMessage::ProbeFinished(Ok(installed)) => {
+                    self.stream_driver_checked = true;
+                    self.stream_driver_installed = installed;
+                    self.stream_driver_error = None;
+                }
+                StreamDriverMessage::ProbeFinished(Err(error)) => {
+                    self.stream_driver_checked = true;
+                    self.stream_driver_error = Some(error);
+                }
                 StreamDriverMessage::Finished(Ok(installed)) => {
+                    self.stream_driver_busy = false;
+                    self.stream_driver_checked = true;
                     self.stream_driver_installed = installed;
                     self.stream_driver_error = None;
                     self.status = Some(if installed {
@@ -3115,9 +3211,10 @@ impl SoundFxApp {
                     });
                 }
                 StreamDriverMessage::Finished(Err(error)) => {
+                    self.stream_driver_busy = false;
+                    self.stream_driver_checked = true;
                     self.stream_driver_error = Some(error);
-                    self.stream_driver_installed =
-                        crate::stream_driver::is_stream_driver_installed();
+                    self.begin_async_stream_driver_probe();
                 }
             }
             ctx.request_repaint();
@@ -3555,6 +3652,9 @@ impl SoundFxApp {
                 let visuals = &mut ui.style_mut().visuals;
                 visuals.extreme_bg_color = Color32::from_rgb(28, 24, 33);
                 visuals.faint_bg_color = Color32::from_rgb(33, 28, 39);
+                visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(28, 24, 33);
+                visuals.widgets.noninteractive.weak_bg_fill = Color32::from_rgb(28, 24, 33);
+                visuals.widgets.noninteractive.bg_stroke.color = Color32::from_rgb(88, 70, 96);
                 visuals.widgets.inactive.bg_fill = Color32::from_rgb(28, 24, 33);
                 visuals.widgets.inactive.weak_bg_fill = Color32::from_rgb(28, 24, 33);
                 visuals.widgets.inactive.bg_stroke.color = Color32::from_rgb(88, 70, 96);
@@ -5453,6 +5553,8 @@ impl SoundFxApp {
                                 ui.label(
                                     RichText::new(if self.stream_driver_busy {
                                         "Working"
+                                    } else if !self.stream_driver_checked {
+                                        "Checking"
                                     } else if self.stream_driver_installed {
                                         "Installed"
                                     } else {
@@ -5466,7 +5568,7 @@ impl SoundFxApp {
                         ui.add_space(8.0);
                         ui.label(
                             RichText::new(
-                                "A true system microphone endpoint needs a virtual audio driver. This installs or removes Voicemeeter Banana from inside the app.",
+                                "A true system microphone endpoint needs a virtual audio driver. This installs or removes the basic Voicemeeter virtual mic from inside the app with no extra setup UI.",
                             )
                             .size(11.5)
                             .color(Self::muted_text_color()),
@@ -5487,7 +5589,7 @@ impl SoundFxApp {
                             }
 
                             let uninstall = ui.add_enabled(
-                                !self.stream_driver_busy && self.stream_driver_installed,
+                                !self.stream_driver_busy,
                                 Self::action_button(
                                     RichText::new("Remove stream driver").size(12.0),
                                     false,
@@ -9014,11 +9116,8 @@ impl SoundFxApp {
         let mut add_to_library = false;
         let mut clear_result = false;
         let mut save_preset = false;
-        let selected_voice_label = GEMINI_VOICE_OPTIONS
-            .iter()
-            .find(|voice| voice.name == self.tts_voice_name)
-            .map(|voice| voice.label)
-            .unwrap_or("Custom voice");
+        let mut delete_preset = false;
+        let selected_voice_label = Self::gemini_voice_label(&self.tts_voice_name).to_owned();
         let selected_preset_name = self
             .selected_tts_preset_name()
             .map(str::to_owned)
@@ -9052,7 +9151,7 @@ impl SoundFxApp {
                         ComboBox::from_id_salt("gemini-tts-voice")
                             .width(170.0)
                             .selected_text(
-                                RichText::new(selected_voice_label)
+                                RichText::new(&selected_voice_label)
                                     .color(Self::strong_text_color()),
                             )
                             .show_ui(ui, |ui| {
@@ -9060,7 +9159,7 @@ impl SoundFxApp {
                                     if ui
                                         .selectable_label(
                                             self.tts_voice_name == voice.name,
-                                            voice.label,
+                                            Self::gemini_voice_label(voice.name),
                                         )
                                         .clicked()
                                     {
@@ -9127,7 +9226,7 @@ impl SoundFxApp {
                     });
                     ui.add_space(8.0);
                     ui.add_sized(
-                        [ui.available_width() - 44.0, 30.0],
+                        [ui.available_width() - 82.0, 30.0],
                         TextEdit::singleline(&mut self.tts_preset_name)
                             .hint_text("Preset name"),
                     );
@@ -9138,6 +9237,14 @@ impl SoundFxApp {
                     Self::decorate_button_response(ui, &save);
                     if save.clicked() {
                         save_preset = true;
+                    }
+                    let delete = ui.add_enabled(
+                        self.selected_tts_preset_name().is_some(),
+                        Self::action_button(RichText::new("×").size(16.0), false, false),
+                    );
+                    Self::decorate_button_response(ui, &delete);
+                    if delete.clicked() {
+                        delete_preset = true;
                     }
                 });
                 ui.add_space(10.0);
@@ -9299,6 +9406,9 @@ impl SoundFxApp {
 
         if save_preset {
             self.save_current_tts_preset();
+        }
+        if delete_preset {
+            self.delete_selected_tts_preset();
         }
         if generate_request {
             self.start_tts_generation();
@@ -12164,6 +12274,7 @@ impl eframe::App for SoundFxApp {
         ctx.set_cursor_icon(egui::CursorIcon::Default);
         self.center_window_if_needed(ctx);
         self.intercept_close_request(ctx);
+        self.poll_transition_analysis_jobs(ctx);
         self.poll_myinstants_waveform_jobs();
         self.poll_demucs_install_result(ctx);
         self.poll_demucs_model_result(ctx);
@@ -12179,7 +12290,7 @@ impl eframe::App for SoundFxApp {
 
         let transition = self.transition_progress(ctx);
         let download_snapshot = self.downloader.snapshot();
-        let wants_shadow = false;
+        let wants_shadow = true;
         if self.native_shadow_applied != wants_shadow {
             platform::set_native_window_shadow(frame, wants_shadow);
             self.native_shadow_applied = wants_shadow;
