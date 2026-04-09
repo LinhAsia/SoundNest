@@ -142,7 +142,10 @@ enum DemucsModelMessage {
 }
 
 enum TransitionAnalysisMessage {
-    StartupReady { waveform: Vec<f32>, duration_sec: f32 },
+    StartupReady {
+        waveform: Vec<f32>,
+        duration_sec: f32,
+    },
 }
 
 enum LibraryHydrationMessage {
@@ -629,10 +632,12 @@ impl SoundFxApp {
         thread::spawn(move || {
             let result = Storage::new()
                 .and_then(|storage| storage.analyze_audio_preview(&path, TRANSITION_WAVE_BUCKETS))
-                .map(|(waveform, duration_sec)| TransitionAnalysisMessage::StartupReady {
-                    waveform,
-                    duration_sec,
-                });
+                .map(
+                    |(waveform, duration_sec)| TransitionAnalysisMessage::StartupReady {
+                        waveform,
+                        duration_sec,
+                    },
+                );
             if let Ok(message) = result {
                 let _ = tx.send(message);
             }
@@ -5625,7 +5630,7 @@ impl SoundFxApp {
                         ui.add_space(8.0);
                         ui.label(
                             RichText::new(
-                                "A true system microphone endpoint needs a virtual audio driver. This installs or removes the basic Voicemeeter virtual mic from inside the app with no extra setup UI.",
+                                "A true system microphone endpoint needs a virtual audio driver. This installs or removes a single VB-CABLE input/output pair from inside the app with no extra setup UI.",
                             )
                             .size(11.5)
                             .color(Self::muted_text_color()),
@@ -7202,10 +7207,12 @@ impl SoundFxApp {
         }
         ui.add_space(12.0);
 
+        let library_clip = ui.max_rect().shrink2(vec2(10.0, 8.0));
         ScrollArea::vertical()
             .drag_to_scroll(false)
             .auto_shrink([false, false])
             .show(ui, |ui| {
+                ui.set_clip_rect(ui.clip_rect().intersect(library_clip));
                 if self.library_tab == LibraryTab::Videos {
                     self.draw_video_library_grid(ui);
                     return;
@@ -7217,7 +7224,7 @@ impl SoundFxApp {
                 }
 
                 let spacing = 16.0;
-                let side_padding = 10.0;
+                let side_padding = 18.0;
                 let available_width = (ui.available_width() - side_padding * 2.0).max(180.0);
                 let target_card = (204.0 * self.library_grid_scale).clamp(150.0, 220.0);
                 let sounds = self.filtered_library_sounds();
@@ -7501,7 +7508,7 @@ impl SoundFxApp {
         }
 
         let spacing = 16.0;
-        let side_padding = 10.0;
+        let side_padding = 18.0;
         let available_width = (ui.available_width() - side_padding * 2.0).max(180.0);
         let target_card = (204.0 * self.library_grid_scale).clamp(150.0, 220.0);
         let columns =
@@ -7678,6 +7685,9 @@ impl SoundFxApp {
                 }
                 for _ in row.len()..columns {
                     ui.allocate_exact_size(vec2(card_size, card_size), Sense::hover());
+                }
+                if side_padding > 0.0 {
+                    ui.add_space(side_padding);
                 }
             });
 
@@ -10736,13 +10746,6 @@ impl SoundFxApp {
                     0.0
                 };
                 let target_rect = Self::transition_target_rect(rect);
-                painter.rect(
-                    target_rect,
-                    CornerRadius::same(APP_FRAME_RADIUS as u8),
-                    Self::page_fill(),
-                    Stroke::new(1.0, Self::border_color()),
-                    StrokeKind::Outside,
-                );
                 let base = rect.width().min(rect.height()).clamp(260.0, 440.0);
                 let half_w = egui::lerp((base * 0.17)..=(target_rect.width() * 0.5), t);
                 let half_h = egui::lerp((base * 0.13)..=(target_rect.height() * 0.5), t);
@@ -11219,111 +11222,13 @@ impl SoundFxApp {
 
                 let inner_rect = Rect::from_center_size(
                     center,
-                    vec2(half_w * 1.18, half_h * 1.02).min(target_rect.size() * 0.86),
+                    vec2(half_w * 1.08, half_h * 0.9).min(target_rect.size() * 0.78),
                 );
-                let panel_fill = if intro_monochrome {
-                    Color32::from_rgba_premultiplied(34, 30, 40, 210)
-                } else if self.dark_theme {
-                    Color32::from_rgba_premultiplied(27, 22, 33, 224)
-                } else {
-                    Color32::from_rgba_premultiplied(248, 244, 248, 244)
-                };
-                let panel_stroke = if intro_monochrome {
-                    Color32::from_rgba_premultiplied(92, 86, 102, 132)
-                } else if self.dark_theme {
-                    Color32::from_rgba_premultiplied(109, 84, 116, 148)
-                } else if light_transition {
-                    Color32::from_rgba_premultiplied(198, 166, 184, 184)
-                } else {
-                    Color32::from_rgba_premultiplied(223, 198, 213, 176)
-                };
-                let panel_shadow = if intro_monochrome {
-                    Color32::from_rgba_premultiplied(8, 7, 10, 48)
-                } else if self.dark_theme {
-                    Color32::from_rgba_premultiplied(9, 7, 12, 64)
-                } else {
-                    Color32::from_rgba_premultiplied(132, 90, 113, 26)
-                };
-
-                let hero_rect = Rect::from_center_size(
-                    Pos2::new(center.x, center.y - half_h * 0.23),
-                    vec2(inner_rect.width() * 0.68, 44.0 + t * 16.0),
-                );
-                let hero_fill = if intro_monochrome {
-                    Color32::from_rgba_premultiplied(43, 38, 50, 190)
-                } else if self.dark_theme {
-                    Color32::from_rgba_premultiplied(39, 30, 45, 204)
-                } else {
-                    Color32::from_rgba_premultiplied(255, 250, 253, 238)
-                };
-                let detail_fill = if intro_monochrome {
-                    Color32::from_rgba_premultiplied(80, 73, 88, 150)
-                } else if self.dark_theme {
-                    Color32::from_rgba_premultiplied(232, 162, 202, 108)
-                } else if light_transition {
-                    Color32::from_rgba_premultiplied(214, 51, 132, 114)
-                } else {
-                    Color32::from_rgba_premultiplied(229, 85, 149, 96)
-                };
-                let detail_secondary = if intro_monochrome {
-                    Color32::from_rgba_premultiplied(72, 66, 80, 118)
-                } else if self.dark_theme {
-                    Color32::from_rgba_premultiplied(248, 226, 238, 84)
-                } else {
-                    Color32::from_rgba_premultiplied(218, 196, 210, 160)
-                };
-                painter.rect(
-                    hero_rect,
-                    CornerRadius::same(20),
-                    Self::with_alpha(hero_fill, layer_alpha * ornament_alpha.max(0.56)),
-                    Stroke::new(
-                        1.0,
-                        Self::with_alpha(panel_stroke, layer_alpha * ornament_alpha.max(0.5)),
-                    ),
-                    StrokeKind::Outside,
-                );
-                let hero_pill_rect = Rect::from_center_size(
-                    Pos2::new(hero_rect.center().x, hero_rect.center().y - 4.0),
-                    vec2(hero_rect.width() * 0.42, 10.0),
-                );
-                painter.rect_filled(
-                    hero_pill_rect,
-                    6.0,
-                    Self::with_alpha(detail_fill, layer_alpha * ornament_alpha.max(0.66)),
-                );
-                let hero_meta_rect = Rect::from_center_size(
-                    Pos2::new(hero_rect.center().x, hero_rect.center().y + 14.0),
-                    vec2(hero_rect.width() * 0.28, 6.0),
-                );
-                painter.rect_filled(
-                    hero_meta_rect,
-                    4.0,
-                    Self::with_alpha(detail_secondary, layer_alpha * ornament_alpha.max(0.58)),
-                );
-
                 let module_rect = Rect::from_center_size(
-                    Pos2::new(center.x, center.y + half_h * 0.22),
-                    vec2(inner_rect.width() * 0.62, inner_rect.height() * 0.54),
+                    Pos2::new(center.x, center.y + half_h * 0.1),
+                    vec2(inner_rect.width() * 0.82, inner_rect.height() * 0.7),
                 );
-                painter.rect(
-                    module_rect.translate(vec2(0.0, 10.0 + aura * 5.0)),
-                    CornerRadius::same(26),
-                    Self::with_alpha(panel_shadow, layer_alpha * ornament_alpha.max(0.54)),
-                    Stroke::NONE,
-                    StrokeKind::Outside,
-                );
-                painter.rect(
-                    module_rect,
-                    CornerRadius::same(26),
-                    Self::with_alpha(panel_fill, layer_alpha * ornament_alpha.max(0.72)),
-                    Stroke::new(
-                        1.0,
-                        Self::with_alpha(panel_stroke, layer_alpha * ornament_alpha.max(0.64)),
-                    ),
-                    StrokeKind::Outside,
-                );
-
-                let module_inner = module_rect.shrink2(vec2(24.0, 20.0));
+                let module_inner = module_rect.shrink2(vec2(24.0, 18.0));
                 let clip = painter.with_clip_rect(module_inner.expand2(vec2(8.0, 8.0)));
                 let accent_rect = Rect::from_center_size(
                     Pos2::new(module_rect.center().x, module_rect.top() + 26.0),
@@ -12495,7 +12400,7 @@ impl eframe::App for SoundFxApp {
             return;
         }
 
-        let root_fill = Self::page_fill();
+        let root_fill = Color32::TRANSPARENT;
 
         CentralPanel::default()
             .frame(Frame::new().fill(root_fill).inner_margin(0.0))

@@ -1,10 +1,23 @@
 #[cfg(windows)]
 mod windows_impl {
+    use std::env;
+    use std::fs;
     use std::path::{Path, PathBuf};
     use std::process::Command;
 
-    const PACKAGE_ID: &str = "VB-Audio.Voicemeeter";
-    const DRIVER_HINT: &str = "VB-Audio Software";
+    const CABLE_DOWNLOAD_URL: &str =
+        "https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip";
+    const CABLE_ZIP_NAME: &str = "VBCABLE_Driver_Pack45.zip";
+    const CABLE_TERM: &str = "VB-CABLE";
+    const VOICEMEETER_TERM: &str = "Voicemeeter";
+    const DRIVER_PROVIDER_HINT: &str = "VB-Audio Software";
+
+    #[derive(Clone, Debug)]
+    struct DriverEntry {
+        published_name: String,
+        original_name: String,
+        provider_name: String,
+    }
 
     fn hidden_command(program: &Path) -> Command {
         let mut command = Command::new(program);
@@ -35,6 +48,19 @@ mod windows_impl {
         value.replace('\'', "''")
     }
 
+    fn run_powershell_script(script: &str) -> Result<(String, String, i32), String> {
+        let mut command = hidden_program_command("powershell");
+        command.args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            script,
+        ]);
+        run_and_capture(command)
+    }
+
     fn run_elevated_command(program: &str, args: &[&str]) -> Result<(String, String, i32), String> {
         let argument_list = if args.is_empty() {
             "@()".to_owned()
@@ -51,34 +77,23 @@ mod windows_impl {
             quote_for_powershell(program),
             argument_list,
         );
-        let mut command = hidden_program_command("powershell");
-        command.args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            &script,
-        ]);
-        run_and_capture(command)
+        run_powershell_script(&script)
+    }
+
+    fn stream_cache_dir() -> PathBuf {
+        env::temp_dir().join("soundfx_manager_vbcable")
+    }
+
+    fn cable_zip_path() -> PathBuf {
+        stream_cache_dir().join(CABLE_ZIP_NAME)
+    }
+
+    fn cable_extract_dir() -> PathBuf {
+        stream_cache_dir().join("extracted")
     }
 
     fn voicemeeter_install_dir() -> PathBuf {
         PathBuf::from(r"C:\Program Files (x86)\VB\Voicemeeter")
-    }
-
-    fn local_setup_candidates() -> Vec<PathBuf> {
-        [
-            "voicemeeterprosetup.exe",
-            "VBVoicemeeterVAIO_Setup_x64.exe",
-            "VBVMAUX_Setup_x64.exe",
-            "VBCABLE_Setup_x64.exe",
-            "VBCABLE_Setup.exe",
-        ]
-        .into_iter()
-        .map(|name| voicemeeter_install_dir().join(name))
-        .filter(|path| path.exists())
-        .collect()
     }
 
     fn extract_exe_path(value: &str) -> Option<PathBuf> {
@@ -90,7 +105,7 @@ mod windows_impl {
         path.exists().then_some(path)
     }
 
-    fn query_registry_uninstall_output() -> String {
+    fn query_registry_uninstall_output(search_term: &str) -> String {
         let roots = [
             r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
             r"HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
@@ -99,7 +114,7 @@ mod windows_impl {
         let mut combined = String::new();
         for root in roots {
             let mut command = hidden_program_command("reg");
-            command.args(["query", root, "/s", "/f", "Voicemeeter"]);
+            command.args(["query", root, "/s", "/f", search_term]);
             if let Ok((stdout, _, _)) = run_and_capture(command) {
                 combined.push_str(&stdout);
                 combined.push('\n');
@@ -108,8 +123,8 @@ mod windows_impl {
         combined
     }
 
-    fn find_registry_uninstall_exe() -> Option<PathBuf> {
-        for line in query_registry_uninstall_output().lines() {
+    fn find_registry_uninstall_exe(search_term: &str) -> Option<PathBuf> {
+        for line in query_registry_uninstall_output(search_term).lines() {
             if !line.contains("UninstallString") {
                 continue;
             }
@@ -128,82 +143,114 @@ mod windows_impl {
         None
     }
 
-    fn has_vb_audio_driver_traces() -> bool {
+    fn recursive_find_named_file(root: &Path, names: &[&str]) -> Option<PathBuf> {
+        if !root.exists() {
+            return None;
+        }
+        let wanted = names
+            .iter()
+            .map(|name| name.to_ascii_lowercase())
+            .collect::<Vec<_>>();
+        let mut stack = vec![root.to_path_buf()];
+        while let Some(dir) = stack.pop() {
+            let entries = match fs::read_dir(&dir) {
+                Ok(entries) => entries,
+                Err(_) => continue,
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                    continue;
+                }
+                let Some(file_name) = path.file_name().and_then(|value| value.to_str()) else {
+                    continue;
+                };
+                let lower = file_name.to_ascii_lowercase();
+                if wanted.iter().any(|wanted_name| wanted_name == &lower) {
+                    return Some(path);
+                }
+            }
+        }
+        None
+    }
+
+    fn download_vbcable_package(zip_path: &Path) -> Result<(), String> {
+        let parent = zip_path
+            .parent()
+            .ok_or_else(|| "Invalid VB-CABLE cache path".to_owned())?;
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        let script = format!(
+            "$ProgressPreference='SilentlyContinue'; [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '{}' -OutFile '{}'",
+            CABLE_DOWNLOAD_URL,
+            quote_for_powershell(&zip_path.display().to_string()),
+        );
+        let (stdout, stderr, code) = run_powershell_script(&script)?;
+        if code == 0 {
+            Ok(())
+        } else if stderr.trim().is_empty() {
+            Err(stdout)
+        } else {
+            Err(stderr)
+        }
+    }
+
+    fn expand_vbcable_package(zip_path: &Path, extract_dir: &Path) -> Result<(), String> {
+        if extract_dir.exists() {
+            fs::remove_dir_all(extract_dir).map_err(|error| error.to_string())?;
+        }
+        fs::create_dir_all(extract_dir).map_err(|error| error.to_string())?;
+        let script = format!(
+            "Expand-Archive -LiteralPath '{}' -DestinationPath '{}' -Force",
+            quote_for_powershell(&zip_path.display().to_string()),
+            quote_for_powershell(&extract_dir.display().to_string()),
+        );
+        let (stdout, stderr, code) = run_powershell_script(&script)?;
+        if code == 0 {
+            Ok(())
+        } else if stderr.trim().is_empty() {
+            Err(stdout)
+        } else {
+            Err(stderr)
+        }
+    }
+
+    fn ensure_vbcable_setup_exe() -> Result<PathBuf, String> {
+        if let Some(path) = find_registry_uninstall_exe(CABLE_TERM) {
+            return Ok(path);
+        }
+        if let Some(path) = recursive_find_named_file(
+            &voicemeeter_install_dir(),
+            &["VBCABLE_Setup_x64.exe", "VBCABLE_Setup.exe"],
+        ) {
+            return Ok(path);
+        }
+        let extract_dir = cable_extract_dir();
+        if let Some(path) = recursive_find_named_file(
+            &extract_dir,
+            &["VBCABLE_Setup_x64.exe", "VBCABLE_Setup.exe"],
+        ) {
+            return Ok(path);
+        }
+        let zip_path = cable_zip_path();
+        if !zip_path.exists() {
+            download_vbcable_package(&zip_path)?;
+        }
+        expand_vbcable_package(&zip_path, &extract_dir)?;
+        recursive_find_named_file(
+            &extract_dir,
+            &["VBCABLE_Setup_x64.exe", "VBCABLE_Setup.exe"],
+        )
+        .ok_or_else(|| {
+            "Downloaded VB-CABLE package but could not find setup executable.".to_owned()
+        })
+    }
+
+    fn parse_driver_entries() -> Result<Vec<DriverEntry>, String> {
         let mut command = hidden_program_command("pnputil");
         command.arg("/enum-drivers");
-        run_and_capture(command)
-            .map(|(stdout, _, _)| stdout.contains(DRIVER_HINT))
-            .unwrap_or(false)
-    }
-
-    fn run_setup(exe_path: &Path, args: &[&str]) -> Result<(), String> {
-        let (stdout, stderr, code) =
-            run_elevated_command(&exe_path.display().to_string(), args)?;
-        if code == 0 || code == 1 {
-            Ok(())
-        } else {
-            Err(if stderr.trim().is_empty() {
-                stdout
-            } else {
-                stderr
-            })
-        }
-    }
-
-    fn run_winget_install() -> Result<(), String> {
-        let args = [
-            "install",
-            "--id",
-            PACKAGE_ID,
-            "--exact",
-            "--source",
-            "winget",
-            "--silent",
-            "--disable-interactivity",
-            "--accept-package-agreements",
-            "--accept-source-agreements",
-        ];
-        let (stdout, stderr, code) = run_elevated_command("winget", &args)?;
-        if code == 0 {
-            Ok(())
-        } else {
-            Err(if stderr.trim().is_empty() {
-                stdout
-            } else {
-                stderr
-            })
-        }
-    }
-
-    fn run_winget_uninstall() -> Result<(), String> {
-        let args = [
-            "uninstall",
-            "--id",
-            PACKAGE_ID,
-            "--exact",
-            "--source",
-            "winget",
-            "--silent",
-            "--disable-interactivity",
-            "--accept-source-agreements",
-        ];
-        let (stdout, stderr, code) = run_elevated_command("winget", &args)?;
-        if code == 0 {
-            Ok(())
-        } else {
-            Err(if stderr.trim().is_empty() {
-                stdout
-            } else {
-                stderr
-            })
-        }
-    }
-
-    fn purge_vb_audio_driver_traces() -> Result<(), String> {
-        let mut enum_command = hidden_program_command("pnputil");
-        enum_command.arg("/enum-drivers");
-        let (stdout, _, _) = run_and_capture(enum_command)?;
-        let mut published = Vec::new();
+        let (stdout, _, _) = run_and_capture(command)?;
+        let mut entries = Vec::new();
         let mut current_published: Option<String> = None;
         let mut current_original = String::new();
         let mut current_provider = String::new();
@@ -218,40 +265,77 @@ mod windows_impl {
                 current_provider = value.trim().to_owned();
             }
 
-            if current_published.is_some()
+            if let Some(published_name) = current_published.clone()
                 && !current_original.is_empty()
                 && !current_provider.is_empty()
             {
-                let matches_provider = current_provider.eq_ignore_ascii_case(DRIVER_HINT);
-                let matches_original = current_original.to_ascii_lowercase().starts_with("vb");
-                if (matches_provider || matches_original)
-                    && let Some(name) = current_published.take()
-                {
-                    published.push(name);
-                }
+                entries.push(DriverEntry {
+                    published_name,
+                    original_name: current_original.clone(),
+                    provider_name: current_provider.clone(),
+                });
+                current_published = None;
                 current_original.clear();
                 current_provider.clear();
             }
         }
 
+        Ok(entries)
+    }
+
+    fn is_cable_driver_entry(entry: &DriverEntry) -> bool {
+        let original = entry.original_name.to_ascii_lowercase();
+        entry
+            .provider_name
+            .eq_ignore_ascii_case(DRIVER_PROVIDER_HINT)
+            && (original.contains("vbmmecable") || original.contains("vbcable"))
+    }
+
+    fn is_voicemeeter_driver_entry(entry: &DriverEntry) -> bool {
+        let original = entry.original_name.to_ascii_lowercase();
+        entry
+            .provider_name
+            .eq_ignore_ascii_case(DRIVER_PROVIDER_HINT)
+            && (original.contains("vbvm")
+                || original.contains("vbvoicemeeter")
+                || original.contains("voicemeeter"))
+    }
+
+    fn has_matching_driver_traces(predicate: impl Fn(&DriverEntry) -> bool) -> bool {
+        parse_driver_entries()
+            .map(|entries| entries.iter().any(predicate))
+            .unwrap_or(false)
+    }
+
+    fn purge_matching_driver_traces(
+        predicate: impl Fn(&DriverEntry) -> bool,
+    ) -> Result<(), String> {
+        let entries = parse_driver_entries()?;
         let mut failures = Vec::new();
-        for inf in published {
-            if let Err(error) = run_elevated_command(
+        for entry in entries.into_iter().filter(predicate) {
+            match run_elevated_command(
                 "pnputil",
-                &["/delete-driver", &inf, "/uninstall", "/force"],
-            )
-            .and_then(|(_, stderr, code)| {
-                if code == 0 {
-                    Ok((String::new(), stderr, code))
-                } else {
-                    Err(if stderr.trim().is_empty() {
-                        format!("pnputil failed for {inf} with exit code {code}")
-                    } else {
-                        stderr
-                    })
+                &[
+                    "/delete-driver",
+                    &entry.published_name,
+                    "/uninstall",
+                    "/force",
+                ],
+            ) {
+                Ok((stdout, stderr, code)) if code == 0 => {
+                    let _ = (stdout, stderr);
                 }
-            }) {
-                failures.push(format!("{inf}: {error}"));
+                Ok((stdout, stderr, code)) => {
+                    failures.push(if stderr.trim().is_empty() {
+                        format!(
+                            "{}: pnputil failed with exit code {code}\n{}",
+                            entry.published_name, stdout
+                        )
+                    } else {
+                        format!("{}: {}", entry.published_name, stderr)
+                    });
+                }
+                Err(error) => failures.push(format!("{}: {error}", entry.published_name)),
             }
         }
 
@@ -262,67 +346,125 @@ mod windows_impl {
         }
     }
 
-    fn find_preferred_setup_exe() -> Option<PathBuf> {
-        find_registry_uninstall_exe().or_else(|| local_setup_candidates().into_iter().next())
+    fn run_setup(exe_path: &Path, args: &[&str]) -> Result<(), String> {
+        let (stdout, stderr, code) = run_elevated_command(&exe_path.display().to_string(), args)?;
+        if code == 0 || code == 1 {
+            Ok(())
+        } else if stderr.trim().is_empty() {
+            Err(stdout)
+        } else {
+            Err(stderr)
+        }
+    }
+
+    fn uninstall_legacy_voicemeeter() -> Result<(), String> {
+        let mut candidates = Vec::new();
+        if let Some(exe) = find_registry_uninstall_exe(VOICEMEETER_TERM) {
+            candidates.push(exe);
+        }
+        if let Some(exe) = recursive_find_named_file(
+            &voicemeeter_install_dir(),
+            &["voicemeeterprosetup.exe", "voicemeetersetup.exe"],
+        ) {
+            if !candidates.iter().any(|candidate| candidate == &exe) {
+                candidates.push(exe);
+            }
+        }
+        let mut failures = Vec::new();
+        for exe in candidates {
+            if let Err(error) = run_setup(&exe, &["-h", "-u"]) {
+                let lower = error.to_ascii_lowercase();
+                if !lower.contains("another setup program")
+                    && !lower.contains("not installed")
+                    && !lower.contains("cancel")
+                {
+                    failures.push(error);
+                }
+            }
+        }
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(failures.join("\n"))
+        }
+    }
+
+    fn has_vbcable_traces() -> bool {
+        find_registry_uninstall_exe(CABLE_TERM).is_some()
+            || has_matching_driver_traces(is_cable_driver_entry)
+    }
+
+    fn has_voicemeeter_traces() -> bool {
+        find_registry_uninstall_exe(VOICEMEETER_TERM).is_some()
+            || has_matching_driver_traces(is_voicemeeter_driver_entry)
     }
 
     pub fn is_stream_driver_installed() -> bool {
-        find_registry_uninstall_exe().is_some() || has_vb_audio_driver_traces()
+        has_vbcable_traces()
     }
 
     pub fn install_stream_driver() -> Result<(), String> {
-        if is_stream_driver_installed() {
-            return Ok(());
+        let mut cleanup_errors = Vec::new();
+        if has_voicemeeter_traces() {
+            if let Err(error) = uninstall_legacy_voicemeeter() {
+                cleanup_errors.push(error);
+            }
+            if let Err(error) = purge_matching_driver_traces(is_voicemeeter_driver_entry) {
+                cleanup_errors.push(error);
+            }
         }
 
-        if let Some(exe) = find_preferred_setup_exe() {
-            run_setup(&exe, &["-install"])?;
-        } else {
-            run_winget_install()?;
-        }
+        let setup = ensure_vbcable_setup_exe()?;
+        run_setup(&setup, &["-h", "-i"])?;
 
         if is_stream_driver_installed() {
             Ok(())
+        } else if cleanup_errors.is_empty() {
+            Err(
+                "VB-CABLE setup finished but Windows has not exposed the cable yet. A reboot may be required."
+                    .to_owned(),
+            )
         } else {
-            Err("Driver installer finished but no VB-Audio driver was detected afterwards.".to_owned())
+            Err(format!(
+                "{}\n\nVB-CABLE setup finished but Windows has not exposed the cable yet. A reboot may be required.",
+                cleanup_errors.join("\n")
+            ))
         }
     }
 
     pub fn uninstall_stream_driver() -> Result<(), String> {
         let mut errors = Vec::new();
-        let mut used_any_uninstaller = false;
-
-        if let Some(exe) = find_registry_uninstall_exe() {
-            used_any_uninstaller = true;
-            if let Err(error) = run_setup(&exe, &["-u"]) {
+        if let Some(exe) = find_registry_uninstall_exe(CABLE_TERM) {
+            if let Err(error) = run_setup(&exe, &["-h", "-u"]) {
+                errors.push(error);
+            }
+        } else if let Ok(exe) = ensure_vbcable_setup_exe() {
+            if let Err(error) = run_setup(&exe, &["-h", "-u"]) {
                 errors.push(error);
             }
         }
 
-        for exe in local_setup_candidates() {
-            used_any_uninstaller = true;
-            if let Err(error) = run_setup(&exe, &["-u"]) {
-                if !error.to_ascii_lowercase().contains("another setup program") {
-                    errors.push(error);
-                }
+        if has_vbcable_traces()
+            && let Err(error) = purge_matching_driver_traces(is_cable_driver_entry)
+        {
+            errors.push(error);
+        }
+
+        if has_voicemeeter_traces() {
+            if let Err(error) = uninstall_legacy_voicemeeter() {
+                errors.push(error);
+            }
+            if let Err(error) = purge_matching_driver_traces(is_voicemeeter_driver_entry) {
+                errors.push(error);
             }
         }
 
-        if !used_any_uninstaller
-            && let Err(error) = run_winget_uninstall()
-        {
-            errors.push(error);
-        }
-
-        if has_vb_audio_driver_traces()
-            && let Err(error) = purge_vb_audio_driver_traces()
-        {
-            errors.push(error);
-        }
-
-        if is_stream_driver_installed() {
+        if is_stream_driver_installed() || has_voicemeeter_traces() {
             if errors.is_empty() {
-                Err("Some VB-Audio traces still remain. A reboot may be required before removing them.".to_owned())
+                Err(
+                    "VB-Audio traces still remain after uninstall. A reboot may be required before Windows drops the devices."
+                        .to_owned(),
+                )
             } else {
                 Err(errors.join("\n"))
             }
