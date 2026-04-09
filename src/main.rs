@@ -11,6 +11,7 @@ mod platform;
 mod record_video;
 mod recorder;
 mod storage;
+mod stream_driver;
 mod vocal_separation;
 
 use app::SoundFxApp;

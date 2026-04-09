@@ -28,6 +28,7 @@ use std::os::windows::fs::MetadataExt;
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
@@ -38,7 +39,7 @@ use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_
 
 const AUDIO_FILTERS: &[&str] = &["wav", "mp3", "ogg", "flac", "m4a", "aac"];
 const APP_FRAME_RADIUS: f32 = 30.0;
-const APP_OUTER_MARGIN: f32 = 0.0;
+const APP_OUTER_MARGIN: f32 = 4.0;
 const LIVE_UI_FADE_SEC: f32 = 0.32;
 const TRANSITION_POINT_COUNT: usize = 240;
 const MATERIAL_ICONS_FONT: &str = "material_icons";
@@ -137,6 +138,11 @@ enum GeminiTtsMessage {
 
 enum DemucsModelMessage {
     Finished(Result<(), String>),
+    Cancelled,
+}
+
+enum StreamDriverMessage {
+    Finished(Result<bool, String>),
 }
 
 struct GeminiVoiceOption {
@@ -323,8 +329,14 @@ pub struct SoundFxApp {
     demucs_model_loading: bool,
     demucs_model_error: Option<String>,
     demucs_model_ready: bool,
+    demucs_model_cancel: Option<Arc<AtomicBool>>,
     demucs_model_tx: Sender<DemucsModelMessage>,
     demucs_model_rx: Receiver<DemucsModelMessage>,
+    stream_driver_busy: bool,
+    stream_driver_error: Option<String>,
+    stream_driver_installed: bool,
+    stream_driver_tx: Sender<StreamDriverMessage>,
+    stream_driver_rx: Receiver<StreamDriverMessage>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -378,6 +390,7 @@ impl SoundFxApp {
         let (demucs_install_tx, demucs_install_rx) = mpsc::channel();
         let (demucs_model_tx, demucs_model_rx) = mpsc::channel();
         let (tts_tx, tts_rx) = mpsc::channel();
+        let (stream_driver_tx, stream_driver_rx) = mpsc::channel();
         let (vocal_separation_tx, vocal_separation_rx) = mpsc::channel();
         let video_assets = storage.load_video_library().unwrap_or_else(|error| {
             status = Some(error.to_string());
@@ -576,8 +589,14 @@ impl SoundFxApp {
             demucs_model_loading: false,
             demucs_model_error: None,
             demucs_model_ready: crate::vocal_separation::is_demucs_model_ready(),
+            demucs_model_cancel: None,
             demucs_model_tx,
             demucs_model_rx,
+            stream_driver_busy: false,
+            stream_driver_error: None,
+            stream_driver_installed: crate::stream_driver::is_stream_driver_installed(),
+            stream_driver_tx,
+            stream_driver_rx,
         }
         .with_initial_selection()
     }
@@ -1158,6 +1177,29 @@ impl SoundFxApp {
         compact
     }
 
+    fn center_waveform_visual(waveform: &[f32]) -> Vec<f32> {
+        if waveform.len() < 8 {
+            return waveform.to_vec();
+        }
+
+        let threshold = 0.08;
+        let Some(first) = waveform.iter().position(|level| *level > threshold) else {
+            return waveform.to_vec();
+        };
+        let Some(last) = waveform.iter().rposition(|level| *level > threshold) else {
+            return waveform.to_vec();
+        };
+        let active = &waveform[first..=last];
+        if active.len() >= waveform.len() {
+            return waveform.to_vec();
+        }
+
+        let mut centered = vec![0.0; waveform.len()];
+        let offset = (waveform.len() - active.len()) / 2;
+        centered[offset..offset + active.len()].copy_from_slice(active);
+        centered
+    }
+
     fn refresh_pitch_capture_devices(&mut self) {
         match list_capture_devices() {
             Ok(devices) => {
@@ -1237,8 +1279,9 @@ impl SoundFxApp {
         };
 
         match self.storage.analyze_sound_as_effect(path, &name) {
-            Ok(sound) => {
+            Ok(mut sound) => {
                 self.stop_preview();
+                sound.waveform = Self::center_waveform_visual(&sound.waveform);
                 let preview_id = sound.id;
                 let preview_start = sound.trim_start_secs;
                 let preview_duration = sound.safe_duration();
@@ -2931,13 +2974,43 @@ impl SoundFxApp {
         self.demucs_model_loading = true;
         self.demucs_model_error = None;
         self.demucs_model_ready = false;
+        let cancel_flag = Arc::new(AtomicBool::new(false));
+        self.demucs_model_cancel = Some(Arc::clone(&cancel_flag));
         let tx = self.demucs_model_tx.clone();
         let root_dir = self.storage.root_dir().to_path_buf();
         thread::spawn(move || {
-            let result = crate::vocal_separation::preload_demucs_model(&root_dir);
-            let _ = tx.send(DemucsModelMessage::Finished(result));
+            let message = match crate::vocal_separation::preload_demucs_model_cancellable(
+                &root_dir,
+                cancel_flag,
+            ) {
+                Ok(true) => DemucsModelMessage::Finished(Ok(())),
+                Ok(false) => DemucsModelMessage::Cancelled,
+                Err(error) => DemucsModelMessage::Finished(Err(error)),
+            };
+            let _ = tx.send(message);
         });
         ctx.request_repaint();
+    }
+
+    fn stop_demucs_model_work(&mut self) {
+        if self.demucs_model_loading {
+            if let Some(cancel_flag) = self.demucs_model_cancel.as_ref() {
+                cancel_flag.store(true, Ordering::Relaxed);
+            }
+            self.status = Some("Stopping demucs model preparation".to_owned());
+            return;
+        }
+
+        if self.demucs_model_ready {
+            match crate::vocal_separation::clear_demucs_model_ready() {
+                Ok(()) => {
+                    self.demucs_model_ready = false;
+                    self.demucs_model_error = None;
+                    self.status = Some("demucs model stopped".to_owned());
+                }
+                Err(error) => self.set_error_status(error),
+            }
+        }
     }
 
     fn uninstall_demucs_from_settings(&mut self) {
@@ -2947,6 +3020,7 @@ impl SoundFxApp {
                 self.demucs_model_error = None;
                 self.demucs_model_loading = false;
                 self.demucs_model_ready = false;
+                self.demucs_model_cancel = None;
                 if let Some(draft) = self.recording_draft.as_mut() {
                     draft.keep_vocal = false;
                     draft.vocal_separated_path = None;
@@ -2977,6 +3051,7 @@ impl SoundFxApp {
     fn poll_demucs_model_result(&mut self, ctx: &Context) {
         while let Ok(message) = self.demucs_model_rx.try_recv() {
             self.demucs_model_loading = false;
+            self.demucs_model_cancel = None;
             match message {
                 DemucsModelMessage::Finished(Ok(())) => {
                     self.demucs_model_error = None;
@@ -2986,6 +3061,63 @@ impl SoundFxApp {
                 DemucsModelMessage::Finished(Err(error)) => {
                     self.demucs_model_error = Some(error);
                     self.demucs_model_ready = crate::vocal_separation::is_demucs_model_ready();
+                }
+                DemucsModelMessage::Cancelled => {
+                    self.demucs_model_error = None;
+                    self.demucs_model_ready = crate::vocal_separation::is_demucs_model_ready();
+                    self.status = Some("demucs model preparation stopped".to_owned());
+                }
+            }
+            ctx.request_repaint();
+        }
+    }
+
+    fn start_stream_driver_install(&mut self, ctx: &Context) {
+        if self.stream_driver_busy || self.stream_driver_installed {
+            return;
+        }
+        self.stream_driver_busy = true;
+        self.stream_driver_error = None;
+        let tx = self.stream_driver_tx.clone();
+        thread::spawn(move || {
+            let result = crate::stream_driver::install_stream_driver()
+                .map(|_| crate::stream_driver::is_stream_driver_installed());
+            let _ = tx.send(StreamDriverMessage::Finished(result));
+        });
+        ctx.request_repaint();
+    }
+
+    fn start_stream_driver_uninstall(&mut self, ctx: &Context) {
+        if self.stream_driver_busy || !self.stream_driver_installed {
+            return;
+        }
+        self.stream_driver_busy = true;
+        self.stream_driver_error = None;
+        let tx = self.stream_driver_tx.clone();
+        thread::spawn(move || {
+            let result = crate::stream_driver::uninstall_stream_driver().map(|_| false);
+            let _ = tx.send(StreamDriverMessage::Finished(result));
+        });
+        ctx.request_repaint();
+    }
+
+    fn poll_stream_driver_result(&mut self, ctx: &Context) {
+        while let Ok(message) = self.stream_driver_rx.try_recv() {
+            self.stream_driver_busy = false;
+            match message {
+                StreamDriverMessage::Finished(Ok(installed)) => {
+                    self.stream_driver_installed = installed;
+                    self.stream_driver_error = None;
+                    self.status = Some(if installed {
+                        "stream driver installed".to_owned()
+                    } else {
+                        "stream driver removed".to_owned()
+                    });
+                }
+                StreamDriverMessage::Finished(Err(error)) => {
+                    self.stream_driver_error = Some(error);
+                    self.stream_driver_installed =
+                        crate::stream_driver::is_stream_driver_installed();
                 }
             }
             ctx.request_repaint();
@@ -3868,8 +4000,8 @@ impl SoundFxApp {
         }
 
         let rect = ctx.screen_rect();
-        let edge = 8.0;
-        let corner = 22.0;
+        let edge = 12.0;
+        let corner = 28.0;
         let handles = [
             (
                 "resize-n",
@@ -4759,9 +4891,11 @@ impl SoundFxApp {
                                     if self.vocal_separation_running && draft.keep_vocal {
                                         ui.spinner();
                                         ui.label(
-                                            RichText::new(
-                                                "Separating vocals... first run can take a while",
-                                            )
+                                            RichText::new(if self.demucs_model_ready {
+                                                "Separating vocals..."
+                                            } else {
+                                                "Separating vocals... first warmup can take a while"
+                                            })
                                             .size(11.5)
                                             .color(Self::muted_text_color()),
                                         );
@@ -5024,7 +5158,10 @@ impl SoundFxApp {
         let mut animation_changed = false;
         let mut install_demucs = false;
         let mut preload_demucs = false;
+        let mut stop_demucs = false;
         let mut uninstall_demucs = false;
+        let mut install_stream_driver = false;
+        let mut uninstall_stream_driver = false;
 
         egui::Window::new("")
             .id(egui::Id::new("settings-panel"))
@@ -5032,7 +5169,7 @@ impl SoundFxApp {
             .title_bar(false)
             .resizable(false)
             .collapsible(false)
-            .fixed_size(vec2(520.0, 580.0))
+            .fixed_size(vec2(520.0, 700.0))
             .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
             .open(&mut open_panel)
             .frame(
@@ -5196,7 +5333,7 @@ impl SoundFxApp {
                         ui.add_space(8.0);
                         ui.label(
                             RichText::new(
-                                "demucs-rs separates vocals in the background. The first warmup can take a while because the model needs to initialize.",
+                                "Prepare model warms up the offline demucs process. It can still take time on later runs because the CLI starts a fresh process each separation.",
                             )
                             .size(11.5)
                             .color(Self::muted_text_color()),
@@ -5234,6 +5371,24 @@ impl SoundFxApp {
                             Self::decorate_button_response(ui, &preload);
                             if preload.clicked() {
                                 preload_demucs = true;
+                            }
+
+                            let stop = ui.add_enabled(
+                                self.demucs_model_loading || self.demucs_model_ready,
+                                Self::action_button(
+                                    RichText::new(if self.demucs_model_loading {
+                                        "Stop preparing"
+                                    } else {
+                                        "Stop model"
+                                    })
+                                    .size(12.0),
+                                    false,
+                                    false,
+                                ),
+                            );
+                            Self::decorate_button_response(ui, &stop);
+                            if stop.clicked() {
+                                stop_demucs = true;
                             }
 
                             let uninstall = ui.add_enabled(
@@ -5279,6 +5434,91 @@ impl SoundFxApp {
                             );
                         }
                     });
+
+                ui.add_space(12.0);
+                Frame::new()
+                    .fill(Self::surface_fill())
+                    .stroke(Stroke::new(1.0, Self::border_color()))
+                    .corner_radius(22.0)
+                    .inner_margin(Margin::same(16))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new("Stream Mic Driver")
+                                    .size(13.0)
+                                    .color(Self::strong_text_color())
+                                    .strong(),
+                            );
+                            ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                                ui.label(
+                                    RichText::new(if self.stream_driver_busy {
+                                        "Working"
+                                    } else if self.stream_driver_installed {
+                                        "Installed"
+                                    } else {
+                                        "Not installed"
+                                    })
+                                    .size(12.0)
+                                    .color(Self::muted_text_color()),
+                                );
+                            });
+                        });
+                        ui.add_space(8.0);
+                        ui.label(
+                            RichText::new(
+                                "A true system microphone endpoint needs a virtual audio driver. This installs or removes Voicemeeter Banana from inside the app.",
+                            )
+                            .size(11.5)
+                            .color(Self::muted_text_color()),
+                        );
+                        ui.add_space(10.0);
+                        ui.horizontal(|ui| {
+                            let install = ui.add_enabled(
+                                !self.stream_driver_busy && !self.stream_driver_installed,
+                                Self::action_button(
+                                    RichText::new("Install stream driver").size(12.0),
+                                    false,
+                                    false,
+                                ),
+                            );
+                            Self::decorate_button_response(ui, &install);
+                            if install.clicked() {
+                                install_stream_driver = true;
+                            }
+
+                            let uninstall = ui.add_enabled(
+                                !self.stream_driver_busy && self.stream_driver_installed,
+                                Self::action_button(
+                                    RichText::new("Remove stream driver").size(12.0),
+                                    false,
+                                    false,
+                                ),
+                            );
+                            Self::decorate_button_response(ui, &uninstall);
+                            if uninstall.clicked() {
+                                uninstall_stream_driver = true;
+                            }
+                        });
+                        if self.stream_driver_busy {
+                            ui.add_space(10.0);
+                            ui.horizontal(|ui| {
+                                ui.spinner();
+                                ui.label(
+                                    RichText::new("Updating stream driver...")
+                                        .size(11.5)
+                                        .color(Self::muted_text_color()),
+                                );
+                            });
+                        }
+                        if let Some(error) = self.stream_driver_error.as_ref() {
+                            ui.add_space(8.0);
+                            ui.label(
+                                RichText::new(error)
+                                    .size(11.5)
+                                    .color(Color32::from_rgb(171, 54, 91)),
+                            );
+                        }
+                    });
             });
 
         self.show_settings_panel = open_panel;
@@ -5299,8 +5539,17 @@ impl SoundFxApp {
         if preload_demucs {
             self.start_demucs_model_preload(ctx);
         }
+        if stop_demucs {
+            self.stop_demucs_model_work();
+        }
         if uninstall_demucs {
             self.uninstall_demucs_from_settings();
+        }
+        if install_stream_driver {
+            self.start_stream_driver_install(ctx);
+        }
+        if uninstall_stream_driver {
+            self.start_stream_driver_uninstall(ctx);
         }
 
         if save_startup
@@ -8799,24 +9048,27 @@ impl SoundFxApp {
                             .size(12.0)
                             .color(Self::muted_text_color()),
                     );
-                    ComboBox::from_id_salt("gemini-tts-voice")
-                        .width(170.0)
-                        .selected_text(
-                            RichText::new(selected_voice_label).color(Self::strong_text_color()),
-                        )
-                        .show_ui(ui, |ui| {
-                            for voice in GEMINI_VOICE_OPTIONS {
-                                if ui
-                                    .selectable_label(
-                                        self.tts_voice_name == voice.name,
-                                        voice.label,
-                                    )
-                                    .clicked()
-                                {
-                                    self.tts_voice_name = voice.name.to_owned();
+                    Self::with_dark_combo_visuals(ui, |ui| {
+                        ComboBox::from_id_salt("gemini-tts-voice")
+                            .width(170.0)
+                            .selected_text(
+                                RichText::new(selected_voice_label)
+                                    .color(Self::strong_text_color()),
+                            )
+                            .show_ui(ui, |ui| {
+                                for voice in GEMINI_VOICE_OPTIONS {
+                                    if ui
+                                        .selectable_label(
+                                            self.tts_voice_name == voice.name,
+                                            voice.label,
+                                        )
+                                        .clicked()
+                                    {
+                                        self.tts_voice_name = voice.name.to_owned();
+                                    }
                                 }
-                            }
-                        });
+                            });
+                    });
                     ui.add_space(10.0);
                     ui.label(
                         RichText::new("Name")
@@ -8837,40 +9089,42 @@ impl SoundFxApp {
                             .size(12.0)
                             .color(Self::muted_text_color()),
                     );
-                    ComboBox::from_id_salt("gemini-tts-preset")
-                        .width(156.0)
-                        .selected_text(
-                            RichText::new(selected_preset_name.clone())
-                                .color(Self::strong_text_color()),
-                        )
-                        .show_ui(ui, |ui| {
-                            if ui
-                                .selectable_label(
-                                    self.selected_tts_preset_name().is_none(),
-                                    "Custom",
-                                )
-                                .clicked()
-                            {
-                                self.tts_preset_name.clear();
-                            }
-                            let preset_names = self
-                                .tts_prompt_presets
-                                .iter()
-                                .map(|preset| preset.name.clone())
-                                .collect::<Vec<_>>();
-                            for preset_name in preset_names {
+                    Self::with_dark_combo_visuals(ui, |ui| {
+                        ComboBox::from_id_salt("gemini-tts-preset")
+                            .width(156.0)
+                            .selected_text(
+                                RichText::new(selected_preset_name.clone())
+                                    .color(Self::strong_text_color()),
+                            )
+                            .show_ui(ui, |ui| {
                                 if ui
                                     .selectable_label(
-                                        self.selected_tts_preset_name()
-                                            == Some(preset_name.as_str()),
-                                        &preset_name,
+                                        self.selected_tts_preset_name().is_none(),
+                                        "Custom",
                                     )
                                     .clicked()
                                 {
-                                    self.apply_tts_preset_by_name(&preset_name);
+                                    self.tts_preset_name.clear();
                                 }
-                            }
-                        });
+                                let preset_names = self
+                                    .tts_prompt_presets
+                                    .iter()
+                                    .map(|preset| preset.name.clone())
+                                    .collect::<Vec<_>>();
+                                for preset_name in preset_names {
+                                    if ui
+                                        .selectable_label(
+                                            self.selected_tts_preset_name()
+                                                == Some(preset_name.as_str()),
+                                            &preset_name,
+                                        )
+                                        .clicked()
+                                    {
+                                        self.apply_tts_preset_by_name(&preset_name);
+                                    }
+                                }
+                            });
+                    });
                     ui.add_space(8.0);
                     ui.add_sized(
                         [ui.available_width() - 44.0, 30.0],
@@ -11913,6 +12167,7 @@ impl eframe::App for SoundFxApp {
         self.poll_myinstants_waveform_jobs();
         self.poll_demucs_install_result(ctx);
         self.poll_demucs_model_result(ctx);
+        self.poll_stream_driver_result(ctx);
         self.poll_vocal_separation_jobs(ctx);
         self.poll_tts_jobs(ctx);
         self.prune_copy_feedback(ctx);

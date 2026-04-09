@@ -1,6 +1,12 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+use std::thread;
+use std::time::Duration;
 
 const DEMUCS_RELEASE_URL: &str = "https://github.com/nikhilunni/demucs-rs/releases/download/v0.3.4/demucs-x86_64-pc-windows-msvc.zip";
 
@@ -28,6 +34,15 @@ pub fn is_demucs_installed() -> bool {
 
 pub fn is_demucs_model_ready() -> bool {
     is_demucs_available() && demucs_model_ready_marker().exists()
+}
+
+pub fn clear_demucs_model_ready() -> Result<(), String> {
+    let marker = demucs_model_ready_marker();
+    if marker.exists() {
+        fs::remove_file(&marker)
+            .map_err(|error| format!("Failed to clear demucs model state: {error}"))?;
+    }
+    Ok(())
 }
 
 /// Check if demucs-rs CLI is available (either installed or in PATH)
@@ -162,6 +177,81 @@ pub fn preload_demucs_model(root_dir: &Path) -> Result<(), String> {
     fs::write(demucs_model_ready_marker(), b"ready")
         .map_err(|error| format!("Failed to save demucs model state: {error}"))?;
     Ok(())
+}
+
+pub fn preload_demucs_model_cancellable(
+    root_dir: &Path,
+    cancel_flag: Arc<AtomicBool>,
+) -> Result<bool, String> {
+    if !is_demucs_available() {
+        return Err("demucs-rs is not installed yet".to_owned());
+    }
+
+    let warmup_dir = root_dir.join("demucs-warmup");
+    if warmup_dir.exists() {
+        let _ = fs::remove_dir_all(&warmup_dir);
+    }
+    fs::create_dir_all(&warmup_dir)
+        .map_err(|error| format!("Failed to create warmup directory: {error}"))?;
+
+    let input_path = warmup_dir.join("warmup.wav");
+    write_silent_wav(&input_path)
+        .map_err(|error| format!("Failed to create warmup file: {error}"))?;
+    let output_dir = warmup_dir.join("output");
+
+    let result = (|| -> Result<bool, String> {
+        let mut child = demucs_command()
+            .arg(&input_path)
+            .arg("-s")
+            .arg("vocals")
+            .arg("-o")
+            .arg(&output_dir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|error| format!("Failed to run demucs: {error}"))?;
+
+        loop {
+            if cancel_flag.load(Ordering::Relaxed) {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Ok(false);
+            }
+
+            if child
+                .try_wait()
+                .map_err(|error| format!("Failed waiting for demucs: {error}"))?
+                .is_some()
+            {
+                break;
+            }
+            thread::sleep(Duration::from_millis(80));
+        }
+
+        let output = child
+            .wait_with_output()
+            .map_err(|error| format!("Failed to read demucs output: {error}"))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("demucs failed: {stderr}"));
+        }
+
+        let vocal_path = output_dir.join("vocals.wav");
+        if !vocal_path.exists() && find_vocals_recursively(&output_dir).is_none() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!(
+                "Vocal output file not found after separation. stdout: {stdout} stderr: {stderr}"
+            ));
+        }
+
+        fs::write(demucs_model_ready_marker(), b"ready")
+            .map_err(|error| format!("Failed to save demucs model state: {error}"))?;
+        Ok(true)
+    })();
+
+    let _ = fs::remove_dir_all(&warmup_dir);
+    result
 }
 
 /// Separate audio and extract only the vocal stem using demucs-rs CLI.
