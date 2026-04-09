@@ -39,7 +39,7 @@ use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_
 
 const AUDIO_FILTERS: &[&str] = &["wav", "mp3", "ogg", "flac", "m4a", "aac"];
 const APP_FRAME_RADIUS: f32 = 30.0;
-const APP_OUTER_MARGIN: f32 = 4.0;
+const APP_OUTER_MARGIN: f32 = 0.0;
 const LIVE_UI_FADE_SEC: f32 = 0.32;
 const TRANSITION_POINT_COUNT: usize = 240;
 const MATERIAL_ICONS_FONT: &str = "material_icons";
@@ -10667,6 +10667,7 @@ impl SoundFxApp {
                 let light_wave_primary = Color32::from_rgb(214, 51, 132);
                 let light_wave_secondary = Color32::from_rgb(229, 85, 149);
                 let light_wave_glow = (246, 124, 181);
+                let blob_only_transition = true;
                 let (rose_ice, berry, magenta, plum, deep_plum, star_rgb, star_alpha_scale) =
                     if intro_monochrome {
                         (
@@ -10920,7 +10921,7 @@ impl SoundFxApp {
                     (16, 10, 14)
                 };
 
-                if self.dark_theme {
+                if !blob_only_transition && self.dark_theme {
                     painter.circle_filled(
                         center,
                         base * 0.56,
@@ -10951,7 +10952,7 @@ impl SoundFxApp {
                             layer_alpha * ornament_alpha,
                         ),
                     );
-                } else if phase != TransitionPhase::Live {
+                } else if !blob_only_transition && phase != TransitionPhase::Live {
                     painter.circle_filled(
                         center,
                         base * 0.52,
@@ -10980,166 +10981,169 @@ impl SoundFxApp {
                     );
                 }
 
-                for star_index in 0..16 {
-                    let seed = star_index as f32 * 11.713;
-                    let px =
-                        rect.left() + rect.width() * (0.18 + ((seed.sin() * 0.5 + 0.5) * 0.64));
-                    let py = rect.top()
-                        + rect.height() * (0.16 + (((seed * 1.7).cos() * 0.5 + 0.5) * 0.54));
-                    let twinkle = 0.48 + ((time * 1.7 + seed).sin() * 0.52).abs();
-                    painter.circle_filled(
-                        Pos2::new(px, py),
-                        0.8 + (star_index % 3) as f32 * 0.35,
-                        Self::with_alpha(
-                            Color32::from_rgba_premultiplied(
-                                star_rgb.0,
-                                star_rgb.1,
-                                star_rgb.2,
-                                (26.0 * star_alpha_scale * twinkle * (0.35 + aura * 0.65)) as u8,
+                if !blob_only_transition {
+                    for star_index in 0..16 {
+                        let seed = star_index as f32 * 11.713;
+                        let px =
+                            rect.left() + rect.width() * (0.18 + ((seed.sin() * 0.5 + 0.5) * 0.64));
+                        let py = rect.top()
+                            + rect.height() * (0.16 + (((seed * 1.7).cos() * 0.5 + 0.5) * 0.54));
+                        let twinkle = 0.48 + ((time * 1.7 + seed).sin() * 0.52).abs();
+                        painter.circle_filled(
+                            Pos2::new(px, py),
+                            0.8 + (star_index % 3) as f32 * 0.35,
+                            Self::with_alpha(
+                                Color32::from_rgba_premultiplied(
+                                    star_rgb.0,
+                                    star_rgb.1,
+                                    star_rgb.2,
+                                    (26.0 * star_alpha_scale * twinkle * (0.35 + aura * 0.65))
+                                        as u8,
+                                ),
+                                layer_alpha * ornament_alpha,
                             ),
-                            layer_alpha * ornament_alpha,
-                        ),
-                    );
-                }
+                        );
+                    }
 
-                let aura_layers = [
-                    (
-                        Pos2::new(center.x, center.y + base * 0.02),
-                        base * 0.23,
-                        base * 0.18,
-                        Color32::from_rgba_premultiplied(
-                            deep_plum.r(),
-                            deep_plum.g(),
-                            deep_plum.b(),
-                            (74.0 * overlay) as u8,
+                    let aura_layers = [
+                        (
+                            Pos2::new(center.x, center.y + base * 0.02),
+                            base * 0.23,
+                            base * 0.18,
+                            Color32::from_rgba_premultiplied(
+                                deep_plum.r(),
+                                deep_plum.g(),
+                                deep_plum.b(),
+                                (74.0 * overlay) as u8,
+                            ),
+                            Color32::from_rgba_premultiplied(
+                                plum.r(),
+                                plum.g(),
+                                plum.b(),
+                                (52.0 + aura * 72.0) as u8,
+                            ),
                         ),
-                        Color32::from_rgba_premultiplied(
-                            plum.r(),
-                            plum.g(),
-                            plum.b(),
-                            (52.0 + aura * 72.0) as u8,
+                        (
+                            Pos2::new(center.x, center.y + base * 0.018),
+                            base * 0.31,
+                            base * 0.24,
+                            Color32::from_rgba_premultiplied(
+                                plum.r(),
+                                plum.g(),
+                                plum.b(),
+                                (58.0 * overlay) as u8,
+                            ),
+                            Color32::from_rgba_premultiplied(
+                                magenta.r(),
+                                magenta.g(),
+                                magenta.b(),
+                                (58.0 + aura * 82.0) as u8,
+                            ),
                         ),
-                    ),
-                    (
-                        Pos2::new(center.x, center.y + base * 0.018),
-                        base * 0.31,
-                        base * 0.24,
-                        Color32::from_rgba_premultiplied(
-                            plum.r(),
-                            plum.g(),
-                            plum.b(),
-                            (58.0 * overlay) as u8,
-                        ),
-                        Color32::from_rgba_premultiplied(
-                            magenta.r(),
-                            magenta.g(),
-                            magenta.b(),
-                            (58.0 + aura * 82.0) as u8,
-                        ),
-                    ),
-                    (
-                        Pos2::new(center.x, center.y + base * 0.016),
-                        base * 0.39,
-                        base * 0.3,
-                        Color32::from_rgba_premultiplied(
-                            magenta.r(),
-                            magenta.g(),
-                            magenta.b(),
-                            (42.0 * overlay) as u8,
-                        ),
-                        Color32::from_rgba_premultiplied(
-                            berry.r(),
-                            berry.g(),
-                            berry.b(),
-                            (50.0 + aura * 96.0) as u8,
-                        ),
-                    ),
-                    (
-                        Pos2::new(center.x, center.y + base * 0.022),
-                        base * 0.47,
-                        base * 0.35,
-                        Color32::from_rgba_premultiplied(
-                            berry.r(),
-                            berry.g(),
-                            berry.b(),
-                            (28.0 * overlay) as u8,
-                        ),
-                        Color32::from_rgba_premultiplied(
-                            rose_ice.r(),
-                            rose_ice.g(),
-                            rose_ice.b(),
-                            (46.0 + aura * 88.0) as u8,
-                        ),
-                    ),
-                ];
-                for (layer_index, (layer_center, radius_x, radius_y, fill, stroke)) in
-                    aura_layers.into_iter().enumerate()
-                {
-                    let stage = target_rect.shrink(layer_index as f32 * 12.0);
-                    let points = Self::morph_squircle_to_rect(
-                        layer_center,
-                        radius_x,
-                        radius_y,
-                        2.6 + layer_index as f32 * 0.18,
-                        (0.18 - layer_index as f32 * 0.02).max(0.08),
-                        time + layer_index as f32 * 0.16,
-                        stage,
-                        square_morph,
-                    );
-                    painter.add(egui::Shape::convex_polygon(
-                        points,
-                        Self::with_alpha(fill, layer_alpha * ornament_alpha),
-                        Stroke::new(
-                            (1.8 - layer_index as f32 * 0.24) * (1.0 - square_morph * 0.3),
-                            Self::with_alpha(stroke, layer_alpha * ornament_alpha),
-                        ),
-                    ));
-                }
-
-                for (radius, alpha) in [
-                    (base * 0.48, 28.0),
-                    (base * 0.38, 42.0),
-                    (base * 0.28, 68.0),
-                    (base * 0.2, 96.0),
-                ] {
-                    painter.circle_filled(
-                        center,
-                        egui::lerp((radius * 0.75)..=radius, 1.0 - aura * 0.22),
-                        Self::with_alpha(
+                        (
+                            Pos2::new(center.x, center.y + base * 0.016),
+                            base * 0.39,
+                            base * 0.3,
+                            Color32::from_rgba_premultiplied(
+                                magenta.r(),
+                                magenta.g(),
+                                magenta.b(),
+                                (42.0 * overlay) as u8,
+                            ),
                             Color32::from_rgba_premultiplied(
                                 berry.r(),
                                 berry.g(),
                                 berry.b(),
-                                (alpha * (0.2 + aura * 0.8)) as u8,
+                                (50.0 + aura * 96.0) as u8,
                             ),
-                            layer_alpha * ornament_alpha,
                         ),
-                    );
-                }
+                        (
+                            Pos2::new(center.x, center.y + base * 0.022),
+                            base * 0.47,
+                            base * 0.35,
+                            Color32::from_rgba_premultiplied(
+                                berry.r(),
+                                berry.g(),
+                                berry.b(),
+                                (28.0 * overlay) as u8,
+                            ),
+                            Color32::from_rgba_premultiplied(
+                                rose_ice.r(),
+                                rose_ice.g(),
+                                rose_ice.b(),
+                                (46.0 + aura * 88.0) as u8,
+                            ),
+                        ),
+                    ];
+                    for (layer_index, (layer_center, radius_x, radius_y, fill, stroke)) in
+                        aura_layers.into_iter().enumerate()
+                    {
+                        let stage = target_rect.shrink(layer_index as f32 * 12.0);
+                        let points = Self::morph_squircle_to_rect(
+                            layer_center,
+                            radius_x,
+                            radius_y,
+                            2.6 + layer_index as f32 * 0.18,
+                            (0.18 - layer_index as f32 * 0.02).max(0.08),
+                            time + layer_index as f32 * 0.16,
+                            stage,
+                            square_morph,
+                        );
+                        painter.add(egui::Shape::convex_polygon(
+                            points,
+                            Self::with_alpha(fill, layer_alpha * ornament_alpha),
+                            Stroke::new(
+                                (1.8 - layer_index as f32 * 0.24) * (1.0 - square_morph * 0.3),
+                                Self::with_alpha(stroke, layer_alpha * ornament_alpha),
+                            ),
+                        ));
+                    }
 
-                let shadow_points = Self::morph_squircle_to_rect(
-                    Pos2::new(center.x, center.y + 14.0 + aura * 12.0),
-                    half_w * 1.02,
-                    half_h * 1.02,
-                    exponent,
-                    wobble * 0.55,
-                    time - 0.35,
-                    target_rect.expand(8.0),
-                    square_morph,
-                );
-                painter.add(egui::Shape::convex_polygon(
-                    shadow_points,
-                    Self::with_alpha(
-                        Color32::from_rgba_premultiplied(
-                            deep_plum.r(),
-                            deep_plum.g(),
-                            deep_plum.b(),
-                            ((36.0 + t * 42.0) * (1.0 - square_morph * 0.82)) as u8,
+                    for (radius, alpha) in [
+                        (base * 0.48, 28.0),
+                        (base * 0.38, 42.0),
+                        (base * 0.28, 68.0),
+                        (base * 0.2, 96.0),
+                    ] {
+                        painter.circle_filled(
+                            center,
+                            egui::lerp((radius * 0.75)..=radius, 1.0 - aura * 0.22),
+                            Self::with_alpha(
+                                Color32::from_rgba_premultiplied(
+                                    berry.r(),
+                                    berry.g(),
+                                    berry.b(),
+                                    (alpha * (0.2 + aura * 0.8)) as u8,
+                                ),
+                                layer_alpha * ornament_alpha,
+                            ),
+                        );
+                    }
+
+                    let shadow_points = Self::morph_squircle_to_rect(
+                        Pos2::new(center.x, center.y + 14.0 + aura * 12.0),
+                        half_w * 1.02,
+                        half_h * 1.02,
+                        exponent,
+                        wobble * 0.55,
+                        time - 0.35,
+                        target_rect.expand(8.0),
+                        square_morph,
+                    );
+                    painter.add(egui::Shape::convex_polygon(
+                        shadow_points,
+                        Self::with_alpha(
+                            Color32::from_rgba_premultiplied(
+                                deep_plum.r(),
+                                deep_plum.g(),
+                                deep_plum.b(),
+                                ((36.0 + t * 42.0) * (1.0 - square_morph * 0.82)) as u8,
+                            ),
+                            layer_alpha,
                         ),
-                        layer_alpha,
-                    ),
-                    Stroke::NONE,
-                ));
+                        Stroke::NONE,
+                    ));
+                }
 
                 let card_points = Self::morph_squircle_to_rect(
                     center,
@@ -11220,208 +11224,210 @@ impl SoundFxApp {
                     );
                 }
 
-                let inner_rect = Rect::from_center_size(
-                    center,
-                    vec2(half_w * 1.08, half_h * 0.9).min(target_rect.size() * 0.78),
-                );
-                let module_rect = Rect::from_center_size(
-                    Pos2::new(center.x, center.y + half_h * 0.1),
-                    vec2(inner_rect.width() * 0.82, inner_rect.height() * 0.7),
-                );
-                let module_inner = module_rect.shrink2(vec2(24.0, 18.0));
-                let clip = painter.with_clip_rect(module_inner.expand2(vec2(8.0, 8.0)));
-                let accent_rect = Rect::from_center_size(
-                    Pos2::new(module_rect.center().x, module_rect.top() + 26.0),
-                    vec2(module_rect.width() * 0.56, 14.0 + t * 3.0),
-                );
-                let band_rect = Rect::from_min_max(
-                    Pos2::new(module_inner.left(), module_rect.top() + 56.0),
-                    Pos2::new(module_inner.right(), module_rect.top() + 140.0),
-                );
-                if light_transition {
-                    clip.rect_filled(
-                        band_rect.expand2(vec2(18.0, 14.0)),
-                        18.0,
-                        Self::with_alpha(
-                            Color32::from_rgba_premultiplied(
-                                light_wave_secondary.r(),
-                                light_wave_secondary.g(),
-                                light_wave_secondary.b(),
-                                52,
-                            ),
-                            layer_alpha * content_alpha,
-                        ),
+                if !blob_only_transition {
+                    let inner_rect = Rect::from_center_size(
+                        center,
+                        vec2(half_w * 1.08, half_h * 0.9).min(target_rect.size() * 0.78),
                     );
-                }
-                let bar_width = band_rect.width() / wave_bars.len().max(1) as f32;
-                for (index, bar) in wave_bars.iter().enumerate() {
-                    let phase_shift = time * 3.2 + index as f32 * 0.44;
-                    let animated = (*bar + 0.06_f32 * phase_shift.sin()).clamp(0.16, 1.0);
-                    let x = band_rect.left() + (index as f32 + 0.5) * bar_width;
-                    let half = animated * band_rect.height() * (0.2 + t * 0.3);
-                    let wave_rect = Rect::from_min_max(
-                        Pos2::new(x - bar_width * 0.22, band_rect.center().y - half),
-                        Pos2::new(x + bar_width * 0.22, band_rect.center().y + half),
+                    let module_rect = Rect::from_center_size(
+                        Pos2::new(center.x, center.y + half_h * 0.1),
+                        vec2(inner_rect.width() * 0.82, inner_rect.height() * 0.7),
                     );
-                    clip.rect_filled(wave_rect, 4.0, wave_color);
-                }
-
-                let ribbon_rect = Rect::from_min_max(
-                    Pos2::new(module_inner.left(), module_rect.bottom() - 84.0),
-                    Pos2::new(module_inner.right(), module_rect.bottom() - 26.0),
-                );
-                if light_transition {
-                    clip.rect_filled(
-                        ribbon_rect.expand2(vec2(22.0, 16.0)),
-                        20.0,
-                        Self::with_alpha(
-                            Color32::from_rgba_premultiplied(
-                                light_wave_primary.r(),
-                                light_wave_primary.g(),
-                                light_wave_primary.b(),
-                                44,
-                            ),
-                            layer_alpha * content_alpha,
-                        ),
+                    let module_inner = module_rect.shrink2(vec2(24.0, 18.0));
+                    let clip = painter.with_clip_rect(module_inner.expand2(vec2(8.0, 8.0)));
+                    let accent_rect = Rect::from_center_size(
+                        Pos2::new(module_rect.center().x, module_rect.top() + 26.0),
+                        vec2(module_rect.width() * 0.56, 14.0 + t * 3.0),
                     );
-                }
-                let mut line = Vec::with_capacity(120);
-                for step in 0..120 {
-                    let sample_t = step as f32 / 119.0;
-                    let x = egui::lerp(ribbon_rect.left()..=ribbon_rect.right(), sample_t);
-                    let ribbon_energy = Self::sample_waveform_level(
-                        &self.startup.sound_waveform,
-                        (audio_progress + (sample_t - 0.5) * 0.18).clamp(0.0, 1.0),
+                    let band_rect = Rect::from_min_max(
+                        Pos2::new(module_inner.left(), module_rect.top() + 56.0),
+                        Pos2::new(module_inner.right(), module_rect.top() + 140.0),
                     );
-                    let y = ribbon_rect.center().y
-                        + (sample_t * std::f32::consts::TAU * 2.2 + time * 2.9).sin()
-                            * ribbon_rect.height()
-                            * (0.18 + ribbon_energy * 0.34)
-                        + (sample_t * std::f32::consts::TAU * 5.8 - time * 1.5).cos()
-                            * ribbon_rect.height()
-                            * (0.08 + ribbon_energy * 0.14);
-                    line.push(Pos2::new(x, y));
-                }
-                clip.add(egui::Shape::line(line, Stroke::new(4.0, ribbon_color)));
-                clip.rect_filled(
-                    accent_rect,
-                    9.0,
                     if light_transition {
-                        Color32::from_rgb(229, 85, 149)
-                    } else {
-                        Self::with_alpha(
-                            Color32::from_rgba_premultiplied(
-                                rose_ice.r(),
-                                rose_ice.g(),
-                                rose_ice.b(),
-                                (34.0 + t * 38.0) as u8,
+                        clip.rect_filled(
+                            band_rect.expand2(vec2(18.0, 14.0)),
+                            18.0,
+                            Self::with_alpha(
+                                Color32::from_rgba_premultiplied(
+                                    light_wave_secondary.r(),
+                                    light_wave_secondary.g(),
+                                    light_wave_secondary.b(),
+                                    52,
+                                ),
+                                layer_alpha * content_alpha,
                             ),
-                            layer_alpha * content_alpha,
-                        )
-                    },
-                );
+                        );
+                    }
+                    let bar_width = band_rect.width() / wave_bars.len().max(1) as f32;
+                    for (index, bar) in wave_bars.iter().enumerate() {
+                        let phase_shift = time * 3.2 + index as f32 * 0.44;
+                        let animated = (*bar + 0.06_f32 * phase_shift.sin()).clamp(0.16, 1.0);
+                        let x = band_rect.left() + (index as f32 + 0.5) * bar_width;
+                        let half = animated * band_rect.height() * (0.2 + t * 0.3);
+                        let wave_rect = Rect::from_min_max(
+                            Pos2::new(x - bar_width * 0.22, band_rect.center().y - half),
+                            Pos2::new(x + bar_width * 0.22, band_rect.center().y + half),
+                        );
+                        clip.rect_filled(wave_rect, 4.0, wave_color);
+                    }
 
-                for index in 0..7 {
-                    let angle = time * 0.72 + index as f32 * 0.9;
-                    let orbit = egui::lerp(
-                        (module_rect.width() * 0.28)..=(module_rect.width() * 0.14),
-                        t,
-                    ) + (index % 3) as f32 * 10.0
-                        + audio_level * 8.0;
-                    let note_anchor = Pos2::new(
-                        module_rect.center().x,
-                        module_rect.top() + module_rect.height() * 0.4,
+                    let ribbon_rect = Rect::from_min_max(
+                        Pos2::new(module_inner.left(), module_rect.bottom() - 84.0),
+                        Pos2::new(module_inner.right(), module_rect.bottom() - 26.0),
                     );
-                    let note_pos = Pos2::new(
-                        note_anchor.x + angle.cos() * orbit,
-                        note_anchor.y + angle.sin() * orbit * 0.62,
-                    );
-                    let note_scale = 0.64 + (index % 3) as f32 * 0.12 + audio_level * 0.12;
-                    let note_alpha = if light_transition {
-                        (196.0 + aura * 52.0).clamp(0.0, 248.0) as u8
-                    } else {
-                        (160.0 * aura).clamp(0.0, 160.0) as u8
-                    };
-                    let note_color = if index % 2 == 0 {
-                        if light_transition {
+                    if light_transition {
+                        clip.rect_filled(
+                            ribbon_rect.expand2(vec2(22.0, 16.0)),
+                            20.0,
                             Self::with_alpha(
                                 Color32::from_rgba_premultiplied(
-                                    note_base.r(),
-                                    note_base.g(),
-                                    note_base.b(),
-                                    note_alpha,
+                                    light_wave_primary.r(),
+                                    light_wave_primary.g(),
+                                    light_wave_primary.b(),
+                                    44,
                                 ),
                                 layer_alpha * content_alpha,
-                            )
+                            ),
+                        );
+                    }
+                    let mut line = Vec::with_capacity(120);
+                    for step in 0..120 {
+                        let sample_t = step as f32 / 119.0;
+                        let x = egui::lerp(ribbon_rect.left()..=ribbon_rect.right(), sample_t);
+                        let ribbon_energy = Self::sample_waveform_level(
+                            &self.startup.sound_waveform,
+                            (audio_progress + (sample_t - 0.5) * 0.18).clamp(0.0, 1.0),
+                        );
+                        let y = ribbon_rect.center().y
+                            + (sample_t * std::f32::consts::TAU * 2.2 + time * 2.9).sin()
+                                * ribbon_rect.height()
+                                * (0.18 + ribbon_energy * 0.34)
+                            + (sample_t * std::f32::consts::TAU * 5.8 - time * 1.5).cos()
+                                * ribbon_rect.height()
+                                * (0.08 + ribbon_energy * 0.14);
+                        line.push(Pos2::new(x, y));
+                    }
+                    clip.add(egui::Shape::line(line, Stroke::new(4.0, ribbon_color)));
+                    clip.rect_filled(
+                        accent_rect,
+                        9.0,
+                        if light_transition {
+                            Color32::from_rgb(229, 85, 149)
                         } else {
                             Self::with_alpha(
                                 Color32::from_rgba_premultiplied(
-                                    note_base.r(),
-                                    note_base.g(),
-                                    note_base.b(),
-                                    note_alpha,
-                                ),
-                                layer_alpha * content_alpha,
-                            )
-                        }
-                    } else {
-                        if light_transition {
-                            Self::with_alpha(
-                                Color32::from_rgba_premultiplied(
-                                    note_alt.r(),
-                                    note_alt.g(),
-                                    note_alt.b(),
-                                    note_alpha,
-                                ),
-                                layer_alpha * content_alpha,
-                            )
-                        } else {
-                            Self::with_alpha(
-                                Color32::from_rgba_premultiplied(
-                                    note_alt.r(),
-                                    note_alt.g(),
-                                    note_alt.b(),
-                                    note_alpha,
-                                ),
-                                layer_alpha * content_alpha,
-                            )
-                        }
-                    };
-                    let glow_alpha = if light_transition {
-                        (92.0 + aura * 54.0).clamp(0.0, 168.0) as u8
-                    } else if self.dark_theme {
-                        (110.0 * aura).clamp(0.0, 148.0) as u8
-                    } else {
-                        (88.0 * aura).clamp(0.0, 128.0) as u8
-                    };
-                    Self::paint_glowing_music_note(
-                        &painter,
-                        note_pos,
-                        note_scale,
-                        angle.sin() * 0.18,
-                        note_color,
-                        if light_transition {
-                            Self::with_alpha(
-                                Color32::from_rgba_premultiplied(
-                                    note_glow_rgb.0,
-                                    note_glow_rgb.1,
-                                    note_glow_rgb.2,
-                                    glow_alpha,
-                                ),
-                                layer_alpha * content_alpha,
-                            )
-                        } else {
-                            Self::with_alpha(
-                                Color32::from_rgba_premultiplied(
-                                    note_glow_rgb.0,
-                                    note_glow_rgb.1,
-                                    note_glow_rgb.2,
-                                    glow_alpha,
+                                    rose_ice.r(),
+                                    rose_ice.g(),
+                                    rose_ice.b(),
+                                    (34.0 + t * 38.0) as u8,
                                 ),
                                 layer_alpha * content_alpha,
                             )
                         },
                     );
+
+                    for index in 0..7 {
+                        let angle = time * 0.72 + index as f32 * 0.9;
+                        let orbit = egui::lerp(
+                            (module_rect.width() * 0.28)..=(module_rect.width() * 0.14),
+                            t,
+                        ) + (index % 3) as f32 * 10.0
+                            + audio_level * 8.0;
+                        let note_anchor = Pos2::new(
+                            module_rect.center().x,
+                            module_rect.top() + module_rect.height() * 0.4,
+                        );
+                        let note_pos = Pos2::new(
+                            note_anchor.x + angle.cos() * orbit,
+                            note_anchor.y + angle.sin() * orbit * 0.62,
+                        );
+                        let note_scale = 0.64 + (index % 3) as f32 * 0.12 + audio_level * 0.12;
+                        let note_alpha = if light_transition {
+                            (196.0 + aura * 52.0).clamp(0.0, 248.0) as u8
+                        } else {
+                            (160.0 * aura).clamp(0.0, 160.0) as u8
+                        };
+                        let note_color = if index % 2 == 0 {
+                            if light_transition {
+                                Self::with_alpha(
+                                    Color32::from_rgba_premultiplied(
+                                        note_base.r(),
+                                        note_base.g(),
+                                        note_base.b(),
+                                        note_alpha,
+                                    ),
+                                    layer_alpha * content_alpha,
+                                )
+                            } else {
+                                Self::with_alpha(
+                                    Color32::from_rgba_premultiplied(
+                                        note_base.r(),
+                                        note_base.g(),
+                                        note_base.b(),
+                                        note_alpha,
+                                    ),
+                                    layer_alpha * content_alpha,
+                                )
+                            }
+                        } else {
+                            if light_transition {
+                                Self::with_alpha(
+                                    Color32::from_rgba_premultiplied(
+                                        note_alt.r(),
+                                        note_alt.g(),
+                                        note_alt.b(),
+                                        note_alpha,
+                                    ),
+                                    layer_alpha * content_alpha,
+                                )
+                            } else {
+                                Self::with_alpha(
+                                    Color32::from_rgba_premultiplied(
+                                        note_alt.r(),
+                                        note_alt.g(),
+                                        note_alt.b(),
+                                        note_alpha,
+                                    ),
+                                    layer_alpha * content_alpha,
+                                )
+                            }
+                        };
+                        let glow_alpha = if light_transition {
+                            (92.0 + aura * 54.0).clamp(0.0, 168.0) as u8
+                        } else if self.dark_theme {
+                            (110.0 * aura).clamp(0.0, 148.0) as u8
+                        } else {
+                            (88.0 * aura).clamp(0.0, 128.0) as u8
+                        };
+                        Self::paint_glowing_music_note(
+                            &painter,
+                            note_pos,
+                            note_scale,
+                            angle.sin() * 0.18,
+                            note_color,
+                            if light_transition {
+                                Self::with_alpha(
+                                    Color32::from_rgba_premultiplied(
+                                        note_glow_rgb.0,
+                                        note_glow_rgb.1,
+                                        note_glow_rgb.2,
+                                        glow_alpha,
+                                    ),
+                                    layer_alpha * content_alpha,
+                                )
+                            } else {
+                                Self::with_alpha(
+                                    Color32::from_rgba_premultiplied(
+                                        note_glow_rgb.0,
+                                        note_glow_rgb.1,
+                                        note_glow_rgb.2,
+                                        glow_alpha,
+                                    ),
+                                    layer_alpha * content_alpha,
+                                )
+                            },
+                        );
+                    }
                 }
             });
     }
