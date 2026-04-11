@@ -4466,6 +4466,8 @@ impl SoundFxApp {
         } else {
             Self::truncate_middle_ascii(self.import_dir.to_string_lossy().as_ref(), 42)
         };
+        let (panel_bounds, panel_size, panel_pos) =
+            self.centered_modal_placement(ctx, vec2(640.0, 560.0), vec2(320.0, 280.0), 0.0);
 
         egui::Window::new("")
             .id(egui::Id::new("sound-import-panel"))
@@ -4473,8 +4475,9 @@ impl SoundFxApp {
             .title_bar(false)
             .resizable(false)
             .collapsible(false)
-            .fixed_size(vec2(640.0, 560.0))
-            .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
+            .fixed_size(panel_size)
+            .fixed_pos(panel_pos)
+            .constrain_to(panel_bounds)
             .open(&mut open_panel)
             .frame(
                 Frame::new()
@@ -4677,6 +4680,8 @@ impl SoundFxApp {
         let mut use_selected_sound = false;
         let refresh_inputs = false;
         let mut clear_hotkey = false;
+        let (panel_bounds, panel_size, panel_pos) =
+            self.centered_modal_placement(ctx, vec2(520.0, 420.0), vec2(320.0, 260.0), 0.0);
 
         egui::Window::new("")
             .id(egui::Id::new("sound-record-panel"))
@@ -4684,8 +4689,9 @@ impl SoundFxApp {
             .title_bar(false)
             .resizable(false)
             .collapsible(false)
-            .fixed_size(vec2(520.0, 420.0))
-            .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
+            .fixed_size(panel_size)
+            .fixed_pos(panel_pos)
+            .constrain_to(panel_bounds)
             .open(&mut open_panel)
             .frame(
                 Frame::new()
@@ -4972,6 +4978,8 @@ impl SoundFxApp {
             .as_ref()
             .map(|export| (export.progress, export.stage.clone()));
         let exporting_video = export_progress.is_some();
+        let (panel_bounds, panel_size, panel_pos) =
+            self.centered_modal_placement(ctx, vec2(680.0, 560.0), vec2(360.0, 300.0), 0.0);
 
         egui::Window::new("")
             .id(egui::Id::new("record-review-panel"))
@@ -4979,8 +4987,9 @@ impl SoundFxApp {
             .title_bar(false)
             .resizable(false)
             .collapsible(false)
-            .fixed_size(vec2(680.0, 560.0))
-            .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
+            .fixed_size(panel_size)
+            .fixed_pos(panel_pos)
+            .constrain_to(panel_bounds)
             .open(&mut open_panel)
             .frame(
                 Frame::new()
@@ -5418,6 +5427,8 @@ impl SoundFxApp {
         let mut install_stream_driver = false;
         let mut uninstall_stream_driver = false;
         let mut routing_changed = false;
+        let (panel_bounds, panel_size, panel_pos) =
+            self.centered_modal_placement(ctx, vec2(344.0, 420.0), vec2(300.0, 280.0), 0.0);
 
         egui::Window::new("")
             .id(egui::Id::new("stream-input-panel"))
@@ -5425,8 +5436,9 @@ impl SoundFxApp {
             .title_bar(false)
             .resizable(false)
             .collapsible(false)
-            .fixed_size(vec2(344.0, 420.0))
-            .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
+            .fixed_size(panel_size)
+            .fixed_pos(panel_pos)
+            .constrain_to(panel_bounds)
             .frame(
                 Frame::new()
                     .fill(Self::overlay_panel_fill())
@@ -5709,6 +5721,8 @@ impl SoundFxApp {
         let mut uninstall_demucs = false;
         let mut install_stream_driver = false;
         let mut uninstall_stream_driver = false;
+        let (panel_bounds, panel_size, panel_pos) =
+            self.centered_modal_placement(ctx, vec2(520.0, 700.0), vec2(320.0, 360.0), 0.0);
 
         egui::Window::new("")
             .id(egui::Id::new("settings-panel"))
@@ -5716,8 +5730,9 @@ impl SoundFxApp {
             .title_bar(false)
             .resizable(false)
             .collapsible(false)
-            .fixed_size(vec2(520.0, 700.0))
-            .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
+            .fixed_size(panel_size)
+            .fixed_pos(panel_pos)
+            .constrain_to(panel_bounds)
             .open(&mut open_panel)
             .frame(
                 Frame::new()
@@ -6371,6 +6386,8 @@ impl SoundFxApp {
         let mut copy_request = false;
         let mut folder_request = false;
         let mut delete_request = false;
+        let (panel_bounds, panel_size, panel_pos) =
+            self.centered_modal_placement(ctx, vec2(760.0, 620.0), vec2(360.0, 320.0), 0.0);
 
         egui::Window::new("")
             .id(egui::Id::new("video-viewer-panel"))
@@ -6378,8 +6395,9 @@ impl SoundFxApp {
             .title_bar(false)
             .resizable(false)
             .collapsible(false)
-            .fixed_size(vec2(760.0, 620.0))
-            .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
+            .fixed_size(panel_size)
+            .fixed_pos(panel_pos)
+            .constrain_to(panel_bounds)
             .frame(
                 Frame::new()
                     .fill(Self::overlay_panel_fill())
@@ -6618,6 +6636,51 @@ impl SoundFxApp {
         padding.round() as i8
     }
 
+    fn modal_safe_rect(&self, ctx: &Context) -> Rect {
+        let host_rect = self
+            .app_frame_rect
+            .unwrap_or_else(|| ctx.screen_rect().shrink(18.0));
+        let min_side = host_rect.width().min(host_rect.height());
+        let edge_inset = (APP_FRAME_RADIUS + min_side * 0.03).clamp(18.0, 48.0);
+        let max_inset_x = ((host_rect.width() - 1.0) * 0.5).max(0.0);
+        let max_inset_y = ((host_rect.height() - 1.0) * 0.5).max(0.0);
+        let inset_x = edge_inset.min(max_inset_x);
+        let inset_y = edge_inset.min(max_inset_y);
+        Rect::from_min_max(
+            Pos2::new(host_rect.left() + inset_x, host_rect.top() + inset_y),
+            Pos2::new(host_rect.right() - inset_x, host_rect.bottom() - inset_y),
+        )
+    }
+
+    fn fit_modal_dimension(available: f32, desired: f32, min: f32) -> f32 {
+        if available <= 1.0 {
+            1.0
+        } else {
+            desired.min(available).max(min.min(available))
+        }
+    }
+
+    fn centered_modal_placement(
+        &self,
+        ctx: &Context,
+        desired_size: Vec2,
+        min_size: Vec2,
+        y_offset: f32,
+    ) -> (Rect, Vec2, Pos2) {
+        let safe_rect = self.modal_safe_rect(ctx);
+        let panel_size = vec2(
+            Self::fit_modal_dimension(safe_rect.width(), desired_size.x, min_size.x),
+            Self::fit_modal_dimension(safe_rect.height(), desired_size.y, min_size.y),
+        );
+        let panel_pos = Pos2::new(
+            (safe_rect.center().x - panel_size.x * 0.5)
+                .clamp(safe_rect.left(), safe_rect.right() - panel_size.x),
+            (safe_rect.center().y - panel_size.y * 0.5 + y_offset)
+                .clamp(safe_rect.top(), safe_rect.bottom() - panel_size.y),
+        );
+        (safe_rect, panel_size, panel_pos)
+    }
+
     fn render_pitch_monitor(&mut self, ctx: &Context) {
         if self.is_transition_active() {
             return;
@@ -6637,14 +6700,17 @@ impl SoundFxApp {
         let mut toggle = None;
         let refresh_inputs = false;
         let mut close_request = false;
+        let (panel_bounds, panel_size, panel_pos) =
+            self.centered_modal_placement(ctx, vec2(296.0, 250.0), vec2(248.0, 220.0), 0.0);
         egui::Window::new("")
             .id(egui::Id::new("pitch-monitor-panel"))
             .order(egui::Order::Foreground)
             .title_bar(false)
             .resizable(false)
             .collapsible(false)
-            .fixed_size(vec2(296.0, 250.0))
-            .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
+            .fixed_size(panel_size)
+            .fixed_pos(panel_pos)
+            .constrain_to(panel_bounds)
             .frame(
                 Frame::new()
                     .fill(Self::overlay_panel_fill())
@@ -9975,6 +10041,8 @@ impl SoundFxApp {
         let mut clear_result = false;
         let mut minimize_request = false;
         let mut close_request = false;
+        let (panel_bounds, panel_size, panel_pos) =
+            self.centered_modal_placement(ctx, vec2(520.0, 420.0), vec2(320.0, 260.0), 0.0);
 
         egui::Window::new("")
             .id(egui::Id::new("youtube-audio-download"))
@@ -9982,8 +10050,9 @@ impl SoundFxApp {
             .title_bar(false)
             .resizable(false)
             .collapsible(false)
-            .fixed_size(vec2(520.0, 420.0))
-            .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
+            .fixed_size(panel_size)
+            .fixed_pos(panel_pos)
+            .constrain_to(panel_bounds)
             .open(&mut open_panel)
             .frame(
                 Frame::new()
@@ -10264,6 +10333,8 @@ impl SoundFxApp {
         let mut stop_youtube_download = false;
         let mut clear_youtube_results = false;
         let mut more_request = false;
+        let (panel_bounds, panel_size, panel_pos) =
+            self.centered_modal_placement(ctx, vec2(720.0, 620.0), vec2(360.0, 300.0), 0.0);
 
         egui::Window::new("")
             .id(egui::Id::new("myinstants-search-panel"))
@@ -10271,8 +10342,9 @@ impl SoundFxApp {
             .title_bar(false)
             .resizable(false)
             .collapsible(false)
-            .fixed_size(vec2(720.0, 620.0))
-            .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
+            .fixed_size(panel_size)
+            .fixed_pos(panel_pos)
+            .constrain_to(panel_bounds)
             .open(&mut open_panel)
             .frame(
                 Frame::new()
@@ -10645,6 +10717,8 @@ impl SoundFxApp {
         let mut close_request = false;
         let mut keep_old = false;
         let mut replace_current = false;
+        let (panel_bounds, panel_size, panel_pos) =
+            self.centered_modal_placement(ctx, vec2(360.0, 180.0), vec2(280.0, 160.0), 0.0);
 
         egui::Window::new("")
             .id(egui::Id::new("trim-commit-panel"))
@@ -10652,8 +10726,9 @@ impl SoundFxApp {
             .title_bar(false)
             .resizable(false)
             .collapsible(false)
-            .fixed_size(vec2(360.0, 180.0))
-            .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
+            .fixed_size(panel_size)
+            .fixed_pos(panel_pos)
+            .constrain_to(panel_bounds)
             .open(&mut open_panel)
             .frame(
                 Frame::new()
@@ -10767,37 +10842,8 @@ impl SoundFxApp {
         let mut playback_reapply_request = false;
         let mut changed = false;
         let mut trim_timeline_zoom = self.trim_timeline_zoom;
-        let app_rect = self
-            .app_frame_rect
-            .unwrap_or_else(|| ctx.screen_rect().shrink(24.0));
-        let popup_bounds = Rect::from_min_max(
-            Pos2::new(app_rect.left() + 12.0, app_rect.top() + 52.0),
-            Pos2::new(app_rect.right() - 12.0, app_rect.bottom() - 12.0),
-        );
-        let base_width: f32 = 840.0;
-        let base_height: f32 = 396.0;
-        let available_popup_width = (popup_bounds.width() - 12.0).max(0.0);
-        let available_popup_height = (popup_bounds.height() - 12.0).max(0.0);
-        let popup_width = if available_popup_width < 260.0 {
-            available_popup_width.max(1.0)
-        } else {
-            available_popup_width.min(base_width).max(260.0)
-        };
-        let popup_height = if available_popup_height < 260.0 {
-            available_popup_height.max(1.0)
-        } else {
-            available_popup_height.min(base_height).max(260.0)
-        };
-        let popup_size = vec2(
-            popup_width,
-            popup_height,
-        );
-        let popup_pos = Pos2::new(
-            (popup_bounds.center().x - popup_size.x * 0.5)
-                .clamp(popup_bounds.left(), popup_bounds.right() - popup_size.x),
-            (popup_bounds.center().y - popup_size.y * 0.5 - 22.0)
-                .clamp(popup_bounds.top(), popup_bounds.bottom() - popup_size.y),
-        );
+        let (popup_bounds, popup_size, popup_pos) =
+            self.centered_modal_placement(ctx, vec2(840.0, 396.0), vec2(260.0, 260.0), -22.0);
         let mut open_popup = self.show_trim_popup;
         if !ctx.wants_keyboard_input()
             && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Space))
