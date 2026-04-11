@@ -11,6 +11,7 @@ use crate::platform;
 use crate::record_video;
 use crate::recorder::{Recorder, RecorderConfig};
 use crate::storage::{GeminiTtsPromptPreset, SoundEffect, Storage, VideoAsset, format_time};
+use crate::stream_input::{StreamInputConfig, StreamInputRouter};
 use anyhow::{Context as _, Result};
 #[cfg(windows)]
 use clipboard_win::{Clipboard, Setter, formats::FileList};
@@ -244,6 +245,7 @@ pub struct SoundFxApp {
     show_record_panel: bool,
     show_record_review_panel: bool,
     show_pitch_panel: bool,
+    show_stream_panel: bool,
     show_settings_panel: bool,
     show_trim_commit_panel: bool,
     show_trim_popup: bool,
@@ -354,6 +356,9 @@ pub struct SoundFxApp {
     stream_driver_installed: bool,
     stream_driver_tx: Sender<StreamDriverMessage>,
     stream_driver_rx: Receiver<StreamDriverMessage>,
+    stream_input_router: StreamInputRouter,
+    stream_input_system_audio: bool,
+    stream_input_microphone: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -478,6 +483,7 @@ impl SoundFxApp {
             show_record_panel: false,
             show_record_review_panel: false,
             show_pitch_panel: false,
+            show_stream_panel: false,
             show_settings_panel: false,
             show_trim_commit_panel: false,
             show_trim_popup: false,
@@ -604,6 +610,9 @@ impl SoundFxApp {
             stream_driver_installed: false,
             stream_driver_tx,
             stream_driver_rx,
+            stream_input_router: StreamInputRouter::new(),
+            stream_input_system_audio: false,
+            stream_input_microphone: false,
         };
         app.begin_async_library_hydration();
         app.begin_async_transition_analysis(resolved_startup_sound);
@@ -3239,6 +3248,7 @@ impl SoundFxApp {
         if self.stream_driver_busy {
             return;
         }
+        let _ = self.stream_input_router.configure(None);
         self.stream_driver_busy = true;
         self.stream_driver_error = None;
         let tx = self.stream_driver_tx.clone();
@@ -3279,7 +3289,38 @@ impl SoundFxApp {
                     self.begin_async_stream_driver_probe();
                 }
             }
+            self.apply_stream_input_routing();
             ctx.request_repaint();
+        }
+    }
+
+    fn apply_stream_input_routing(&mut self) {
+        let config = if !self.stream_driver_busy
+            && self.stream_driver_installed
+            && (self.stream_input_system_audio || self.stream_input_microphone)
+        {
+            Some(StreamInputConfig {
+                capture_system_audio: self.stream_input_system_audio,
+                capture_microphone: self.stream_input_microphone,
+                microphone_device_name: None,
+            })
+        } else {
+            None
+        };
+
+        if let Err(error) = self.stream_input_router.configure(config) {
+            self.set_error_status(error);
+        }
+    }
+
+    fn poll_stream_input_router(&mut self, ctx: &Context) {
+        let snapshot = self.stream_input_router.snapshot();
+        if snapshot.running {
+            ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
+        }
+        if let Some(error) = snapshot.error {
+            self.set_error_status(error);
+            let _ = self.stream_input_router.configure(None);
         }
     }
 
@@ -3947,7 +3988,7 @@ impl SoundFxApp {
         let downloader_snapshot = self.downloader.snapshot();
         let download_titlebar_active = downloader_snapshot.running && !self.show_download_panel;
         ui.horizontal(|ui| {
-            let drag_width = (ui.available_width() - 506.0).max(180.0);
+            let drag_width = (ui.available_width() - 564.0).max(180.0);
             let drag_response = ui
                 .allocate_ui_with_layout(
                     vec2(drag_width, 44.0),
@@ -4053,6 +4094,21 @@ impl SoundFxApp {
                 if spn_response.clicked() {
                     self.refresh_pitch_capture_devices();
                     self.show_pitch_panel = !self.show_pitch_panel;
+                }
+
+                let stream_response = ui.add_sized(
+                    [56.0, 30.0],
+                    Self::titlebar_button(
+                        RichText::new("STRM")
+                            .size(10.5)
+                            .color(Self::strong_text_color()),
+                        self.show_stream_panel,
+                        false,
+                    ),
+                );
+                Self::decorate_button_response(ui, &stream_response);
+                if stream_response.clicked() {
+                    self.show_stream_panel = !self.show_stream_panel;
                 }
 
                 if Self::icon_titlebar(ui, [42.0, 30.0], 0xe8b8, self.show_settings_panel, false)
@@ -5303,6 +5359,234 @@ impl SoundFxApp {
         }
     }
 
+    fn render_stream_panel(&mut self, ctx: &Context) {
+        if self.is_transition_active() {
+            return;
+        }
+        if !self.show_stream_panel {
+            return;
+        }
+
+        let snapshot = self.stream_input_router.snapshot();
+        let mut close_request = false;
+        let mut open_panel = self.show_stream_panel;
+        let mut install_stream_driver = false;
+        let mut uninstall_stream_driver = false;
+        let mut routing_changed = false;
+
+        egui::Window::new("")
+            .id(egui::Id::new("stream-input-panel"))
+            .order(egui::Order::Foreground)
+            .title_bar(false)
+            .resizable(false)
+            .collapsible(false)
+            .fixed_size(vec2(344.0, 286.0))
+            .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
+            .frame(
+                Frame::new()
+                    .fill(Self::overlay_panel_fill())
+                    .stroke(Stroke::new(1.0, Self::border_color()))
+                    .shadow(Shadow {
+                        offset: [0, 14],
+                        blur: 28,
+                        spread: 0,
+                        color: Color32::from_rgba_premultiplied(78, 40, 63, 24),
+                    })
+                    .corner_radius(22.0)
+                    .inner_margin(Margin::same(16)),
+            )
+            .open(&mut open_panel)
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new("Stream Input")
+                            .size(16.0)
+                            .color(Self::strong_text_color())
+                            .strong(),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                        if Self::icon_titlebar(ui, [34.0, 28.0], 0xe5cd, false, true).clicked() {
+                            close_request = true;
+                        }
+                    });
+                });
+                ui.add_space(6.0);
+                ui.label(
+                    RichText::new(
+                        "Route system audio and/or your default microphone into VB-CABLE so other apps can use the app output as a mic input.",
+                    )
+                    .size(11.5)
+                    .color(Self::muted_text_color()),
+                );
+
+                ui.add_space(10.0);
+                Frame::new()
+                    .fill(Self::surface_fill())
+                    .stroke(Stroke::new(1.0, Self::border_color()))
+                    .corner_radius(18.0)
+                    .inner_margin(Margin::same(14))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new("Driver")
+                                    .size(12.5)
+                                    .color(Self::strong_text_color())
+                                    .strong(),
+                            );
+                            ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                                let label = if self.stream_driver_busy {
+                                    "Working"
+                                } else if !self.stream_driver_checked {
+                                    "Checking"
+                                } else if self.stream_driver_installed {
+                                    "Installed"
+                                } else {
+                                    "Not installed"
+                                };
+                                ui.label(
+                                    RichText::new(label)
+                                        .size(11.5)
+                                        .color(Self::muted_text_color()),
+                                );
+                            });
+                        });
+                        ui.add_space(8.0);
+                        ui.horizontal(|ui| {
+                            let install = ui.add_enabled(
+                                !self.stream_driver_busy && !self.stream_driver_installed,
+                                Self::action_button(
+                                    RichText::new("Install").size(12.0),
+                                    false,
+                                    false,
+                                ),
+                            );
+                            Self::decorate_button_response(ui, &install);
+                            if install.clicked() {
+                                install_stream_driver = true;
+                            }
+
+                            let remove = ui.add_enabled(
+                                !self.stream_driver_busy,
+                                Self::action_button(
+                                    RichText::new("Remove").size(12.0),
+                                    false,
+                                    false,
+                                ),
+                            );
+                            Self::decorate_button_response(ui, &remove);
+                            if remove.clicked() {
+                                uninstall_stream_driver = true;
+                            }
+                        });
+                        if self.stream_driver_busy {
+                            ui.add_space(8.0);
+                            ui.horizontal(|ui| {
+                                ui.spinner();
+                                ui.label(
+                                    RichText::new("Updating stream driver...")
+                                        .size(11.0)
+                                        .color(Self::muted_text_color()),
+                                );
+                            });
+                        }
+                        if let Some(error) = self.stream_driver_error.as_ref() {
+                            ui.add_space(8.0);
+                            ui.label(
+                                RichText::new(error)
+                                    .size(11.0)
+                                    .color(Color32::from_rgb(171, 54, 91)),
+                            );
+                        }
+                    });
+
+                ui.add_space(10.0);
+                Frame::new()
+                    .fill(Self::surface_fill())
+                    .stroke(Stroke::new(1.0, Self::border_color()))
+                    .corner_radius(18.0)
+                    .inner_margin(Margin::same(14))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new("Route To Virtual Mic")
+                                    .size(12.5)
+                                    .color(Self::strong_text_color())
+                                    .strong(),
+                            );
+                            ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                                let routing_label = if snapshot.running { "Live" } else { "Idle" };
+                                ui.label(
+                                    RichText::new(routing_label)
+                                        .size(11.5)
+                                        .color(Self::muted_text_color()),
+                                );
+                            });
+                        });
+                        ui.add_space(8.0);
+                        ui.label(
+                            RichText::new("Microphone routing uses the current Windows default input device.")
+                                .size(11.0)
+                                .color(Self::muted_text_color()),
+                        );
+                        ui.add_space(10.0);
+                        ui.add_enabled_ui(self.stream_driver_installed && !self.stream_driver_busy, |ui| {
+                            routing_changed |= ui
+                                .checkbox(&mut self.stream_input_system_audio, "Capture system audio")
+                                .changed();
+                            routing_changed |= ui
+                                .checkbox(&mut self.stream_input_microphone, "Capture microphone")
+                                .changed();
+                        });
+                        if !self.stream_driver_installed {
+                            ui.add_space(6.0);
+                            ui.label(
+                                RichText::new("Install the stream driver first to expose the virtual mic.")
+                                    .size(11.0)
+                                    .color(Self::muted_text_color()),
+                            );
+                        }
+                        if let Some(target_name) = snapshot.target_device_name.as_ref() {
+                            ui.add_space(8.0);
+                            ui.label(
+                                RichText::new(format!("Target: {target_name}"))
+                                    .size(11.0)
+                                    .color(Self::muted_text_color()),
+                            );
+                        }
+                        if snapshot.running {
+                            ui.add_space(8.0);
+                            ui.add(
+                                ProgressBar::new(snapshot.level.clamp(0.0, 1.0))
+                                    .desired_width(ui.available_width())
+                                    .show_percentage(),
+                            );
+                        }
+                        if let Some(error) = snapshot.error.as_ref() {
+                            ui.add_space(8.0);
+                            ui.label(
+                                RichText::new(error)
+                                    .size(11.0)
+                                    .color(Color32::from_rgb(171, 54, 91)),
+                            );
+                        }
+                    });
+            });
+
+        self.show_stream_panel = open_panel;
+        if close_request {
+            self.show_stream_panel = false;
+        }
+        if routing_changed {
+            self.apply_stream_input_routing();
+        }
+        if install_stream_driver {
+            self.start_stream_driver_install(ctx);
+        }
+        if uninstall_stream_driver {
+            self.start_stream_driver_uninstall(ctx);
+        }
+    }
+
     fn render_settings_panel(&mut self, ctx: &Context) {
         if !self.show_settings_panel {
             return;
@@ -6186,6 +6470,7 @@ impl SoundFxApp {
 
     fn has_modal_panel(&self) -> bool {
         self.show_pitch_panel
+            || self.show_stream_panel
             || self.show_myinstants_panel
             || self.show_import_panel
             || self.show_download_panel
@@ -12404,6 +12689,7 @@ impl eframe::App for SoundFxApp {
         self.poll_demucs_install_result(ctx);
         self.poll_demucs_model_result(ctx);
         self.poll_stream_driver_result(ctx);
+        self.poll_stream_input_router(ctx);
         self.poll_vocal_separation_jobs(ctx);
         self.poll_tts_jobs(ctx);
         self.prune_copy_feedback(ctx);
@@ -12617,6 +12903,7 @@ impl eframe::App for SoundFxApp {
         self.render_import_panel(ctx);
         self.render_record_panel(ctx);
         self.render_record_review_panel(ctx);
+        self.render_stream_panel(ctx);
         self.render_settings_panel(ctx);
         self.render_video_viewer_panel(ctx);
         self.render_pitch_monitor(ctx);

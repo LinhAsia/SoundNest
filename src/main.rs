@@ -12,6 +12,7 @@ mod record_video;
 mod recorder;
 mod storage;
 mod stream_driver;
+mod stream_input;
 mod vocal_separation;
 
 use app::SoundFxApp;
