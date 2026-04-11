@@ -10753,8 +10753,17 @@ impl SoundFxApp {
                 let half_h = egui::lerp((base * 0.13)..=(target_rect.height() * 0.5), t);
                 let exponent = egui::lerp(2.2..=6.4, t);
                 let wobble = (1.0 - t).powf(1.4) * 0.24;
-                let square_seed = ((t - 0.08) / 0.66).clamp(0.0, 1.0);
-                let square_morph = square_seed * square_seed * (3.0 - 2.0 * square_seed);
+                let square_morph = match phase {
+                    TransitionPhase::Intro => {
+                        let square_seed = ((t - 0.08) / 0.66).clamp(0.0, 1.0);
+                        square_seed * square_seed * (3.0 - 2.0 * square_seed)
+                    }
+                    TransitionPhase::Outro => {
+                        let release = 1.0 - (1.0 - (progress / 0.82).clamp(0.0, 1.0)).powi(3);
+                        (1.0 - release).clamp(0.0, 1.0)
+                    }
+                    TransitionPhase::Live => 1.0,
+                };
                 let ornament_alpha = if phase == TransitionPhase::Intro && progress >= 0.50 {
                     0.0
                 } else {
@@ -11135,7 +11144,9 @@ impl SoundFxApp {
                             ),
                         );
                     }
+                }
 
+                if !blob_only_transition {
                     let aura_layers = [
                         (
                             Pos2::new(center.x, center.y + base * 0.02),
