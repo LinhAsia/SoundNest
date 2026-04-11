@@ -13020,16 +13020,8 @@ impl eframe::App for SoundFxApp {
                                 );
                             });
                         }
-                    });
+                });
                 self.app_frame_rect = Some(frame_response.response.rect);
-
-                ui.painter().rect_filled(frame_response.response.rect, frame_radius, Self::page_fill());
-                ui.painter().rect_stroke(
-                    frame_response.response.rect,
-                    frame_radius,
-                    Stroke::new(1.0, Self::border_color()),
-                    StrokeKind::Outside,
-                );
 
                 if live_ui_overlay_alpha > 0.0 {
                     ui.painter().rect(
