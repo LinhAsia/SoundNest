@@ -7588,12 +7588,10 @@ impl SoundFxApp {
         }
         ui.add_space(12.0);
 
-        let library_clip = ui.max_rect().shrink2(vec2(32.0, 12.0));
         ScrollArea::vertical()
             .drag_to_scroll(false)
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                ui.set_clip_rect(ui.clip_rect().intersect(library_clip));
                 if self.library_tab == LibraryTab::Videos {
                     self.draw_video_library_grid(ui);
                     return;
