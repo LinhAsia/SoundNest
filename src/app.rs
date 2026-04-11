@@ -7602,10 +7602,10 @@ impl SoundFxApp {
                     return;
                 }
 
-                let spacing = 16.0;
-                let side_padding = 36.0;
+                let spacing = 14.0;
+                let side_padding = 24.0;
                 let available_width = (ui.available_width() - side_padding * 2.0).max(180.0);
-                let target_card = (204.0 * self.library_grid_scale).clamp(150.0, 220.0);
+                let target_card = (204.0 * self.library_grid_scale).clamp(120.0, 220.0);
                 let sounds = self.filtered_library_sounds();
                 if sounds.is_empty() {
                     Self::draw_empty_editor(ui);
@@ -7622,7 +7622,7 @@ impl SoundFxApp {
                     .max(1);
                 let card_size = ((available_width - spacing * (columns.saturating_sub(1)) as f32)
                     / columns as f32)
-                    .clamp(150.0, 220.0);
+                    .clamp(120.0, 220.0);
                 let row_count = sounds.len().div_ceil(columns);
 
                 for (row_index, row) in sounds.chunks(columns).enumerate() {
@@ -7886,15 +7886,15 @@ impl SoundFxApp {
             return;
         }
 
-        let spacing = 16.0;
-        let side_padding = 30.0;
+        let spacing = 14.0;
+        let side_padding = 24.0;
         let available_width = (ui.available_width() - side_padding * 2.0).max(180.0);
-        let target_card = (204.0 * self.library_grid_scale).clamp(150.0, 220.0);
+        let target_card = (204.0 * self.library_grid_scale).clamp(120.0, 220.0);
         let columns =
             (((available_width + spacing) / (target_card + spacing)).floor() as usize).max(1);
         let card_size = ((available_width - spacing * (columns.saturating_sub(1)) as f32)
             / columns as f32)
-            .clamp(150.0, 220.0);
+            .clamp(120.0, 220.0);
         let row_count = videos.len().div_ceil(columns);
         let mut open_video: Option<VideoAsset> = None;
         let mut copy_video: Option<VideoAsset> = None;
@@ -10763,15 +10763,15 @@ impl SoundFxApp {
         let base_height: f32 = 396.0;
         let available_popup_width = (popup_bounds.width() - 12.0).max(0.0);
         let available_popup_height = (popup_bounds.height() - 12.0).max(0.0);
-        let popup_width = if available_popup_width < 320.0 {
+        let popup_width = if available_popup_width < 260.0 {
             available_popup_width.max(1.0)
         } else {
-            available_popup_width.min(base_width).max(320.0)
+            available_popup_width.min(base_width).max(260.0)
         };
-        let popup_height = if available_popup_height < 280.0 {
+        let popup_height = if available_popup_height < 260.0 {
             available_popup_height.max(1.0)
         } else {
-            available_popup_height.min(base_height).max(280.0)
+            available_popup_height.min(base_height).max(260.0)
         };
         let popup_size = vec2(
             popup_width,
@@ -10841,8 +10841,7 @@ impl SoundFxApp {
                     .inner_margin(Margin::same(12))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            let button_width = 5.0 * 46.0 + 4.0 * 8.0 + 10.0;
-                            let text_width = (ui.available_width() - button_width - 10.0).max(120.0);
+                            let text_width = (ui.available_width() - 44.0).max(120.0);
                             let response = ui.add_sized(
                                 [text_width, 42.0],
                                 TextEdit::singleline(&mut sound.name)
@@ -10854,7 +10853,17 @@ impl SoundFxApp {
                                 changed = true;
                             }
 
-                            ui.add_space(10.0);
+                            ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                                if Self::icon_titlebar(ui, [34.0, 34.0], 0xe5cd, false, true)
+                                    .clicked()
+                                {
+                                    close_request = true;
+                                }
+                            });
+                        });
+
+                        ui.add_space(10.0);
+                        ui.horizontal_wrapped(|ui| {
                             if Self::icon_action(
                                 ui,
                                 [56.0, 34.0],
