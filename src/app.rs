@@ -6640,8 +6640,10 @@ impl SoundFxApp {
         let host_rect = self
             .app_frame_rect
             .unwrap_or_else(|| ctx.screen_rect().shrink(18.0));
-        let min_side = host_rect.width().min(host_rect.height());
-        let edge_inset = (APP_FRAME_RADIUS + min_side * 0.03).clamp(18.0, 48.0);
+        let width_pressure = ((960.0 - host_rect.width()).max(0.0) * 0.16).clamp(0.0, 56.0);
+        let height_pressure = ((760.0 - host_rect.height()).max(0.0) * 0.12).clamp(0.0, 36.0);
+        let edge_inset = (APP_FRAME_RADIUS + 20.0 + width_pressure.max(height_pressure))
+            .clamp(26.0, 92.0);
         let max_inset_x = ((host_rect.width() - 1.0) * 0.5).max(0.0);
         let max_inset_y = ((host_rect.height() - 1.0) * 0.5).max(0.0);
         let inset_x = edge_inset.min(max_inset_x);
@@ -6668,9 +6670,11 @@ impl SoundFxApp {
         y_offset: f32,
     ) -> (Rect, Vec2, Pos2) {
         let safe_rect = self.modal_safe_rect(ctx);
+        let soft_width = (safe_rect.width() * 0.92).max(1.0);
+        let soft_height = (safe_rect.height() * 0.94).max(1.0);
         let panel_size = vec2(
-            Self::fit_modal_dimension(safe_rect.width(), desired_size.x, min_size.x),
-            Self::fit_modal_dimension(safe_rect.height(), desired_size.y, min_size.y),
+            Self::fit_modal_dimension(soft_width, desired_size.x, min_size.x),
+            Self::fit_modal_dimension(soft_height, desired_size.y, min_size.y),
         );
         let panel_pos = Pos2::new(
             (safe_rect.center().x - panel_size.x * 0.5)
@@ -7688,8 +7692,10 @@ impl SoundFxApp {
                 }
 
                 let spacing = 14.0;
-                let side_padding = (ui.available_width() * 0.025).clamp(8.0, 24.0);
-                let available_width = (ui.available_width() - side_padding * 2.0).max(180.0);
+                let side_padding = (ui.available_width() * 0.03).clamp(12.0, 28.0);
+                let edge_reserve = (ui.available_width() * 0.06).clamp(20.0, 52.0);
+                let available_width =
+                    (ui.available_width() - side_padding * 2.0 - edge_reserve).max(156.0);
                 let target_card = (204.0 * self.library_grid_scale).clamp(120.0, 220.0);
                 let sounds = self.filtered_library_sounds();
                 if sounds.is_empty() {
@@ -7972,8 +7978,10 @@ impl SoundFxApp {
         }
 
         let spacing = 14.0;
-        let side_padding = (ui.available_width() * 0.025).clamp(8.0, 24.0);
-        let available_width = (ui.available_width() - side_padding * 2.0).max(180.0);
+        let side_padding = (ui.available_width() * 0.03).clamp(12.0, 28.0);
+        let edge_reserve = (ui.available_width() * 0.06).clamp(20.0, 52.0);
+        let available_width =
+            (ui.available_width() - side_padding * 2.0 - edge_reserve).max(156.0);
         let target_card = (204.0 * self.library_grid_scale).clamp(120.0, 220.0);
         let columns =
             (((available_width + spacing) / (target_card + spacing)).floor() as usize).max(1);
