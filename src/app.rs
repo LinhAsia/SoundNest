@@ -10667,7 +10667,8 @@ impl SoundFxApp {
                 let light_wave_primary = Color32::from_rgb(214, 51, 132);
                 let light_wave_secondary = Color32::from_rgb(229, 85, 149);
                 let light_wave_glow = (246, 124, 181);
-                let blob_only_transition = true;
+                let blob_only_transition = false;
+                let transparent_transition_backdrop = true;
                 let (rose_ice, berry, magenta, plum, deep_plum, star_rgb, star_alpha_scale) =
                     if intro_monochrome {
                         (
@@ -10759,10 +10760,16 @@ impl SoundFxApp {
                 } else {
                     ornament_alpha * (1.0 - square_morph).powf(1.7)
                 };
-                let content_alpha = if intro_light_fade {
-                    1.0
+                let preview_content_alpha =
+                    Self::ease_in_out_cubic(((square_morph - 0.16) / 0.72).clamp(0.0, 1.0));
+                let content_alpha = if blob_only_transition {
+                    if intro_light_fade {
+                        1.0
+                    } else {
+                        ornament_alpha
+                    }
                 } else {
-                    ornament_alpha
+                    preview_content_alpha
                 };
                 let mut card_fill = Self::with_alpha(
                     Self::lerp_color(
@@ -11042,7 +11049,7 @@ impl SoundFxApp {
                     return;
                 }
 
-                if !blob_only_transition && self.dark_theme {
+                if !blob_only_transition && !transparent_transition_backdrop && self.dark_theme {
                     painter.circle_filled(
                         center,
                         base * 0.56,
@@ -11073,7 +11080,10 @@ impl SoundFxApp {
                             layer_alpha * ornament_alpha,
                         ),
                     );
-                } else if !blob_only_transition && phase != TransitionPhase::Live {
+                } else if !blob_only_transition
+                    && !transparent_transition_backdrop
+                    && phase != TransitionPhase::Live
+                {
                     painter.circle_filled(
                         center,
                         base * 0.52,
@@ -11102,7 +11112,7 @@ impl SoundFxApp {
                     );
                 }
 
-                if !blob_only_transition {
+                if !blob_only_transition && !transparent_transition_backdrop {
                     for star_index in 0..16 {
                         let seed = star_index as f32 * 11.713;
                         let px =
