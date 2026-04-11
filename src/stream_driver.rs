@@ -4,6 +4,10 @@ mod windows_impl {
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::process::Command;
+    use wasapi::{Direction, Role, get_default_device_for_role};
+    use windows::Win32::Media::Audio::{ERole, eCommunications, eConsole, eMultimedia};
+    use windows::Win32::System::Com::{CLSCTX_ALL, CoCreateInstance};
+    use windows::core::{GUID, HRESULT, HSTRING, IUnknown, IUnknown_Vtbl, Interface, PCWSTR};
 
     const CABLE_DOWNLOAD_URL: &str =
         "https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip";
@@ -17,6 +21,93 @@ mod windows_impl {
         published_name: String,
         original_name: String,
         provider_name: String,
+    }
+
+    #[repr(transparent)]
+    #[derive(Clone, PartialEq, Eq)]
+    struct IPolicyConfig(IUnknown);
+
+    unsafe impl Interface for IPolicyConfig {
+        type Vtable = IPolicyConfig_Vtbl;
+        const IID: GUID = GUID::from_u128(0xf8679f50_850a_41cf_9c72_430f290290c8);
+    }
+
+    #[repr(C)]
+    struct IPolicyConfig_Vtbl {
+        base__: IUnknown_Vtbl,
+        get_mix_format: usize,
+        get_device_format: usize,
+        reset_device_format: usize,
+        set_device_format: usize,
+        get_processing_period: usize,
+        set_processing_period: usize,
+        get_share_mode: usize,
+        set_share_mode: usize,
+        get_property_value: usize,
+        set_property_value: usize,
+        set_default_endpoint: unsafe extern "system" fn(
+            this: *mut core::ffi::c_void,
+            device_id: PCWSTR,
+            role: ERole,
+        ) -> HRESULT,
+        set_endpoint_visibility: usize,
+    }
+
+    #[derive(Clone)]
+    struct DefaultRenderEndpoint {
+        role: ERole,
+        device_id: String,
+    }
+
+    fn snapshot_default_render_endpoints() -> Vec<DefaultRenderEndpoint> {
+        let mut entries = Vec::new();
+        for (role, wasapi_role) in [
+            (eConsole, Role::Console),
+            (eMultimedia, Role::Multimedia),
+            (eCommunications, Role::Communications),
+        ] {
+            if let Ok(device) = get_default_device_for_role(&Direction::Render, &wasapi_role)
+                && let Ok(device_id) = device.get_id()
+            {
+                entries.push(DefaultRenderEndpoint { role, device_id });
+            }
+        }
+        entries
+    }
+
+    fn restore_default_render_endpoints(entries: &[DefaultRenderEndpoint]) -> Result<(), String> {
+        if entries.is_empty() {
+            return Ok(());
+        }
+
+        let policy: IPolicyConfig = unsafe {
+            CoCreateInstance(
+                &GUID::from_u128(0x870af99c_171d_4f9e_af0d_e63df40c2bc9),
+                None,
+                CLSCTX_ALL,
+            )
+        }
+        .map_err(|error| format!("Unable to create audio policy client: {error}"))?;
+
+        for entry in entries {
+            let device_id = HSTRING::from(entry.device_id.as_str());
+            unsafe {
+                (Interface::vtable(&policy).set_default_endpoint)(
+                    Interface::as_raw(&policy),
+                    PCWSTR(device_id.as_ptr()),
+                    entry.role,
+                )
+            }
+            .ok()
+            .map_err(|error| {
+                format!(
+                    "Unable to restore previous default audio output for role {:?}: {error}",
+                    entry.role
+                )
+            })?;
+        }
+
+        Ok(())
     }
 
     fn hidden_command(program: &Path) -> Command {
@@ -432,6 +523,7 @@ mod windows_impl {
     }
 
     pub fn install_stream_driver() -> Result<(), String> {
+        let prior_defaults = snapshot_default_render_endpoints();
         let mut cleanup_errors = Vec::new();
         if has_voicemeeter_traces() {
             if let Err(error) = uninstall_legacy_voicemeeter() {
@@ -451,9 +543,16 @@ mod windows_impl {
         let inf_string = inf.display().to_string();
         run_elevated_pnputil(&["/add-driver", &inf_string, "/install"])?;
         let _ = run_elevated_pnputil(&["/scan-devices"]);
+        if let Err(error) = restore_default_render_endpoints(&prior_defaults) {
+            cleanup_errors.push(error);
+        }
 
         if is_stream_driver_installed() {
-            Ok(())
+            if cleanup_errors.is_empty() {
+                Ok(())
+            } else {
+                Err(cleanup_errors.join("\n"))
+            }
         } else if cleanup_errors.is_empty() {
             Err(
                 "VB-CABLE setup finished but Windows has not exposed the cable yet. A reboot may be required."

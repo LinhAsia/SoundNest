@@ -292,7 +292,7 @@ fn open_capture_source(
     use wasapi::{DeviceCollection, Direction, StreamMode, get_default_device};
 
     let device = match source {
-        PitchSource::System => get_default_device(&Direction::Render)?,
+        PitchSource::System => resolve_system_loopback_device()?,
         PitchSource::Microphone => {
             if let Some(device_name) = device_name {
                 DeviceCollection::new(&Direction::Capture)?.get_device_with_name(device_name)?
@@ -325,6 +325,31 @@ fn open_capture_source(
         byte_queue: VecDeque::with_capacity(ROUTE_FRAME_BYTES * 4096),
         sample_queue: VecDeque::with_capacity(MAX_SAMPLE_QUEUE),
     })
+}
+
+#[cfg(windows)]
+fn resolve_system_loopback_device() -> Result<wasapi::Device> {
+    use wasapi::{DeviceCollection, Direction, get_default_device};
+
+    let default_device = get_default_device(&Direction::Render)?;
+    let default_name = default_device
+        .get_friendlyname()
+        .unwrap_or_else(|_| String::new())
+        .to_ascii_lowercase();
+    if !default_name.contains("cable input") {
+        return Ok(default_device);
+    }
+
+    let devices = DeviceCollection::new(&Direction::Render)?;
+    for device in &devices {
+        let device = device?;
+        let name = device.get_friendlyname()?.to_ascii_lowercase();
+        if !name.contains("cable input") && !name.contains("cable output") {
+            return Ok(device);
+        }
+    }
+
+    Ok(default_device)
 }
 
 #[cfg(windows)]

@@ -258,6 +258,8 @@ pub struct SoundFxApp {
     record_input_source: PitchInputSource,
     record_capture_devices: Vec<String>,
     selected_record_input_device: Option<String>,
+    stream_input_capture_devices: Vec<String>,
+    selected_stream_input_device: Option<String>,
     record_hotkey: Option<egui::Key>,
     pitch_hotkey: Option<egui::Key>,
     capture_record_hotkey: bool,
@@ -432,6 +434,8 @@ impl SoundFxApp {
         let selected_pitch_input_device = pitch_capture_devices.first().cloned();
         let record_capture_devices = pitch_capture_devices.clone();
         let selected_record_input_device = record_capture_devices.first().cloned();
+        let stream_input_capture_devices = pitch_capture_devices.clone();
+        let selected_stream_input_device = stream_input_capture_devices.first().cloned();
         let record_hotkey = storage
             .load_record_hotkey()
             .ok()
@@ -496,6 +500,8 @@ impl SoundFxApp {
             record_input_source: PitchInputSource::System,
             record_capture_devices,
             selected_record_input_device,
+            stream_input_capture_devices,
+            selected_stream_input_device,
             record_hotkey,
             pitch_hotkey,
             capture_record_hotkey: false,
@@ -1357,6 +1363,28 @@ impl SoundFxApp {
                 {
                     self.selected_record_input_device =
                         self.record_capture_devices.first().cloned();
+                }
+                self.clear_status();
+            }
+            Err(error) => self.set_error_status(error),
+        }
+    }
+
+    fn refresh_stream_input_capture_devices(&mut self) {
+        match list_capture_devices() {
+            Ok(devices) => {
+                self.stream_input_capture_devices = devices;
+                if !self
+                    .selected_stream_input_device
+                    .as_ref()
+                    .is_some_and(|selected| {
+                        self.stream_input_capture_devices
+                            .iter()
+                            .any(|name| name == selected)
+                    })
+                {
+                    self.selected_stream_input_device =
+                        self.stream_input_capture_devices.first().cloned();
                 }
                 self.clear_status();
             }
@@ -3302,7 +3330,7 @@ impl SoundFxApp {
             Some(StreamInputConfig {
                 capture_system_audio: self.stream_input_system_audio,
                 capture_microphone: self.stream_input_microphone,
-                microphone_device_name: None,
+                microphone_device_name: self.selected_stream_input_device.clone(),
             })
         } else {
             None
@@ -4108,6 +4136,7 @@ impl SoundFxApp {
                 );
                 Self::decorate_button_response(ui, &stream_response);
                 if stream_response.clicked() {
+                    self.refresh_stream_input_capture_devices();
                     self.show_stream_panel = !self.show_stream_panel;
                 }
 
@@ -5380,7 +5409,7 @@ impl SoundFxApp {
             .title_bar(false)
             .resizable(false)
             .collapsible(false)
-            .fixed_size(vec2(344.0, 286.0))
+            .fixed_size(vec2(344.0, 344.0))
             .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
             .frame(
                 Frame::new()
@@ -5524,7 +5553,9 @@ impl SoundFxApp {
                         });
                         ui.add_space(8.0);
                         ui.label(
-                            RichText::new("Microphone routing uses the current Windows default input device.")
+                            RichText::new(
+                                "Pick the microphone to mix in. In Discord or any other app, choose CABLE Output as the mic input.",
+                            )
                                 .size(11.0)
                                 .color(Self::muted_text_color()),
                         );
@@ -5536,6 +5567,39 @@ impl SoundFxApp {
                             routing_changed |= ui
                                 .checkbox(&mut self.stream_input_microphone, "Capture microphone")
                                 .changed();
+                            ui.add_space(8.0);
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new("Mic device")
+                                        .size(11.5)
+                                        .color(Self::muted_text_color()),
+                                );
+                                let before = self.selected_stream_input_device.clone();
+                                ComboBox::from_id_salt("stream-input-mic-device")
+                                    .width(190.0)
+                                    .selected_text(
+                                        self.selected_stream_input_device
+                                            .as_deref()
+                                            .unwrap_or("Default microphone"),
+                                    )
+                                    .show_ui(ui, |ui| {
+                                        for name in &self.stream_input_capture_devices {
+                                            ui.selectable_value(
+                                                &mut self.selected_stream_input_device,
+                                                Some(name.clone()),
+                                                name,
+                                            );
+                                        }
+                                    });
+                                if self.selected_stream_input_device != before {
+                                    routing_changed = true;
+                                }
+                                if Self::icon_titlebar(ui, [30.0, 26.0], 0xe5d5, false, false)
+                                    .clicked()
+                                {
+                                    self.refresh_stream_input_capture_devices();
+                                }
+                            });
                         });
                         if !self.stream_driver_installed {
                             ui.add_space(6.0);
