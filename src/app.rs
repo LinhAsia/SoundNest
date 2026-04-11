@@ -6598,6 +6598,11 @@ impl SoundFxApp {
         CornerRadius::same(APP_FRAME_RADIUS.min(max_radius).round().clamp(0.0, 255.0) as u8)
     }
 
+    fn main_frame_inner_margin(rect: Rect) -> i8 {
+        let padding = (rect.width().min(rect.height()) * 0.04).clamp(18.0, 30.0);
+        padding.round() as i8
+    }
+
     fn render_pitch_monitor(&mut self, ctx: &Context) {
         if self.is_transition_active() {
             return;
@@ -7583,7 +7588,7 @@ impl SoundFxApp {
         }
         ui.add_space(12.0);
 
-        let library_clip = ui.max_rect().shrink2(vec2(24.0, 8.0));
+        let library_clip = ui.max_rect().shrink2(vec2(32.0, 12.0));
         ScrollArea::vertical()
             .drag_to_scroll(false)
             .auto_shrink([false, false])
@@ -7600,7 +7605,7 @@ impl SoundFxApp {
                 }
 
                 let spacing = 16.0;
-                let side_padding = 30.0;
+                let side_padding = 36.0;
                 let available_width = (ui.available_width() - side_padding * 2.0).max(180.0);
                 let target_card = (204.0 * self.library_grid_scale).clamp(150.0, 220.0);
                 let sounds = self.filtered_library_sounds();
@@ -12989,13 +12994,14 @@ impl eframe::App for SoundFxApp {
             .show(ctx, |ui| {
                 let frame_rect = ui.max_rect();
                 let frame_radius = Self::main_frame_corner_radius(frame_rect);
+                let frame_margin = Self::main_frame_inner_margin(frame_rect);
                 let frame_response = Frame::new()
                     .fill(Self::page_fill())
                     .stroke(Stroke::new(1.0, Self::border_color()))
                     .shadow(Shadow::NONE)
                     .corner_radius(frame_radius)
                     .outer_margin(Margin::same(APP_OUTER_MARGIN as i8))
-                    .inner_margin(Margin::same(16))
+                    .inner_margin(Margin::same(frame_margin))
                     .show(ui, |ui| {
                         self.draw_titlebar(ui, ctx);
                         ui.add_space(14.0);
