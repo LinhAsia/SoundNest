@@ -13010,12 +13010,6 @@ impl eframe::App for SoundFxApp {
                     .outer_margin(Margin::same(APP_OUTER_MARGIN as i8))
                     .inner_margin(Margin::same(frame_margin))
                     .show(ui, |ui| {
-                        let clip_inset = (APP_FRAME_RADIUS
-                            .min((frame_rect.width().min(frame_rect.height()) * 0.5) - 1.0)
-                            .max(0.0))
-                            * 0.82;
-                        let clip_rect = ui.max_rect().shrink(clip_inset);
-                        ui.set_clip_rect(ui.clip_rect().intersect(clip_rect));
                         self.draw_titlebar(ui, ctx);
                         ui.add_space(14.0);
 
