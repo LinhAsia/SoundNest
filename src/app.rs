@@ -7671,8 +7671,12 @@ impl SoundFxApp {
 
         ScrollArea::vertical()
             .drag_to_scroll(false)
-            .auto_shrink([false, false])
+            .auto_shrink([true, false])
             .show(ui, |ui| {
+                let viewport_width = ui.available_width();
+                ui.set_width(viewport_width);
+                ui.set_max_width(viewport_width);
+
                 if self.library_tab == LibraryTab::Videos {
                     self.draw_video_library_grid(ui);
                     return;
@@ -7684,7 +7688,7 @@ impl SoundFxApp {
                 }
 
                 let spacing = 14.0;
-                let side_padding = 24.0;
+                let side_padding = (ui.available_width() * 0.025).clamp(8.0, 24.0);
                 let available_width = (ui.available_width() - side_padding * 2.0).max(180.0);
                 let target_card = (204.0 * self.library_grid_scale).clamp(120.0, 220.0);
                 let sounds = self.filtered_library_sounds();
@@ -7968,7 +7972,7 @@ impl SoundFxApp {
         }
 
         let spacing = 14.0;
-        let side_padding = 24.0;
+        let side_padding = (ui.available_width() * 0.025).clamp(8.0, 24.0);
         let available_width = (ui.available_width() - side_padding * 2.0).max(180.0);
         let target_card = (204.0 * self.library_grid_scale).clamp(120.0, 220.0);
         let columns =
