@@ -5628,8 +5628,9 @@ impl SoundFxApp {
                         ui.checkbox(&mut self.stream_input_show_waveform, "Show live wave");
                         if snapshot.running {
                             ui.add_space(8.0);
+                            let meter_level = Self::boost_stream_meter_level(snapshot.level);
                             ui.add(
-                                ProgressBar::new(snapshot.level.clamp(0.0, 1.0))
+                                ProgressBar::new(meter_level)
                                     .desired_width(ui.available_width())
                                     .show_percentage(),
                             );
@@ -6590,6 +6591,11 @@ impl SoundFxApp {
                     Color32::from_rgba_premultiplied(22, 16, 22, 132),
                 );
             });
+    }
+
+    fn main_frame_corner_radius(rect: Rect) -> CornerRadius {
+        let max_radius = ((rect.width().min(rect.height()) * 0.5) - 1.0).max(0.0);
+        CornerRadius::same(APP_FRAME_RADIUS.min(max_radius).round().clamp(0.0, 255.0) as u8)
     }
 
     fn render_pitch_monitor(&mut self, ctx: &Context) {
@@ -9539,7 +9545,8 @@ impl SoundFxApp {
         };
         for (index, value) in data.iter().enumerate() {
             let x = inner.left() + (index as f32 + 0.5) * bar_width;
-            let half = value.clamp(0.04, 1.0) * inner.height() * 0.44;
+            let amplitude = Self::boost_stream_meter_level(*value);
+            let half = amplitude * inner.height() * 0.44;
             let bar = Rect::from_min_max(
                 Pos2::new(x - bar_width * 0.22, inner.center().y - half),
                 Pos2::new(x + bar_width * 0.22, inner.center().y + half),
@@ -9577,7 +9584,7 @@ impl SoundFxApp {
         let wave_left = inner.center().x - wave_width * 0.5;
         let bar_width = wave_width / waveform.len() as f32;
         for (index, level) in waveform.iter().enumerate() {
-            let amplitude = level.clamp(0.06, 1.0);
+            let amplitude = Self::boost_stream_meter_level(*level);
             let center_x = wave_left + (index as f32 + 0.5) * bar_width;
             let half = amplitude * inner.height() * 0.42;
             let wave_rect = Rect::from_min_max(
@@ -9603,6 +9610,11 @@ impl SoundFxApp {
                 Stroke::new(2.0, active_color),
             );
         }
+    }
+
+    fn boost_stream_meter_level(level: f32) -> f32 {
+        let level = level.clamp(0.0, 1.0);
+        (level * 6.0).sqrt().clamp(0.12, 1.0)
     }
 
     fn render_tts_download_tab(&mut self, ui: &mut Ui, ctx: &Context) {
@@ -12975,11 +12987,13 @@ impl eframe::App for SoundFxApp {
         CentralPanel::default()
             .frame(Frame::new().fill(root_fill).inner_margin(0.0))
             .show(ctx, |ui| {
+                let frame_rect = ui.max_rect();
+                let frame_radius = Self::main_frame_corner_radius(frame_rect);
                 let frame_response = Frame::new()
                     .fill(Self::page_fill())
                     .stroke(Stroke::new(1.0, Self::border_color()))
                     .shadow(Shadow::NONE)
-                    .corner_radius(CornerRadius::same(APP_FRAME_RADIUS as u8))
+                    .corner_radius(frame_radius)
                     .outer_margin(Margin::same(APP_OUTER_MARGIN as i8))
                     .inner_margin(Margin::same(16))
                     .show(ui, |ui| {
@@ -13009,10 +13023,18 @@ impl eframe::App for SoundFxApp {
                     });
                 self.app_frame_rect = Some(frame_response.response.rect);
 
+                ui.painter().rect_filled(frame_response.response.rect, frame_radius, Self::page_fill());
+                ui.painter().rect_stroke(
+                    frame_response.response.rect,
+                    frame_radius,
+                    Stroke::new(1.0, Self::border_color()),
+                    StrokeKind::Outside,
+                );
+
                 if live_ui_overlay_alpha > 0.0 {
                     ui.painter().rect(
                         frame_response.response.rect,
-                        CornerRadius::same(APP_FRAME_RADIUS as u8),
+                        frame_radius,
                         Color32::from_rgba_premultiplied(
                             0,
                             0,
