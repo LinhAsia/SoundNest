@@ -191,16 +191,22 @@ fn run_loop(
     }
 
     let mut system_source = if config.capture_system_audio {
-        Some(open_capture_source(PitchSource::System, None, &desired_format)?)
+        Some(
+            open_capture_source(PitchSource::System, None, &desired_format)
+                .context("unable to capture system audio")?,
+        )
     } else {
         None
     };
     let mut mic_source = if config.capture_microphone {
-        Some(open_capture_source(
-            PitchSource::Microphone,
-            config.microphone_device_name.as_deref(),
-            &desired_format,
-        )?)
+        Some(
+            open_capture_source(
+                PitchSource::Microphone,
+                config.microphone_device_name.as_deref(),
+                &desired_format,
+            )
+            .context("unable to capture microphone audio")?,
+        )
     } else {
         None
     };
@@ -304,18 +310,15 @@ fn open_capture_source(
 
     let mut audio_client = device.get_iaudioclient()?;
     let (_, min_time) = audio_client.get_device_period()?;
-    let direction = match source {
-        PitchSource::System => Direction::Render,
-        PitchSource::Microphone => Direction::Capture,
-    };
     audio_client.initialize_client(
         desired_format,
-        &direction,
-        &StreamMode::PollingShared {
+        &Direction::Capture,
+        &StreamMode::EventsShared {
             autoconvert: true,
             buffer_duration_hns: min_time,
         },
     )?;
+    let _ = audio_client.set_get_eventhandle()?;
     let capture_client = audio_client.get_audiocaptureclient()?;
     audio_client.start_stream()?;
 

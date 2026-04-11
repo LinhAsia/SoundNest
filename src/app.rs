@@ -3343,12 +3343,11 @@ impl SoundFxApp {
 
     fn poll_stream_input_router(&mut self, ctx: &Context) {
         let snapshot = self.stream_input_router.snapshot();
-        if snapshot.running {
+        if snapshot.running || snapshot.error.is_some() {
             ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
         }
         if let Some(error) = snapshot.error {
             self.set_error_status(error);
-            let _ = self.stream_input_router.configure(None);
         }
     }
 
@@ -5543,7 +5542,13 @@ impl SoundFxApp {
                                     .strong(),
                             );
                             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                                let routing_label = if snapshot.running { "Live" } else { "Idle" };
+                                let routing_label = if snapshot.error.is_some() {
+                                    "Error"
+                                } else if snapshot.running {
+                                    "Live"
+                                } else {
+                                    "Idle"
+                                };
                                 ui.label(
                                     RichText::new(routing_label)
                                         .size(11.5)
