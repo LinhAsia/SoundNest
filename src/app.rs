@@ -10763,9 +10763,21 @@ impl SoundFxApp {
         );
         let base_width: f32 = 840.0;
         let base_height: f32 = 396.0;
+        let available_popup_width = (popup_bounds.width() - 12.0).max(0.0);
+        let available_popup_height = (popup_bounds.height() - 12.0).max(0.0);
+        let popup_width = if available_popup_width < 320.0 {
+            available_popup_width.max(1.0)
+        } else {
+            available_popup_width.min(base_width).max(320.0)
+        };
+        let popup_height = if available_popup_height < 280.0 {
+            available_popup_height.max(1.0)
+        } else {
+            available_popup_height.min(base_height).max(280.0)
+        };
         let popup_size = vec2(
-            (popup_bounds.width() - 12.0).clamp(360.0, base_width),
-            (popup_bounds.height() - 12.0).clamp(320.0, base_height),
+            popup_width,
+            popup_height,
         );
         let popup_pos = Pos2::new(
             (popup_bounds.center().x - popup_size.x * 0.5)
@@ -10832,7 +10844,7 @@ impl SoundFxApp {
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             let button_width = 5.0 * 46.0 + 4.0 * 8.0 + 10.0;
-                            let text_width = (ui.available_width() - button_width).max(320.0);
+                            let text_width = (ui.available_width() - button_width - 10.0).max(120.0);
                             let response = ui.add_sized(
                                 [text_width, 42.0],
                                 TextEdit::singleline(&mut sound.name)
