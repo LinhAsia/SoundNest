@@ -27,6 +27,7 @@ pub struct StreamInputSnapshot {
     pub capture_microphone: bool,
     pub target_device_name: Option<String>,
     pub level: f32,
+    pub waveform: Vec<f32>,
     pub error: Option<String>,
 }
 
@@ -38,6 +39,7 @@ impl Default for StreamInputSnapshot {
             capture_microphone: false,
             target_device_name: None,
             level: 0.0,
+            waveform: Vec::new(),
             error: None,
         }
     }
@@ -102,6 +104,7 @@ impl StreamInputRouter {
                     state.capture_microphone = config_for_thread.capture_microphone;
                     state.target_device_name = None;
                     state.level = 0.0;
+                    state.waveform.clear();
                     state.error = None;
                 }
                 let result = run_loop(Arc::clone(&snapshot), stop_for_thread, config_for_thread);
@@ -135,6 +138,8 @@ const ROUTE_CHANNELS: usize = 2;
 const ROUTE_FRAME_BYTES: usize = ROUTE_CHANNELS * std::mem::size_of::<f32>();
 #[cfg(windows)]
 const MAX_SAMPLE_QUEUE: usize = ROUTE_SAMPLE_RATE * ROUTE_CHANNELS * 3;
+#[cfg(windows)]
+const STREAM_WAVE_BUCKETS: usize = 40;
 
 #[cfg(windows)]
 struct CaptureSource {
@@ -264,6 +269,8 @@ fn run_loop(
             };
             let mut state = snapshot.lock().unwrap();
             state.level = state.level * 0.72 + instant_level * 0.28;
+            let wave_level = state.level.max(instant_level);
+            push_wave_level(&mut state.waveform, wave_level);
             state.error = None;
         }
 
@@ -393,27 +400,49 @@ fn pop_stereo_frame(queue: &mut VecDeque<f32>) -> Option<[f32; 2]> {
 }
 
 #[cfg(windows)]
+fn push_wave_level(waveform: &mut Vec<f32>, level: f32) {
+    waveform.push(level.clamp(0.04, 1.0));
+    if waveform.len() > STREAM_WAVE_BUCKETS {
+        let drain_count = waveform.len() - STREAM_WAVE_BUCKETS;
+        waveform.drain(0..drain_count);
+    }
+}
+
+#[cfg(windows)]
 fn find_cable_render_device(
     devices: wasapi::DeviceCollection,
 ) -> Result<(wasapi::Device, String)> {
     let mut fallback: Option<(wasapi::Device, String)> = None;
+    let mut available_devices = Vec::new();
     for device in &devices {
         let device = device?;
         let name = device.get_friendlyname()?;
         let lower = name.to_ascii_lowercase();
+        available_devices.push(name.clone());
         if lower.contains("cable input") {
             return Ok((device, name));
         }
         if fallback.is_none()
             && (lower.contains("vb-cable")
+                || lower.contains("vb-audio")
                 || lower.contains("vb audio")
+                || lower.contains("virtual cable")
                 || (lower.contains("cable") && lower.contains("input")))
         {
             fallback = Some((device, name));
         }
     }
 
-    fallback.ok_or_else(|| anyhow::anyhow!("VB-CABLE playback endpoint was not found"))
+    fallback.ok_or_else(|| {
+        let device_list = if available_devices.is_empty() {
+            "none".to_owned()
+        } else {
+            available_devices.join(" | ")
+        };
+        anyhow::anyhow!(
+            "VB-CABLE playback endpoint was not found.\nWindows playback devices: {device_list}"
+        )
+    })
 }
 
 #[cfg(not(windows))]

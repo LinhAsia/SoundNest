@@ -361,6 +361,7 @@ pub struct SoundFxApp {
     stream_input_router: StreamInputRouter,
     stream_input_system_audio: bool,
     stream_input_microphone: bool,
+    stream_input_show_waveform: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -619,6 +620,7 @@ impl SoundFxApp {
             stream_input_router: StreamInputRouter::new(),
             stream_input_system_audio: false,
             stream_input_microphone: false,
+            stream_input_show_waveform: true,
         };
         app.begin_async_library_hydration();
         app.begin_async_transition_analysis(resolved_startup_sound);
@@ -5408,7 +5410,7 @@ impl SoundFxApp {
             .title_bar(false)
             .resizable(false)
             .collapsible(false)
-            .fixed_size(vec2(344.0, 344.0))
+            .fixed_size(vec2(344.0, 420.0))
             .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
             .frame(
                 Frame::new()
@@ -5622,6 +5624,8 @@ impl SoundFxApp {
                                     .color(Self::muted_text_color()),
                             );
                         }
+                        ui.add_space(8.0);
+                        ui.checkbox(&mut self.stream_input_show_waveform, "Show live wave");
                         if snapshot.running {
                             ui.add_space(8.0);
                             ui.add(
@@ -5630,12 +5634,24 @@ impl SoundFxApp {
                                     .show_percentage(),
                             );
                         }
+                        if self.stream_input_show_waveform {
+                            ui.add_space(8.0);
+                            Self::draw_stream_wave_strip(ui, &snapshot.waveform, snapshot.running);
+                        }
                         if let Some(error) = snapshot.error.as_ref() {
                             ui.add_space(8.0);
                             ui.label(
                                 RichText::new(error)
                                     .size(11.0)
                                     .color(Color32::from_rgb(171, 54, 91)),
+                            );
+                            ui.add_space(4.0);
+                            ui.label(
+                                RichText::new(
+                                    "Neu ban vua cai driver ma chua restart Windows, hay restart 1 lan roi mo app lai.",
+                                )
+                                .size(10.5)
+                                .color(Self::muted_text_color()),
                             );
                         }
                     });
@@ -9478,6 +9494,57 @@ impl SoundFxApp {
                 Pos2::new(x + bar_width * 0.18, inner.center().y + half),
             );
             painter.rect_filled(bar, 4.0, Color32::from_rgb(227, 82, 149));
+        }
+    }
+
+    fn draw_stream_wave_strip(ui: &mut Ui, waveform: &[f32], active: bool) {
+        let desired = vec2(ui.available_width().max(220.0), 46.0);
+        let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
+        let painter = ui.painter_at(rect);
+        let dark_theme = Self::dark_theme_enabled();
+        painter.rect_filled(
+            rect,
+            18.0,
+            if dark_theme {
+                Color32::from_rgba_premultiplied(255, 255, 255, 14)
+            } else {
+                Color32::from_rgba_premultiplied(255, 255, 255, 96)
+            },
+        );
+        painter.rect_stroke(
+            rect,
+            18.0,
+            Stroke::new(
+                1.0,
+                if dark_theme {
+                    Color32::from_rgba_premultiplied(111, 86, 120, 150)
+                } else {
+                    Color32::from_rgba_premultiplied(231, 214, 224, 180)
+                },
+            ),
+            StrokeKind::Outside,
+        );
+
+        let data = if waveform.is_empty() {
+            vec![0.05; 40]
+        } else {
+            waveform.to_vec()
+        };
+        let inner = rect.shrink2(vec2(12.0, 8.0));
+        let bar_width = inner.width() / data.len().max(1) as f32;
+        let active_color = if active {
+            Color32::from_rgb(227, 82, 149)
+        } else {
+            Color32::from_rgba_premultiplied(184, 132, 164, 120)
+        };
+        for (index, value) in data.iter().enumerate() {
+            let x = inner.left() + (index as f32 + 0.5) * bar_width;
+            let half = value.clamp(0.04, 1.0) * inner.height() * 0.44;
+            let bar = Rect::from_min_max(
+                Pos2::new(x - bar_width * 0.22, inner.center().y - half),
+                Pos2::new(x + bar_width * 0.22, inner.center().y + half),
+            );
+            painter.rect_filled(bar, 3.0, active_color);
         }
     }
 
