@@ -12995,9 +12995,16 @@ impl eframe::App for SoundFxApp {
                 let frame_rect = ui.max_rect();
                 let frame_radius = Self::main_frame_corner_radius(frame_rect);
                 let frame_margin = Self::main_frame_inner_margin(frame_rect);
+                ui.painter().rect_filled(frame_rect, frame_radius, Self::page_fill());
+                ui.painter().rect_stroke(
+                    frame_rect,
+                    frame_radius,
+                    Stroke::new(1.0, Self::border_color()),
+                    StrokeKind::Outside,
+                );
                 let frame_response = Frame::new()
-                    .fill(Self::page_fill())
-                    .stroke(Stroke::new(1.0, Self::border_color()))
+                    .fill(Color32::TRANSPARENT)
+                    .stroke(Stroke::NONE)
                     .shadow(Shadow::NONE)
                     .corner_radius(frame_radius)
                     .outer_margin(Margin::same(APP_OUTER_MARGIN as i8))
