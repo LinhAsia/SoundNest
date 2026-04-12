@@ -49,6 +49,8 @@ const JOB_POLL_REPAINT_MS: u64 = 90;
 const DEFAULT_INTRO_DURATION_SEC: f32 = 1.35;
 const DEFAULT_OUTRO_DURATION_SEC: f32 = 0.72;
 const TRANSITION_WAVE_BUCKETS: usize = 160;
+const LIBRARY_GRID_MIN_COLUMNS: usize = 3;
+const LIBRARY_GRID_MAX_COLUMNS: usize = 20;
 const RECORD_EXPORT_VIDEO_FPS_OPTIONS: [u32; 3] = [
     record_video::LOW_VIDEO_FPS,
     record_video::STANDARD_VIDEO_FPS,
@@ -271,7 +273,7 @@ pub struct SoundFxApp {
     center_record_overlay_next_frame: bool,
     record_overlay_native_visuals_applied: bool,
     record_overlay_pos: Option<Pos2>,
-    library_grid_scale: f32,
+    library_grid_columns: usize,
     video_assets: Vec<VideoAsset>,
     recording_draft: Option<RecordingDraft>,
     active_record_video_export: Option<RecordVideoExportState>,
@@ -420,11 +422,11 @@ impl SoundFxApp {
             .ok()
             .flatten()
             .unwrap_or(true);
-        let library_grid_scale = storage
-            .load_library_grid_scale()
+        let library_grid_columns = storage
+            .load_library_grid_columns()
             .ok()
             .flatten()
-            .unwrap_or(0.86);
+            .unwrap_or(6);
         let dark_theme = storage.load_dark_theme().ok().flatten().unwrap_or(false);
         let pitch_show_sharps = storage
             .load_pitch_show_sharps()
@@ -514,7 +516,7 @@ impl SoundFxApp {
             center_record_overlay_next_frame: false,
             record_overlay_native_visuals_applied: false,
             record_overlay_pos: None,
-            library_grid_scale,
+            library_grid_columns,
             video_assets,
             recording_draft: None,
             active_record_video_export: None,
@@ -7556,7 +7558,7 @@ impl SoundFxApp {
     fn draw_library_grid(&mut self, ui: &mut Ui) {
         let modal_open = self.has_modal_panel();
         let titlebar_drag_active = self.titlebar_drag_active(ui.ctx());
-        let mut scale_changed = false;
+        let mut columns_changed = false;
         ui.horizontal(|ui| {
             let sounds_tab = ui.add_sized(
                 [84.0, 30.0],
@@ -7631,16 +7633,35 @@ impl SoundFxApp {
                 }
                 ui.add_space(8.0);
                 Self::with_slider_visuals(ui, |ui| {
-                    let (scale_response, scale_slider_changed) = Self::click_slider(
+                    let mut slider_value = (LIBRARY_GRID_MIN_COLUMNS + LIBRARY_GRID_MAX_COLUMNS)
+                        as f32
+                        - self.library_grid_columns as f32;
+                    let (slider_response, slider_changed) = Self::click_slider(
                         ui,
-                        &mut self.library_grid_scale,
-                        0.72..=1.1,
-                        0.01,
-                        vec2(112.0, 28.0),
+                        &mut slider_value,
+                        LIBRARY_GRID_MIN_COLUMNS as f32..=LIBRARY_GRID_MAX_COLUMNS as f32,
+                        1.0,
+                        vec2(132.0, 28.0),
                     );
-                    scale_changed = scale_response.changed() || scale_slider_changed;
+                    if slider_response.changed() || slider_changed {
+                        let reversed = slider_value
+                            .round()
+                            .clamp(LIBRARY_GRID_MIN_COLUMNS as f32, LIBRARY_GRID_MAX_COLUMNS as f32)
+                            as usize;
+                        self.library_grid_columns = (LIBRARY_GRID_MIN_COLUMNS
+                            + LIBRARY_GRID_MAX_COLUMNS)
+                            - reversed;
+                        self.library_grid_columns = self
+                            .library_grid_columns
+                            .clamp(LIBRARY_GRID_MIN_COLUMNS, LIBRARY_GRID_MAX_COLUMNS);
+                        columns_changed = true;
+                    }
                     ui.add_space(8.0);
-                    ui.label(Self::icon(0xe8b8, 15.0, Self::muted_text_color()));
+                    ui.label(
+                        RichText::new(format!("{} col", self.library_grid_columns))
+                            .size(11.5)
+                            .color(Self::muted_text_color()),
+                    );
                 });
             });
         });
@@ -7666,10 +7687,10 @@ impl SoundFxApp {
                     );
                 });
             });
-        if scale_changed {
+        if columns_changed {
             let _ = self
                 .storage
-                .save_library_grid_scale(self.library_grid_scale);
+                .save_library_grid_columns(self.library_grid_columns);
         }
         ui.add_space(12.0);
 
@@ -7695,7 +7716,10 @@ impl SoundFxApp {
                 let layout_width = ui.clip_rect().width().min(ui.available_width());
                 let side_padding = (layout_width * 0.03).clamp(12.0, 28.0);
                 let available_width = (layout_width - side_padding * 2.0 - spacing).max(156.0);
-                let target_card = (204.0 * self.library_grid_scale).clamp(120.0, 220.0);
+                let desired_columns = self
+                    .library_grid_columns
+                    .clamp(LIBRARY_GRID_MIN_COLUMNS, LIBRARY_GRID_MAX_COLUMNS)
+                    as f32;
                 let sounds = self.filtered_library_sounds();
                 if sounds.is_empty() {
                     Self::draw_empty_editor(ui);
@@ -7707,7 +7731,9 @@ impl SoundFxApp {
                 let mut drag_sound = None;
                 let mut favorite_sound = None;
 
-                let card_size = target_card.min(available_width).clamp(120.0, 220.0);
+                let card_size = ((available_width - spacing * (desired_columns - 1.0))
+                    / desired_columns)
+                    .clamp(120.0, 260.0);
                 ui.horizontal(|ui| {
                     if side_padding > 0.0 {
                         ui.add_space(side_padding);
@@ -7972,8 +7998,12 @@ impl SoundFxApp {
         let layout_width = ui.clip_rect().width().min(ui.available_width());
         let side_padding = (layout_width * 0.03).clamp(12.0, 28.0);
         let available_width = (layout_width - side_padding * 2.0 - spacing).max(156.0);
-        let target_card = (204.0 * self.library_grid_scale).clamp(120.0, 220.0);
-        let card_size = target_card.min(available_width).clamp(120.0, 220.0);
+        let desired_columns = self
+            .library_grid_columns
+            .clamp(LIBRARY_GRID_MIN_COLUMNS, LIBRARY_GRID_MAX_COLUMNS)
+            as f32;
+        let card_size = ((available_width - spacing * (desired_columns - 1.0)) / desired_columns)
+            .clamp(120.0, 260.0);
         let mut open_video: Option<VideoAsset> = None;
         let mut copy_video: Option<VideoAsset> = None;
         let mut delete_video: Option<Uuid> = None;
@@ -10836,10 +10866,10 @@ impl SoundFxApp {
         let mut playback_reapply_request = false;
         let mut changed = false;
         let mut trim_timeline_zoom = self.trim_timeline_zoom;
-        let popup_bounds = self.modal_safe_rect(ctx).shrink2(vec2(40.0, 12.0));
+        let popup_bounds = self.modal_safe_rect(ctx).shrink2(vec2(64.0, 20.0));
         let popup_size = vec2(
-            Self::fit_modal_dimension((popup_bounds.width() * 0.76).max(1.0), 700.0, 240.0),
-            Self::fit_modal_dimension((popup_bounds.height() * 0.94).max(1.0), 396.0, 260.0),
+            Self::fit_modal_dimension((popup_bounds.width() * 0.68).max(1.0), 620.0, 220.0),
+            Self::fit_modal_dimension((popup_bounds.height() * 0.9).max(1.0), 396.0, 240.0),
         );
         let popup_pos = Pos2::new(
             (popup_bounds.center().x - popup_size.x * 0.5)

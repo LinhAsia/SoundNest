@@ -122,6 +122,7 @@ struct PreferencesFile {
     overlay_animation: Option<bool>,
     app_transition_animation: Option<bool>,
     pitch_show_sharps: Option<bool>,
+    library_grid_columns: Option<usize>,
     library_grid_scale: Option<f32>,
     dark_theme: Option<bool>,
     record_hotkey: Option<String>,
@@ -315,16 +316,22 @@ impl Storage {
         self.save_preferences(&preferences)
     }
 
-    pub fn load_library_grid_scale(&self) -> Result<Option<f32>> {
+    pub fn load_library_grid_columns(&self) -> Result<Option<usize>> {
         let preferences = self.load_preferences()?;
-        Ok(preferences
-            .library_grid_scale
-            .map(|value| value.clamp(0.72, 1.1)))
+        if let Some(columns) = preferences.library_grid_columns {
+            return Ok(Some(columns.clamp(3, 20)));
+        }
+        Ok(preferences.library_grid_scale.map(|scale| {
+            let normalized = ((1.1 - scale.clamp(0.72, 1.1)) / (1.1 - 0.72)).clamp(0.0, 1.0);
+            let mapped = 3.0 + normalized * 17.0;
+            mapped.round().clamp(3.0, 20.0) as usize
+        }))
     }
 
-    pub fn save_library_grid_scale(&self, scale: f32) -> Result<()> {
+    pub fn save_library_grid_columns(&self, columns: usize) -> Result<()> {
         let mut preferences = self.load_preferences()?;
-        preferences.library_grid_scale = Some(scale.clamp(0.72, 1.1));
+        preferences.library_grid_columns = Some(columns.clamp(3, 20));
+        preferences.library_grid_scale = None;
         self.save_preferences(&preferences)
     }
 
