@@ -8553,22 +8553,31 @@ impl SoundFxApp {
                                     }
                                 });
                             });
+                        let scrollbar_gutter = 18.0;
+                        let interactive_rect = Rect::from_min_max(
+                            frame.response.rect.min,
+                            Pos2::new(
+                                (frame.response.rect.max.x - scrollbar_gutter)
+                                    .max(frame.response.rect.min.x),
+                                frame.response.rect.max.y,
+                            ),
+                        );
 
                         let response = ui.interact(
-                            frame.response.rect,
+                            interactive_rect,
                             ui.id().with(sound.id),
                             Sense::click_and_drag(),
                         );
                         let pointer_hover = ui
                             .ctx()
                             .input(|input| input.pointer.hover_pos())
-                            .is_some_and(|pos| frame.response.rect.contains(pos));
+                            .is_some_and(|pos| interactive_rect.contains(pos));
                         if titlebar_drag_active {
                             self.pending_sound_drag = None;
                         }
                         if !modal_open
                             && !titlebar_drag_active
-                            && Self::pointer_primary_pressed_within(ui.ctx(), frame.response.rect)
+                            && Self::pointer_primary_pressed_within(ui.ctx(), interactive_rect)
                         {
                             self.pending_sound_drag = Some(sound.id);
                         }
