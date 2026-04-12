@@ -7707,216 +7707,208 @@ impl SoundFxApp {
                 let mut drag_sound = None;
                 let mut favorite_sound = None;
 
-                let columns = (((available_width + spacing) / (target_card + spacing)).floor()
-                    as usize)
-                    .max(1);
-                let card_size = ((available_width - spacing * (columns.saturating_sub(1)) as f32)
-                    / columns as f32)
-                    .clamp(120.0, 220.0);
-                let row_count = sounds.len().div_ceil(columns);
+                let card_size = target_card.min(available_width).clamp(120.0, 220.0);
+                ui.horizontal(|ui| {
+                    if side_padding > 0.0 {
+                        ui.add_space(side_padding);
+                    }
+                    let wrap_width = (layout_width - side_padding * 2.0).max(card_size);
+                    ui.allocate_ui_with_layout(
+                        vec2(wrap_width, 0.0),
+                        egui::Layout::left_to_right(Align::Min).with_main_wrap(true),
+                        |ui| {
+                            ui.spacing_mut().item_spacing = vec2(spacing, spacing);
+                            for sound in sounds {
+                                let (tile_rect, _tile_response) = ui
+                                    .allocate_exact_size(vec2(card_size, card_size), Sense::hover());
+                                let body_response = ui.interact(
+                                    tile_rect,
+                                    ui.id().with(("library-grid", sound.id)),
+                                    if modal_open {
+                                        Sense::hover()
+                                    } else {
+                                        Sense::click_and_drag()
+                                    },
+                                );
+                                let pointer_hover = !modal_open
+                                    && ui
+                                        .ctx()
+                                        .input(|input| input.pointer.hover_pos())
+                                        .is_some_and(|pos| tile_rect.contains(pos));
+                                let hovered = !modal_open && pointer_hover;
 
-                for (row_index, row) in sounds.chunks(columns).enumerate() {
-                    ui.horizontal_top(|ui| {
-                        ui.spacing_mut().item_spacing = vec2(spacing, spacing);
-                        if side_padding > 0.0 {
-                            ui.add_space(side_padding);
-                        }
+                                if hovered {
+                                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+                                }
+                                if titlebar_drag_active {
+                                    self.pending_sound_drag = None;
+                                }
+                                if !modal_open
+                                    && !titlebar_drag_active
+                                    && Self::pointer_primary_pressed_within(ui.ctx(), tile_rect)
+                                {
+                                    self.pending_sound_drag = Some(sound.id);
+                                }
+                                if !modal_open
+                                    && !titlebar_drag_active
+                                    && self.pending_sound_drag == Some(sound.id)
+                                    && pointer_hover
+                                    && ui.ctx().input(|input| input.pointer.primary_down())
+                                {
+                                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                                }
+                                if !modal_open
+                                    && !titlebar_drag_active
+                                    && self.pending_sound_drag == Some(sound.id)
+                                    && Self::pointer_primary_drag_ready(ui.ctx())
+                                {
+                                    drag_sound = Some(sound.id);
+                                    self.pending_sound_drag = None;
+                                }
+                                if !modal_open && body_response.clicked() {
+                                    open_sound = Some(sound.id);
+                                }
 
-                        for sound in row {
-                            let (tile_rect, _tile_response) =
-                                ui.allocate_exact_size(vec2(card_size, card_size), Sense::hover());
-                            let body_response = ui.interact(
-                                tile_rect,
-                                ui.id().with(("library-grid", sound.id)),
-                                if modal_open {
-                                    Sense::hover()
-                                } else {
-                                    Sense::click_and_drag()
-                                },
-                            );
-                            let pointer_hover = !modal_open
-                                && ui
-                                    .ctx()
-                                    .input(|input| input.pointer.hover_pos())
-                                    .is_some_and(|pos| tile_rect.contains(pos));
-                            let hovered = !modal_open && pointer_hover;
+                                ui.scope_builder(egui::UiBuilder::new().max_rect(tile_rect), |ui| {
+                                    ui.style_mut().interaction.selectable_labels = false;
+                                    let fill = if hovered {
+                                        Color32::from_rgb(227, 82, 149)
+                                    } else {
+                                        Self::surface_fill()
+                                    };
+                                    let stroke = if hovered {
+                                        Color32::from_rgb(227, 82, 149)
+                                    } else {
+                                        Self::border_color()
+                                    };
+                                    let title_color = if hovered {
+                                        Color32::WHITE
+                                    } else {
+                                        Self::strong_text_color()
+                                    };
+                                    let meta_color = if hovered {
+                                        Color32::from_rgba_premultiplied(255, 255, 255, 196)
+                                    } else {
+                                        Self::muted_text_color()
+                                    };
 
-                            if hovered {
-                                ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
-                            }
-                            if titlebar_drag_active {
-                                self.pending_sound_drag = None;
-                            }
-                            if !modal_open
-                                && !titlebar_drag_active
-                                && Self::pointer_primary_pressed_within(ui.ctx(), tile_rect)
-                            {
-                                self.pending_sound_drag = Some(sound.id);
-                            }
-                            if !modal_open
-                                && !titlebar_drag_active
-                                && self.pending_sound_drag == Some(sound.id)
-                                && pointer_hover
-                                && ui.ctx().input(|input| input.pointer.primary_down())
-                            {
-                                ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
-                            }
-                            if !modal_open
-                                && !titlebar_drag_active
-                                && self.pending_sound_drag == Some(sound.id)
-                                && Self::pointer_primary_drag_ready(ui.ctx())
-                            {
-                                drag_sound = Some(sound.id);
-                                self.pending_sound_drag = None;
-                            }
-                            if !modal_open && body_response.clicked() {
-                                open_sound = Some(sound.id);
-                            }
-
-                            ui.scope_builder(egui::UiBuilder::new().max_rect(tile_rect), |ui| {
-                                ui.style_mut().interaction.selectable_labels = false;
-                                let fill = if hovered {
-                                    Color32::from_rgb(227, 82, 149)
-                                } else {
-                                    Self::surface_fill()
-                                };
-                                let stroke = if hovered {
-                                    Color32::from_rgb(227, 82, 149)
-                                } else {
-                                    Self::border_color()
-                                };
-                                let title_color = if hovered {
-                                    Color32::WHITE
-                                } else {
-                                    Self::strong_text_color()
-                                };
-                                let meta_color = if hovered {
-                                    Color32::from_rgba_premultiplied(255, 255, 255, 196)
-                                } else {
-                                    Self::muted_text_color()
-                                };
-
-                                Frame::new()
-                                    .fill(fill)
-                                    .stroke(Stroke::new(1.0, stroke))
-                                    .shadow(Shadow {
-                                        offset: [0, 12],
-                                        blur: 28,
-                                        spread: 0,
-                                        color: Color32::from_rgba_premultiplied(86, 43, 67, 18),
-                                    })
-                                    .corner_radius(30.0)
-                                    .inner_margin(Margin::same(16))
-                                    .show(ui, |ui| {
-                                        let inner_size = card_size - 32.0;
-                                        ui.set_min_size(vec2(inner_size, inner_size));
-                                        ui.set_width(inner_size);
-                                        ui.vertical(|ui| {
-                                            ui.add_sized(
-                                                [inner_size, 18.0],
-                                                egui::Label::new(
-                                                    RichText::new(&sound.name)
-                                                        .size(12.5)
-                                                        .color(title_color)
-                                                        .strong(),
-                                                )
-                                                .truncate(),
-                                            );
-                                            ui.add_space(7.0);
-                                            let waveform_preview =
-                                                Self::trimmed_waveform_preview(sound);
-                                            Self::draw_wave_strip(
-                                                ui,
-                                                &waveform_preview,
-                                                None,
-                                                if hovered {
-                                                    Color32::from_rgb(255, 214, 232)
-                                                } else {
-                                                    Color32::from_rgb(214, 51, 132)
-                                                },
-                                                if hovered {
-                                                    Color32::from_rgb(255, 214, 232)
-                                                } else {
-                                                    Color32::from_rgb(238, 213, 227)
-                                                },
-                                                if hovered {
-                                                    Color32::from_rgba_premultiplied(
-                                                        255, 255, 255, 22,
+                                    Frame::new()
+                                        .fill(fill)
+                                        .stroke(Stroke::new(1.0, stroke))
+                                        .shadow(Shadow {
+                                            offset: [0, 12],
+                                            blur: 28,
+                                            spread: 0,
+                                            color: Color32::from_rgba_premultiplied(
+                                                86, 43, 67, 18,
+                                            ),
+                                        })
+                                        .corner_radius(30.0)
+                                        .inner_margin(Margin::same(16))
+                                        .show(ui, |ui| {
+                                            let inner_size = card_size - 32.0;
+                                            ui.set_min_size(vec2(inner_size, inner_size));
+                                            ui.set_width(inner_size);
+                                            ui.vertical(|ui| {
+                                                ui.add_sized(
+                                                    [inner_size, 18.0],
+                                                    egui::Label::new(
+                                                        RichText::new(&sound.name)
+                                                            .size(12.5)
+                                                            .color(title_color)
+                                                            .strong(),
                                                     )
-                                                } else {
-                                                    Self::panel_fill()
-                                                },
-                                                (card_size * 0.38).clamp(58.0, 78.0),
-                                            );
-                                            ui.add_space(9.0);
-                                            ui.label(
-                                                RichText::new(format_time(sound.trimmed_length()))
-                                                    .size(11.5)
-                                                    .color(meta_color),
-                                            );
-                                            ui.add_space(8.0);
-                                            ui.horizontal(|ui| {
-                                                if Self::favorite_button(ui, sound.favorite)
-                                                    .clicked()
-                                                {
-                                                    favorite_sound = Some(sound.id);
-                                                }
-                                                if Self::icon_action(
+                                                    .truncate(),
+                                                );
+                                                ui.add_space(7.0);
+                                                let waveform_preview =
+                                                    Self::trimmed_waveform_preview(&sound);
+                                                Self::draw_wave_strip(
                                                     ui,
-                                                    [46.0, 31.0],
-                                                    0xe037,
-                                                    false,
-                                                    false,
-                                                )
-                                                .clicked()
-                                                {
-                                                    preview_sound = Some(sound.id);
-                                                }
-                                                if Self::icon_action(
-                                                    ui,
-                                                    [46.0, 31.0],
-                                                    0xe14d,
-                                                    self.sound_copy_feedback_active(
-                                                        ui.ctx(),
-                                                        sound.id,
-                                                    ),
-                                                    self.sound_copy_feedback_active(
-                                                        ui.ctx(),
-                                                        sound.id,
-                                                    ),
-                                                )
-                                                .clicked()
-                                                {
-                                                    copy_sound = Some(sound.id);
-                                                }
-                                            });
-                                            if self.sound_copy_feedback_active(ui.ctx(), sound.id) {
-                                                ui.add_space(6.0);
+                                                    &waveform_preview,
+                                                    None,
+                                                    if hovered {
+                                                        Color32::from_rgb(255, 214, 232)
+                                                    } else {
+                                                        Color32::from_rgb(214, 51, 132)
+                                                    },
+                                                    if hovered {
+                                                        Color32::from_rgb(255, 214, 232)
+                                                    } else {
+                                                        Color32::from_rgb(238, 213, 227)
+                                                    },
+                                                    if hovered {
+                                                        Color32::from_rgba_premultiplied(
+                                                            255, 255, 255, 22,
+                                                        )
+                                                    } else {
+                                                        Self::panel_fill()
+                                                    },
+                                                    (card_size * 0.38).clamp(58.0, 78.0),
+                                                );
+                                                ui.add_space(9.0);
                                                 ui.label(
-                                                    RichText::new("Copied")
-                                                        .size(11.0)
+                                                    RichText::new(format_time(sound.trimmed_length()))
+                                                        .size(11.5)
                                                         .color(meta_color),
                                                 );
-                                            }
+                                                ui.add_space(8.0);
+                                                ui.horizontal(|ui| {
+                                                    if Self::favorite_button(ui, sound.favorite)
+                                                        .clicked()
+                                                    {
+                                                        favorite_sound = Some(sound.id);
+                                                    }
+                                                    if Self::icon_action(
+                                                        ui,
+                                                        [46.0, 31.0],
+                                                        0xe037,
+                                                        false,
+                                                        false,
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        preview_sound = Some(sound.id);
+                                                    }
+                                                    if Self::icon_action(
+                                                        ui,
+                                                        [46.0, 31.0],
+                                                        0xe14d,
+                                                        self.sound_copy_feedback_active(
+                                                            ui.ctx(),
+                                                            sound.id,
+                                                        ),
+                                                        self.sound_copy_feedback_active(
+                                                            ui.ctx(),
+                                                            sound.id,
+                                                        ),
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        copy_sound = Some(sound.id);
+                                                    }
+                                                });
+                                                if self.sound_copy_feedback_active(
+                                                    ui.ctx(),
+                                                    sound.id,
+                                                ) {
+                                                    ui.add_space(6.0);
+                                                    ui.label(
+                                                        RichText::new("Copied")
+                                                            .size(11.0)
+                                                            .color(meta_color),
+                                                    );
+                                                }
+                                            });
                                         });
-                                    });
-                            });
-                            if hovered {
-                                ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+                                });
                             }
-                        }
-                        for _ in row.len()..columns {
-                            ui.allocate_exact_size(vec2(card_size, card_size), Sense::hover());
-                        }
-                        if side_padding > 0.0 {
-                            ui.add_space(side_padding);
-                        }
-                    });
-
-                    if row_index + 1 < row_count {
-                        ui.add_space(spacing);
+                        },
+                    );
+                    if side_padding > 0.0 {
+                        ui.add_space(side_padding);
                     }
-                }
+                });
                 ui.add_space(208.0);
 
                 if let Some(sound_id) = preview_sound {
@@ -7981,27 +7973,25 @@ impl SoundFxApp {
         let side_padding = (layout_width * 0.03).clamp(12.0, 28.0);
         let available_width = (layout_width - side_padding * 2.0 - spacing).max(156.0);
         let target_card = (204.0 * self.library_grid_scale).clamp(120.0, 220.0);
-        let columns =
-            (((available_width + spacing) / (target_card + spacing)).floor() as usize).max(1);
-        let card_size = ((available_width - spacing * (columns.saturating_sub(1)) as f32)
-            / columns as f32)
-            .clamp(120.0, 220.0);
-        let row_count = videos.len().div_ceil(columns);
+        let card_size = target_card.min(available_width).clamp(120.0, 220.0);
         let mut open_video: Option<VideoAsset> = None;
         let mut copy_video: Option<VideoAsset> = None;
         let mut delete_video: Option<Uuid> = None;
         let mut favorite_video: Option<Uuid> = None;
 
-        for (row_index, row) in videos.chunks(columns).enumerate() {
-            ui.horizontal_top(|ui| {
-                ui.spacing_mut().item_spacing = vec2(spacing, spacing);
-                if side_padding > 0.0 {
-                    ui.add_space(side_padding);
-                }
-
-                for video in row {
-                    let (tile_rect, tile_response) =
-                        ui.allocate_exact_size(vec2(card_size, card_size), Sense::hover());
+        ui.horizontal(|ui| {
+            if side_padding > 0.0 {
+                ui.add_space(side_padding);
+            }
+            let wrap_width = (layout_width - side_padding * 2.0).max(card_size);
+            ui.allocate_ui_with_layout(
+                vec2(wrap_width, 0.0),
+                egui::Layout::left_to_right(Align::Min).with_main_wrap(true),
+                |ui| {
+                    ui.spacing_mut().item_spacing = vec2(spacing, spacing);
+                    for video in videos {
+                        let (tile_rect, tile_response) =
+                            ui.allocate_exact_size(vec2(card_size, card_size), Sense::hover());
                     let body_rect = Rect::from_min_max(
                         tile_rect.min,
                         Pos2::new(tile_rect.max.x, tile_rect.max.y - 46.0),
@@ -8152,19 +8142,13 @@ impl SoundFxApp {
                                 });
                             });
                     });
-                }
-                for _ in row.len()..columns {
-                    ui.allocate_exact_size(vec2(card_size, card_size), Sense::hover());
-                }
-                if side_padding > 0.0 {
-                    ui.add_space(side_padding);
-                }
-            });
-
-            if row_index + 1 < row_count {
-                ui.add_space(spacing);
+                    }
+                },
+            );
+            if side_padding > 0.0 {
+                ui.add_space(side_padding);
             }
-        }
+        });
         ui.add_space(208.0);
 
         if let Some(video) = open_video {
@@ -10852,9 +10836,9 @@ impl SoundFxApp {
         let mut playback_reapply_request = false;
         let mut changed = false;
         let mut trim_timeline_zoom = self.trim_timeline_zoom;
-        let popup_bounds = self.modal_safe_rect(ctx).shrink2(vec2(28.0, 8.0));
+        let popup_bounds = self.modal_safe_rect(ctx).shrink2(vec2(40.0, 12.0));
         let popup_size = vec2(
-            Self::fit_modal_dimension((popup_bounds.width() * 0.82).max(1.0), 760.0, 260.0),
+            Self::fit_modal_dimension((popup_bounds.width() * 0.76).max(1.0), 700.0, 240.0),
             Self::fit_modal_dimension((popup_bounds.height() * 0.94).max(1.0), 396.0, 260.0),
         );
         let popup_pos = Pos2::new(
