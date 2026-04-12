@@ -8423,7 +8423,7 @@ impl SoundFxApp {
     fn draw_library(&mut self, ui: &mut Ui) {
         ui.vertical(|ui| {
             ui.add_space(2.0);
-            Frame::new()
+            let search_panel = Frame::new()
                 .fill(Self::surface_fill())
                 .stroke(Stroke::new(1.0, Self::border_color()))
                 .corner_radius(18.0)
@@ -8436,9 +8436,15 @@ impl SoundFxApp {
                             TextEdit::singleline(&mut self.library_audio_query)
                                 .hint_text("Search")
                                 .desired_width(f32::INFINITY),
-                        );
-                    });
+                        )
+                    })
+                    .inner
                 });
+            let search_block_rect = search_panel
+                .response
+                .rect
+                .union(search_panel.inner.rect)
+                .expand2(vec2(12.0, 10.0));
             ui.add_space(12.0);
             ScrollArea::vertical()
                 .auto_shrink([false, false])
@@ -8468,6 +8474,13 @@ impl SoundFxApp {
 
                     let modal_open = self.has_modal_panel();
                     let titlebar_drag_active = self.titlebar_drag_active(ui.ctx());
+                    let search_drag_blocked = ui.ctx().input(|input| {
+                        input
+                            .pointer
+                            .hover_pos()
+                            .or(input.pointer.press_origin())
+                            .is_some_and(|pos| search_block_rect.contains(pos))
+                    });
                     let mut preview_request = None;
                     let mut drag_request = None;
 
@@ -8572,19 +8585,24 @@ impl SoundFxApp {
                             .ctx()
                             .input(|input| input.pointer.hover_pos())
                             .is_some_and(|pos| interactive_rect.contains(pos));
+                        if search_drag_blocked {
+                            self.pending_sound_drag = None;
+                        }
                         if titlebar_drag_active {
                             self.pending_sound_drag = None;
                         }
                         if !modal_open
+                            && !search_drag_blocked
                             && !titlebar_drag_active
                             && Self::pointer_primary_pressed_within(ui.ctx(), interactive_rect)
                         {
                             self.pending_sound_drag = Some(sound.id);
                         }
-                        if !modal_open && pointer_hover {
+                        if !modal_open && !search_drag_blocked && pointer_hover {
                             ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
                         }
                         if !modal_open
+                            && !search_drag_blocked
                             && !titlebar_drag_active
                             && self.pending_sound_drag == Some(sound.id)
                             && pointer_hover
@@ -8593,6 +8611,7 @@ impl SoundFxApp {
                             ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
                         }
                         if !modal_open
+                            && !search_drag_blocked
                             && !titlebar_drag_active
                             && self.pending_sound_drag == Some(sound.id)
                             && Self::pointer_primary_drag_ready(ui.ctx())
