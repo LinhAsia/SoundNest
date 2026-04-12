@@ -8745,7 +8745,7 @@ impl SoundFxApp {
                 color: Self::shadow_color(),
             })
             .corner_radius(36.0)
-            .inner_margin(Margin::same(28))
+            .inner_margin(Margin::same(20))
             .show(ui, |ui| {
                 let sound = &mut self.sounds[index];
                 let controls_width = 52.0 + 52.0 + 52.0 + 64.0 + 64.0 + 36.0;
@@ -8753,11 +8753,11 @@ impl SoundFxApp {
 
                 ui.vertical(|ui| {
                     let response = ui.add_sized(
-                        [ui.available_width(), 40.0],
+                        [ui.available_width(), 36.0],
                         TextEdit::singleline(&mut sound.name)
                             .font(egui::TextStyle::Heading)
                             .desired_width(name_width)
-                            .margin(Vec2::new(12.0, 12.0)),
+                            .margin(Vec2::new(10.0, 10.0)),
                     );
                     if response.changed() {
                         changed = true;
@@ -8791,7 +8791,7 @@ impl SoundFxApp {
                     });
                 });
 
-                ui.add_space(8.0);
+                ui.add_space(4.0);
 
                 Frame::new()
                     .fill(Self::panel_fill())
@@ -8894,7 +8894,7 @@ impl SoundFxApp {
                     .show(ui, |ui| {
                         ui.set_min_height(76.0);
                         ui.vertical_centered(|ui| {
-                            ui.add_space(8.0);
+                ui.add_space(4.0);
                             ui.label(
                                 RichText::new("Drop sound here")
                                     .size(14.5)
@@ -10971,7 +10971,7 @@ impl SoundFxApp {
                         .strong(),
                 );
 
-                ui.add_space(18.0);
+                ui.add_space(12.0);
                 ui.horizontal_centered(|ui| {
                     let keep_response = ui.add_sized(
                         [120.0, 38.0],
