@@ -2276,7 +2276,12 @@ impl SoundFxApp {
         }
     }
 
-    fn favorite_button(ui: &mut Ui, active: bool) -> egui::Response {
+    fn favorite_button_sized(
+        ui: &mut Ui,
+        active: bool,
+        size: [f32; 2],
+        icon_size: f32,
+    ) -> egui::Response {
         let fill = if active {
             Color32::from_rgb(247, 191, 64)
         } else if Self::dark_theme_enabled() {
@@ -2298,14 +2303,18 @@ impl SoundFxApp {
             Self::strong_text_color()
         };
         let response = ui.add_sized(
-            [46.0, 31.0],
-            Button::new(Self::icon(icon, 18.0, icon_color))
+            size,
+            Button::new(Self::icon(icon, icon_size, icon_color))
                 .fill(fill)
                 .stroke(Stroke::new(1.0, stroke))
                 .corner_radius(16.0),
         );
         Self::decorate_button_response(ui, &response);
         response
+    }
+
+    fn favorite_button(ui: &mut Ui, active: bool) -> egui::Response {
+        Self::favorite_button_sized(ui, active, [46.0, 31.0], 18.0)
     }
 
     fn start_vocal_separation_if_needed(&mut self) {
@@ -7778,6 +7787,21 @@ impl SoundFxApp {
                                 .inner_margin(Margin::same(card_padding.round() as i8))
                                 .show(ui, |ui| {
                                     let inner_size = (card_size - card_padding * 2.0).max(8.0);
+                                    let action_gap = if inner_size < 132.0 { 4.0 } else { 8.0 };
+                                    let action_button_width =
+                                        ((inner_size - action_gap * 2.0) / 3.0).clamp(28.0, 46.0);
+                                    let action_button_height = if action_button_width < 34.0 {
+                                        28.0
+                                    } else {
+                                        31.0
+                                    };
+                                    let action_button_size =
+                                        [action_button_width, action_button_height];
+                                    let action_icon_size = if action_button_width < 34.0 {
+                                        16.0
+                                    } else {
+                                        18.0
+                                    };
                                     ui.set_min_size(vec2(inner_size, inner_size));
                                     ui.set_width(inner_size);
                                     ui.vertical(|ui| {
@@ -7831,14 +7855,20 @@ impl SoundFxApp {
                                             );
                                             ui.add_space(8.0);
                                             ui.horizontal(|ui| {
-                                                if Self::favorite_button(ui, sound.favorite)
+                                                ui.spacing_mut().item_spacing.x = action_gap;
+                                                if Self::favorite_button_sized(
+                                                    ui,
+                                                    sound.favorite,
+                                                    action_button_size,
+                                                    action_icon_size,
+                                                )
                                                     .clicked()
                                                 {
                                                     favorite_sound = Some(sound.id);
                                                 }
                                                 if Self::icon_action(
                                                     ui,
-                                                    [46.0, 31.0],
+                                                    action_button_size,
                                                     0xe037,
                                                     false,
                                                     false,
@@ -7849,7 +7879,7 @@ impl SoundFxApp {
                                                 }
                                                 if Self::icon_action(
                                                     ui,
-                                                    [46.0, 31.0],
+                                                    action_button_size,
                                                     0xe14d,
                                                     self.sound_copy_feedback_active(
                                                         ui.ctx(),
@@ -8027,6 +8057,20 @@ impl SoundFxApp {
                         .inner_margin(Margin::same(card_padding.round() as i8))
                         .show(ui, |ui| {
                             let inner_size = (card_size - card_padding * 2.0).max(8.0);
+                            let action_gap = if inner_size < 158.0 { 4.0 } else { 8.0 };
+                            let action_button_width =
+                                ((inner_size - action_gap * 3.0) / 4.0).clamp(28.0, 46.0);
+                            let action_button_height = if action_button_width < 34.0 {
+                                28.0
+                            } else {
+                                31.0
+                            };
+                            let action_button_size = [action_button_width, action_button_height];
+                            let action_icon_size = if action_button_width < 34.0 {
+                                16.0
+                            } else {
+                                18.0
+                            };
                             let title_color = if hovered {
                                 Color32::WHITE
                             } else {
@@ -8103,12 +8147,20 @@ impl SoundFxApp {
                                     );
                                     ui.add_space(10.0);
                                     ui.horizontal(|ui| {
-                                        if Self::favorite_button(ui, video.favorite).clicked() {
+                                        ui.spacing_mut().item_spacing.x = action_gap;
+                                        if Self::favorite_button_sized(
+                                            ui,
+                                            video.favorite,
+                                            action_button_size,
+                                            action_icon_size,
+                                        )
+                                        .clicked()
+                                        {
                                             favorite_video = Some(video.id);
                                         }
                                         if Self::icon_action(
                                             ui,
-                                            [46.0, 31.0],
+                                            action_button_size,
                                             0xe89e,
                                             false,
                                             false,
@@ -8119,7 +8171,7 @@ impl SoundFxApp {
                                         }
                                         if Self::icon_action(
                                             ui,
-                                            [46.0, 31.0],
+                                            action_button_size,
                                             0xe14d,
                                             self.video_copy_feedback_active(ui.ctx(), video.id),
                                             self.video_copy_feedback_active(ui.ctx(), video.id),
@@ -8130,7 +8182,7 @@ impl SoundFxApp {
                                         }
                                         if Self::icon_action(
                                             ui,
-                                            [46.0, 31.0],
+                                            action_button_size,
                                             0xe872,
                                             false,
                                             false,
