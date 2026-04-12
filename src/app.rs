@@ -8753,17 +8753,17 @@ impl SoundFxApp {
 
                 ui.vertical(|ui| {
                     let response = ui.add_sized(
-                        [ui.available_width(), 44.0],
+                        [ui.available_width(), 40.0],
                         TextEdit::singleline(&mut sound.name)
                             .font(egui::TextStyle::Heading)
                             .desired_width(name_width)
-                            .margin(Vec2::new(14.0, 14.0)),
+                            .margin(Vec2::new(12.0, 12.0)),
                     );
                     if response.changed() {
                         changed = true;
                     }
 
-                    ui.add_space(8.0);
+                    ui.add_space(4.0);
                     ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                         if Self::icon_action(ui, [52.0, 34.0], 0xe872, false, false).clicked() {
                             delete_request = true;
@@ -8791,7 +8791,7 @@ impl SoundFxApp {
                     });
                 });
 
-                ui.add_space(14.0);
+                ui.add_space(8.0);
 
                 Frame::new()
                     .fill(Self::panel_fill())
