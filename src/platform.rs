@@ -48,7 +48,7 @@ mod windows_platform {
             WindowsAndMessaging::{
                 CreateWindowExW, DestroyWindow, FindWindowW, GWL_EXSTYLE, GWL_STYLE, GetCursorPos,
                 GetWindowLongW, HWND_NOTOPMOST, HWND_TOPMOST, IDC_ARROW, LoadCursorW, SW_MINIMIZE,
-                SW_RESTORE, SW_SHOWNOACTIVATE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE,
+                SW_SHOWNOACTIVATE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE,
                 SWP_NOOWNERZORDER, SWP_NOSIZE, SetCursor, SetWindowLongW, SetWindowPos, ShowWindow,
                 ULW_ALPHA, UpdateLayeredWindow, WS_CAPTION, WS_EX_APPWINDOW, WS_EX_LAYERED,
                 WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_MAXIMIZEBOX, WS_MINIMIZEBOX,
@@ -140,28 +140,6 @@ mod windows_platform {
                 0,
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER,
             );
-        }
-    }
-
-    pub fn show_native_window_by_title(title: &str) {
-        let mut utf16 = title.encode_utf16().collect::<Vec<_>>();
-        utf16.push(0);
-        let hwnd = unsafe { FindWindowW(PCWSTR::null(), PCWSTR(utf16.as_ptr())) };
-        if let Ok(hwnd) = hwnd {
-            if !hwnd.0.is_null() {
-                unsafe {
-                    let _ = ShowWindow(hwnd, SW_RESTORE);
-                    let _ = SetWindowPos(
-                        hwnd,
-                        Some(HWND_TOPMOST),
-                        0,
-                        0,
-                        0,
-                        0,
-                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER,
-                    );
-                }
-            }
         }
     }
 

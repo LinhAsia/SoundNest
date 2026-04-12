@@ -155,30 +155,6 @@ pub fn uninstall_demucs() -> Result<(), String> {
     Ok(())
 }
 
-pub fn preload_demucs_model(root_dir: &Path) -> Result<(), String> {
-    if !is_demucs_available() {
-        return Err("demucs-rs is not installed yet".to_owned());
-    }
-
-    let warmup_dir = root_dir.join("demucs-warmup");
-    if warmup_dir.exists() {
-        let _ = fs::remove_dir_all(&warmup_dir);
-    }
-    fs::create_dir_all(&warmup_dir)
-        .map_err(|error| format!("Failed to create warmup directory: {error}"))?;
-
-    let input_path = warmup_dir.join("warmup.wav");
-    write_silent_wav(&input_path)
-        .map_err(|error| format!("Failed to create warmup file: {error}"))?;
-    let output_dir = warmup_dir.join("output");
-    let result = extract_vocals(&input_path, &output_dir);
-    let _ = fs::remove_dir_all(&warmup_dir);
-    result?;
-    fs::write(demucs_model_ready_marker(), b"ready")
-        .map_err(|error| format!("Failed to save demucs model state: {error}"))?;
-    Ok(())
-}
-
 pub fn preload_demucs_model_cancellable(
     root_dir: &Path,
     cancel_flag: Arc<AtomicBool>,

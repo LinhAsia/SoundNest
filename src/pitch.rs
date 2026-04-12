@@ -55,6 +55,7 @@ pub struct PitchMonitorConfig {
     pub source: PitchInputSource,
     pub input_device_name: Option<String>,
     pub updates_per_second: f32,
+    pub show_sharps_only: bool,
 }
 
 pub struct PitchMonitor {
@@ -257,7 +258,7 @@ fn run_loop(
             if last_publish.elapsed() >= publish_interval {
                 let analysis_window = pitch_samples.iter().copied().collect::<Vec<_>>();
                 if let Some((frequency, confidence)) = detect_pitch(&analysis_window, 44_100) {
-                    let candidate_note = pitch_to_spn(frequency, false);
+                    let candidate_note = pitch_to_spn(frequency, config.show_sharps_only);
                     let sustained_note =
                         candidate_note == last_note && confidence >= PITCH_SUSTAIN_CONFIDENCE;
                     if confidence >= PITCH_ACCEPT_CONFIDENCE || sustained_note {

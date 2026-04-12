@@ -303,6 +303,7 @@ pub struct SoundFxApp {
     startup_sound_name: Option<String>,
     exit_sound_name: Option<String>,
     gemini_api_key: String,
+    gemini_api_key_visible: bool,
     settings_startup_candidate: Option<Uuid>,
     settings_exit_candidate: Option<Uuid>,
     settings_show_startup_sound: bool,
@@ -561,6 +562,7 @@ impl SoundFxApp {
             startup_sound_name,
             exit_sound_name,
             gemini_api_key,
+            gemini_api_key_visible: false,
             settings_startup_candidate: None,
             settings_exit_candidate: None,
             settings_show_startup_sound: false,
@@ -1665,6 +1667,7 @@ impl SoundFxApp {
                 None
             },
             updates_per_second: self.pitch_update_hz,
+            show_sharps_only: self.pitch_show_sharps,
         }) {
             Ok(()) => {
                 self.center_pitch_overlay_next_frame = true;
@@ -2313,10 +2316,6 @@ impl SoundFxApp {
         response
     }
 
-    fn favorite_button(ui: &mut Ui, active: bool) -> egui::Response {
-        Self::favorite_button_sized(ui, active, [46.0, 31.0], 18.0)
-    }
-
     fn start_vocal_separation_if_needed(&mut self) {
         let Some(draft) = self.recording_draft.as_ref() else {
             return;
@@ -2461,17 +2460,11 @@ impl SoundFxApp {
     }
 
     fn gemini_voice_label(name: &str) -> &str {
-        match name {
-            "Kore" => "Kore (Female)",
-            "Puck" => "Puck (Male)",
-            "Charon" => "Charon (Male)",
-            "Aoede" => "Aoede (Female)",
-            "Fenrir" => "Fenrir (Male)",
-            "Leda" => "Leda (Female)",
-            "Orus" => "Orus (Male)",
-            "Zephyr" => "Zephyr (Female)",
-            _ => "Custom voice",
-        }
+        GEMINI_VOICE_OPTIONS
+            .iter()
+            .find(|voice| voice.name == name)
+            .map(|voice| voice.label)
+            .unwrap_or("Custom voice")
     }
 
     fn save_current_tts_preset(&mut self) {
@@ -2608,11 +2601,6 @@ impl SoundFxApp {
         ctx.send_viewport_cmd(ViewportCommand::Visible(true));
         ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
         ctx.send_viewport_cmd(ViewportCommand::Focus);
-        ctx.request_repaint();
-    }
-
-    fn hide_window(ctx: &Context) {
-        ctx.send_viewport_cmd(ViewportCommand::Minimized(true));
         ctx.request_repaint();
     }
 
@@ -3416,6 +3404,12 @@ impl SoundFxApp {
         } else {
             Color32::from_rgb(226, 216, 225)
         };
+        style.visuals.widgets.inactive.bg_stroke.width = 1.2;
+        style.visuals.widgets.inactive.fg_stroke.color = if dark_theme {
+            Color32::from_rgb(236, 230, 239)
+        } else {
+            Color32::from_rgb(76, 58, 85)
+        };
         style.visuals.widgets.inactive.weak_bg_fill = if dark_theme {
             Color32::from_rgb(245, 242, 248)
         } else {
@@ -3427,6 +3421,8 @@ impl SoundFxApp {
             Color32::from_rgb(255, 236, 246)
         };
         style.visuals.widgets.hovered.bg_stroke.color = Color32::from_rgb(230, 94, 150);
+        style.visuals.widgets.hovered.bg_stroke.width = 1.2;
+        style.visuals.widgets.hovered.fg_stroke.color = Color32::from_rgb(255, 252, 255);
         style.visuals.widgets.hovered.weak_bg_fill = if dark_theme {
             Color32::from_rgb(255, 248, 252)
         } else {
@@ -3438,6 +3434,8 @@ impl SoundFxApp {
             Color32::from_rgb(255, 223, 239)
         };
         style.visuals.widgets.active.bg_stroke.color = Color32::from_rgb(214, 51, 132);
+        style.visuals.widgets.active.bg_stroke.width = 1.2;
+        style.visuals.widgets.active.fg_stroke.color = Color32::from_rgb(255, 252, 255);
         style.visuals.widgets.active.weak_bg_fill = if dark_theme {
             Color32::from_rgb(255, 251, 253)
         } else {
@@ -3904,6 +3902,46 @@ impl SoundFxApp {
         response
     }
 
+    fn gemini_api_key_field(ui: &mut Ui, api_key: &mut String, visible: &mut bool) -> bool {
+        let mut changed = false;
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new("Gemini API")
+                    .size(13.0)
+                    .color(Self::strong_text_color())
+                    .strong(),
+            );
+            ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                let toggle = Self::icon_titlebar(
+                    ui,
+                    [34.0, 28.0],
+                    if *visible { 0xe8f5 } else { 0xe8f4 },
+                    *visible,
+                    false,
+                )
+                .on_hover_text(if *visible {
+                    "Hide API key"
+                } else {
+                    "Show API key"
+                });
+                if toggle.clicked() {
+                    *visible = !*visible;
+                }
+            });
+        });
+        ui.add_space(8.0);
+        let response = ui.add(
+            TextEdit::singleline(api_key)
+                .desired_width(f32::INFINITY)
+                .hint_text("AIza...")
+                .password(!*visible),
+        );
+        if response.changed() {
+            changed = true;
+        }
+        changed
+    }
+
     fn paint_theme_titlebar_icon(painter: &egui::Painter, rect: Rect, active: bool) {
         let center = rect.center();
         let icon_color = Self::strong_text_color();
@@ -4167,34 +4205,6 @@ impl SoundFxApp {
                 }
             });
         });
-    }
-
-    fn render_titlebar_drag_zone(&self, ctx: &Context) {
-        if self.is_transition_active() {
-            return;
-        }
-
-        let Some(handle_rect) = self.titlebar_drag_rect else {
-            return;
-        };
-
-        egui::Area::new(egui::Id::new("titlebar-drag-overlay"))
-            .order(egui::Order::Foreground)
-            .fixed_pos(handle_rect.min)
-            .interactable(true)
-            .show(ctx, |ui| {
-                let (_, response) =
-                    ui.allocate_exact_size(handle_rect.size(), Sense::click_and_drag());
-                if response.hovered() {
-                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
-                }
-                if response.dragged() {
-                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
-                }
-                if response.drag_started() {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
-                }
-            });
     }
 
     fn render_custom_window_resize_handles(&mut self, ctx: &Context) {
@@ -5775,20 +5785,11 @@ impl SoundFxApp {
                     .corner_radius(22.0)
                     .inner_margin(Margin::same(16))
                     .show(ui, |ui| {
-                        ui.label(
-                            RichText::new("Gemini API")
-                                .size(13.0)
-                                .color(Self::strong_text_color())
-                                .strong(),
-                        );
-                        ui.add_space(8.0);
-                        let response = ui.add(
-                            TextEdit::singleline(&mut self.gemini_api_key)
-                                .desired_width(f32::INFINITY)
-                                .hint_text("AIza...")
-                                .password(true),
-                        );
-                        if response.changed() {
+                        if Self::gemini_api_key_field(
+                            ui,
+                            &mut self.gemini_api_key,
+                            &mut self.gemini_api_key_visible,
+                        ) {
                             save_gemini = true;
                         }
                     });
@@ -6889,6 +6890,7 @@ impl SoundFxApp {
                             None
                         },
                         updates_per_second: self.pitch_update_hz,
+                        show_sharps_only: self.pitch_show_sharps,
                     }) {
                         Ok(()) => {
                             self.center_pitch_overlay_next_frame = true;
@@ -9821,6 +9823,7 @@ impl SoundFxApp {
         let mut preview_request = false;
         let mut add_to_library = false;
         let mut clear_result = false;
+        let mut save_gemini = false;
         let mut save_preset = false;
         let mut delete_preset = false;
         let selected_voice_label = Self::gemini_voice_label(&self.tts_voice_name).to_owned();
@@ -9954,6 +9957,21 @@ impl SoundFxApp {
                     }
                 });
                 ui.add_space(10.0);
+                Frame::new()
+                    .fill(Self::surface_fill())
+                    .stroke(Stroke::new(1.0, Self::border_color()))
+                    .corner_radius(22.0)
+                    .inner_margin(Margin::same(16))
+                    .show(ui, |ui| {
+                        if Self::gemini_api_key_field(
+                            ui,
+                            &mut self.gemini_api_key,
+                            &mut self.gemini_api_key_visible,
+                        ) {
+                            save_gemini = true;
+                        }
+                    });
+                ui.add_space(12.0);
                 ui.label(
                     RichText::new("Direction / accent prompt")
                         .size(12.0)
@@ -10112,6 +10130,9 @@ impl SoundFxApp {
 
         if save_preset {
             self.save_current_tts_preset();
+        }
+        if save_gemini {
+            let _ = self.storage.save_gemini_api_key(&self.gemini_api_key);
         }
         if delete_preset {
             self.delete_selected_tts_preset();
