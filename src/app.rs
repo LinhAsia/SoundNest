@@ -2,6 +2,7 @@ use crate::audio::AudioEngine;
 use crate::downloader::{YoutubeAudioDownloader, YoutubeSearchResult};
 use crate::gemini_tts;
 use crate::hotkey::GlobalHotkeyManager;
+use crate::localization::Localization;
 use crate::myinstants::{MyinstantsClient, MyinstantsResult};
 use crate::pitch::{
     PitchInputSource, PitchMonitor, PitchMonitorConfig, PitchSnapshot, analyze_pitch_file,
@@ -300,6 +301,7 @@ pub struct SoundFxApp {
     preview_cursor: Option<(Uuid, f32)>,
     dark_theme: bool,
     app_transition_animation: bool,
+    localization: Localization,
     startup_sound_name: Option<String>,
     exit_sound_name: Option<String>,
     gemini_api_key: String,
@@ -454,6 +456,10 @@ impl SoundFxApp {
             .ok()
             .flatten()
             .unwrap_or(true);
+        let mut localization = Localization::load();
+        if let Ok(Some(language_code)) = storage.load_language_code() {
+            localization.set_current_code(&language_code);
+        }
         let startup_sound_name = storage.load_startup_sound_name().ok().flatten();
         let exit_sound_name = storage.load_exit_sound_name().ok().flatten();
         let gemini_api_key = storage
@@ -559,6 +565,7 @@ impl SoundFxApp {
             preview_cursor: None,
             dark_theme,
             app_transition_animation,
+            localization,
             startup_sound_name,
             exit_sound_name,
             gemini_api_key,
@@ -1585,7 +1592,7 @@ impl SoundFxApp {
         if self.record_input_source == PitchInputSource::Microphone
             && self.selected_record_input_device.is_none()
         {
-            self.set_error_status("No microphone input found");
+            self.set_error_status(self.t("pitch.no_microphone_input"));
             return;
         }
 
@@ -1655,7 +1662,7 @@ impl SoundFxApp {
         if self.pitch_input_source == PitchInputSource::Microphone
             && self.selected_pitch_input_device.is_none()
         {
-            self.set_error_status("No microphone input found");
+            self.set_error_status(self.t("pitch.no_microphone_input"));
             return;
         }
 
@@ -1667,7 +1674,6 @@ impl SoundFxApp {
                 None
             },
             updates_per_second: self.pitch_update_hz,
-            show_sharps_only: self.pitch_show_sharps,
         }) {
             Ok(()) => {
                 self.center_pitch_overlay_next_frame = true;
@@ -1852,10 +1858,14 @@ impl SoundFxApp {
         let (tx, rx) = mpsc::channel();
         self.active_record_video_export = Some(RecordVideoExportState {
             progress: 0.04,
-            stage: "Preparing".to_owned(),
+            stage: self.t("record.preparing"),
             receiver: rx,
         });
         self.clear_status();
+
+        let record_preparing_audio = self.t("record.preparing_audio");
+        let record_checking_ffmpeg = self.t("record.checking_ffmpeg");
+        let record_analyzing_pitch = self.t("record.analyzing_pitch");
 
         thread::spawn(move || {
             let send_progress = |progress: f32, stage: &str| {
@@ -1868,7 +1878,7 @@ impl SoundFxApp {
             let mut processed_audio_to_clean: Option<PathBuf> = None;
             let mut video_to_clean: Option<PathBuf> = None;
             let result = (|| -> Result<RecordVideoExportResult> {
-                send_progress(0.08, "Preparing audio");
+                send_progress(0.08, record_preparing_audio.as_str());
                 let storage = Storage::new()?;
 
                 let audio_source = if keep_vocal {
@@ -1885,11 +1895,11 @@ impl SoundFxApp {
                     storage.export_processed_sound_from_path(&audio_source, &sound)?;
                 processed_audio_to_clean = Some(processed_audio.clone());
 
-                send_progress(0.18, "Checking ffmpeg");
+                send_progress(0.18, record_checking_ffmpeg.as_str());
                 let downloader = YoutubeAudioDownloader::new(&root_dir)?;
                 let ffmpeg_path = downloader.ensure_ffmpeg_available()?;
 
-                send_progress(0.28, "Analyzing pitch");
+                send_progress(0.28, record_analyzing_pitch.as_str());
                 let (duration_secs, frames) =
                     analyze_pitch_file(&processed_audio, export_fps, show_sharps)?;
 
@@ -2383,12 +2393,12 @@ impl SoundFxApp {
         }
         let api_key = self.gemini_api_key.trim().to_owned();
         if api_key.is_empty() {
-            self.tts_error = Some("Gemini API key is empty".to_owned());
+            self.tts_error = Some(self.t("download.gemini_api_key_missing"));
             return;
         }
         let text = self.tts_text.trim().to_owned();
         if text.is_empty() {
-            self.tts_error = Some("Text is empty".to_owned());
+            self.tts_error = Some(self.t("download.text_empty"));
             return;
         }
         let voice = self.tts_voice_name.trim().to_owned();
@@ -3902,11 +3912,20 @@ impl SoundFxApp {
         response
     }
 
-    fn gemini_api_key_field(ui: &mut Ui, api_key: &mut String, visible: &mut bool) -> bool {
+    fn t(&self, key: &str) -> String {
+        self.localization.text(key)
+    }
+
+    fn gemini_api_key_field(
+        ui: &mut Ui,
+        label: &str,
+        api_key: &mut String,
+        visible: &mut bool,
+    ) -> bool {
         let mut changed = false;
         ui.horizontal(|ui| {
             ui.label(
-                RichText::new("Gemini API")
+                RichText::new(label)
                     .size(13.0)
                     .color(Self::strong_text_color())
                     .strong(),
@@ -4052,6 +4071,12 @@ impl SoundFxApp {
                 .inner;
 
             self.titlebar_drag_rect = Some(drag_response.rect);
+            if drag_response.hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+            }
+            if drag_response.dragged() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+            }
             if drag_response.drag_started() {
                 ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
             }
@@ -4119,7 +4144,7 @@ impl SoundFxApp {
                     self.show_pitch_panel,
                     false,
                 )
-                .on_hover_text("Pitch Monitor");
+                .on_hover_text(self.t("title.pitch_monitor"));
                 if spn_response.clicked() {
                     self.refresh_pitch_capture_devices();
                     self.show_pitch_panel = !self.show_pitch_panel;
@@ -4132,7 +4157,7 @@ impl SoundFxApp {
                     self.show_stream_panel,
                     false,
                 )
-                .on_hover_text("Stream Input");
+                .on_hover_text(self.t("title.stream_input"));
                 if stream_response.clicked() {
                     self.refresh_stream_input_capture_devices();
                     self.show_stream_panel = !self.show_stream_panel;
@@ -4420,7 +4445,7 @@ impl SoundFxApp {
         } else {
             Self::truncate_middle_ascii(self.import_dir.to_string_lossy().as_ref(), 42)
         };
-        let (_panel_bounds, panel_size, _panel_pos) =
+        let (_panel_bounds, panel_size, panel_pos) =
             self.centered_modal_placement(ctx, vec2(640.0, 560.0), vec2(320.0, 280.0), 0.0);
 
         egui::Window::new("")
@@ -4430,7 +4455,7 @@ impl SoundFxApp {
             .resizable(false)
             .collapsible(false)
             .fixed_size(panel_size)
-            .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
+            .fixed_pos(panel_pos)
             .open(&mut open_panel)
             .frame(
                 Frame::new()
@@ -4633,7 +4658,7 @@ impl SoundFxApp {
         let mut use_selected_sound = false;
         let refresh_inputs = false;
         let mut clear_hotkey = false;
-        let (_panel_bounds, panel_size, _panel_pos) =
+        let (_panel_bounds, panel_size, panel_pos) =
             self.centered_modal_placement(ctx, vec2(520.0, 420.0), vec2(320.0, 260.0), 0.0);
 
         egui::Window::new("")
@@ -4643,7 +4668,7 @@ impl SoundFxApp {
             .resizable(false)
             .collapsible(false)
             .fixed_size(panel_size)
-            .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
+            .fixed_pos(panel_pos)
             .open(&mut open_panel)
             .frame(
                 Frame::new()
@@ -4930,7 +4955,7 @@ impl SoundFxApp {
             .as_ref()
             .map(|export| (export.progress, export.stage.clone()));
         let exporting_video = export_progress.is_some();
-        let (_panel_bounds, panel_size, _panel_pos) =
+        let (_panel_bounds, panel_size, panel_pos) =
             self.centered_modal_placement(ctx, vec2(680.0, 560.0), vec2(360.0, 300.0), 0.0);
 
         egui::Window::new("")
@@ -4940,7 +4965,7 @@ impl SoundFxApp {
             .resizable(false)
             .collapsible(false)
             .fixed_size(panel_size)
-            .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
+            .fixed_pos(panel_pos)
             .open(&mut open_panel)
             .frame(
                 Frame::new()
@@ -5186,7 +5211,7 @@ impl SoundFxApp {
                             let sharp = ui.add_sized(
                                 [88.0, 32.0],
                                 Self::action_button(
-                                    RichText::new("Sharp").size(12.5),
+                                    RichText::new(self.t("record.sharp")).size(12.5),
                                     self.record_export_video_sharps,
                                     false,
                                 ),
@@ -5371,7 +5396,7 @@ impl SoundFxApp {
         let mut install_stream_driver = false;
         let mut uninstall_stream_driver = false;
         let mut routing_changed = false;
-        let (_panel_bounds, panel_size, _panel_pos) =
+        let (_panel_bounds, panel_size, panel_pos) =
             self.centered_modal_placement(ctx, vec2(344.0, 420.0), vec2(300.0, 280.0), 0.0);
 
         egui::Window::new("")
@@ -5381,7 +5406,7 @@ impl SoundFxApp {
             .resizable(false)
             .collapsible(false)
             .fixed_size(panel_size)
-            .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
+            .fixed_pos(panel_pos)
             .frame(
                 Frame::new()
                     .fill(Self::overlay_panel_fill())
@@ -5399,7 +5424,7 @@ impl SoundFxApp {
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(
-                        RichText::new("Stream Input")
+                        RichText::new(self.t("title.stream_input"))
                             .size(16.0)
                             .color(Self::strong_text_color())
                             .strong(),
@@ -5412,9 +5437,7 @@ impl SoundFxApp {
                 });
                 ui.add_space(6.0);
                 ui.label(
-                    RichText::new(
-                        "Route system audio and/or your default microphone into VB-CABLE so other apps can use the app output as a mic input.",
-                    )
+                    RichText::new(self.t("stream.description"))
                     .size(11.5)
                     .color(Self::muted_text_color()),
                 );
@@ -5428,20 +5451,20 @@ impl SoundFxApp {
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.label(
-                                RichText::new("Driver")
+                                RichText::new(self.t("stream.driver"))
                                     .size(12.5)
                                     .color(Self::strong_text_color())
                                     .strong(),
                             );
                             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                                 let label = if self.stream_driver_busy {
-                                    "Working"
+                                    self.t("settings.preparing")
                                 } else if !self.stream_driver_checked {
-                                    "Checking"
+                                    self.t("stream.checking")
                                 } else if self.stream_driver_installed {
-                                    "Installed"
+                                    self.t("settings.installed")
                                 } else {
-                                    "Not installed"
+                                    self.t("settings.not_installed")
                                 };
                                 ui.label(
                                     RichText::new(label)
@@ -5455,7 +5478,8 @@ impl SoundFxApp {
                             let install = ui.add_enabled(
                                 !self.stream_driver_busy && !self.stream_driver_installed,
                                 Self::action_button(
-                                    RichText::new("Install").size(12.0),
+                                    RichText::new(self.t("settings.install_stream_driver"))
+                                        .size(12.0),
                                     false,
                                     false,
                                 ),
@@ -5468,7 +5492,8 @@ impl SoundFxApp {
                             let remove = ui.add_enabled(
                                 !self.stream_driver_busy,
                                 Self::action_button(
-                                    RichText::new("Remove").size(12.0),
+                                    RichText::new(self.t("settings.remove_stream_driver"))
+                                        .size(12.0),
                                     false,
                                     false,
                                 ),
@@ -5483,7 +5508,7 @@ impl SoundFxApp {
                             ui.horizontal(|ui| {
                                 ui.spinner();
                                 ui.label(
-                                    RichText::new("Updating stream driver...")
+                                    RichText::new(self.t("settings.updating_stream_driver"))
                                         .size(11.0)
                                         .color(Self::muted_text_color()),
                                 );
@@ -5508,18 +5533,18 @@ impl SoundFxApp {
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.label(
-                                RichText::new("Route To Virtual Mic")
+                                RichText::new(self.t("stream.route_to_virtual_mic"))
                                     .size(12.5)
                                     .color(Self::strong_text_color())
                                     .strong(),
                             );
                             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                                 let routing_label = if snapshot.error.is_some() {
-                                    "Error"
+                                    self.t("stream.error")
                                 } else if snapshot.running {
-                                    "Live"
+                                    self.t("stream.live")
                                 } else {
-                                    "Idle"
+                                    self.t("stream.idle")
                                 };
                                 ui.label(
                                     RichText::new(routing_label)
@@ -5530,34 +5555,41 @@ impl SoundFxApp {
                         });
                         ui.add_space(8.0);
                         ui.label(
-                            RichText::new(
-                                "Pick the microphone to mix in. In Discord or any other app, choose CABLE Output as the mic input.",
-                            )
+                            RichText::new(self.t("stream.description"))
                                 .size(11.0)
                                 .color(Self::muted_text_color()),
                         );
                         ui.add_space(10.0);
                         ui.add_enabled_ui(self.stream_driver_installed && !self.stream_driver_busy, |ui| {
+                            let capture_system_audio_label = self.t("stream.capture_system_audio");
+                            let capture_microphone_label = self.t("stream.capture_microphone");
                             routing_changed |= ui
-                                .checkbox(&mut self.stream_input_system_audio, "Capture system audio")
+                                .checkbox(
+                                    &mut self.stream_input_system_audio,
+                                    capture_system_audio_label,
+                                )
                                 .changed();
                             routing_changed |= ui
-                                .checkbox(&mut self.stream_input_microphone, "Capture microphone")
+                                .checkbox(
+                                    &mut self.stream_input_microphone,
+                                    capture_microphone_label,
+                                )
                                 .changed();
                             ui.add_space(8.0);
                             ui.horizontal(|ui| {
                                 ui.label(
-                                    RichText::new("Mic device")
+                                    RichText::new(self.t("stream.mic_device"))
                                         .size(11.5)
                                         .color(Self::muted_text_color()),
                                 );
+                                let default_microphone_label = self.t("stream.default_microphone");
                                 let before = self.selected_stream_input_device.clone();
                                 ComboBox::from_id_salt("stream-input-mic-device")
                                     .width(190.0)
                                     .selected_text(
                                         self.selected_stream_input_device
-                                            .as_deref()
-                                            .unwrap_or("Default microphone"),
+                                            .clone()
+                                            .unwrap_or(default_microphone_label),
                                     )
                                     .show_ui(ui, |ui| {
                                         for name in &self.stream_input_capture_devices {
@@ -5581,7 +5613,7 @@ impl SoundFxApp {
                         if !self.stream_driver_installed {
                             ui.add_space(6.0);
                             ui.label(
-                                RichText::new("Install the stream driver first to expose the virtual mic.")
+                                RichText::new(self.t("stream.pick_mic_hint"))
                                     .size(11.0)
                                     .color(Self::muted_text_color()),
                             );
@@ -5589,13 +5621,17 @@ impl SoundFxApp {
                         if let Some(target_name) = snapshot.target_device_name.as_ref() {
                             ui.add_space(8.0);
                             ui.label(
-                                RichText::new(format!("Target: {target_name}"))
+                                RichText::new(format!("{}: {target_name}", self.t("stream.target")))
                                     .size(11.0)
                                     .color(Self::muted_text_color()),
                             );
                         }
                         ui.add_space(8.0);
-                        ui.checkbox(&mut self.stream_input_show_waveform, "Show live wave");
+                        let show_live_wave_label = self.t("stream.show_live_wave");
+                        ui.checkbox(
+                            &mut self.stream_input_show_waveform,
+                            show_live_wave_label,
+                        );
                         if snapshot.running {
                             ui.add_space(8.0);
                             let meter_level = Self::boost_stream_meter_level(snapshot.level);
@@ -5656,7 +5692,6 @@ impl SoundFxApp {
         let mut clear_exit = false;
         let mut reset_startup = false;
         let mut reset_exit = false;
-        let mut save_gemini = false;
         let mut animation_changed = false;
         let mut install_demucs = false;
         let mut preload_demucs = false;
@@ -5664,7 +5699,9 @@ impl SoundFxApp {
         let mut uninstall_demucs = false;
         let mut install_stream_driver = false;
         let mut uninstall_stream_driver = false;
-        let (_panel_bounds, panel_size, _panel_pos) =
+        let available_languages = self.localization.available_languages();
+        let mut selected_language = self.localization.current_code().to_owned();
+        let (_panel_bounds, panel_size, panel_pos) =
             self.centered_modal_placement(ctx, vec2(520.0, 700.0), vec2(320.0, 360.0), 0.0);
 
         egui::Window::new("")
@@ -5674,7 +5711,7 @@ impl SoundFxApp {
             .resizable(false)
             .collapsible(false)
             .fixed_size(panel_size)
-            .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
+            .fixed_pos(panel_pos)
             .open(&mut open_panel)
             .frame(
                 Frame::new()
@@ -5700,15 +5737,31 @@ impl SoundFxApp {
                 });
 
                 ui.add_space(14.0);
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(self.t("settings.language"))
+                            .size(12.5)
+                            .color(Self::muted_text_color()),
+                    );
+                    Self::with_dark_combo_visuals(ui, |ui| {
+                        ComboBox::from_id_salt("settings-language")
+                            .width(140.0)
+                            .selected_text(
+                                RichText::new(self.localization.current_name())
+                                    .color(Self::strong_text_color()),
+                            )
+                            .show_ui(ui, |ui| {
+                                for (code, name) in &available_languages {
+                                    ui.selectable_value(&mut selected_language, code.clone(), name);
+                                }
+                            });
+                    });
+                });
+                ui.add_space(12.0);
                 let startup_toggle = ui.add_sized(
                     [ui.available_width(), 34.0],
                     Self::action_button(
-                        RichText::new(if self.settings_show_startup_sound {
-                            "Startup sound"
-                        } else {
-                            "Startup sound"
-                        })
-                        .size(13.0),
+                        RichText::new(self.t("settings.startup_sound")).size(13.0),
                         self.settings_show_startup_sound,
                         false,
                     ),
@@ -5722,7 +5775,7 @@ impl SoundFxApp {
                     Self::draw_settings_sound_row(
                         ui,
                         &self.sounds,
-                        "Startup",
+                        &self.t("settings.startup_sound"),
                         &mut self.settings_startup_candidate,
                         &self.startup_sound_name,
                         "settings-startup-combo",
@@ -5736,7 +5789,7 @@ impl SoundFxApp {
                 let exit_toggle = ui.add_sized(
                     [ui.available_width(), 34.0],
                     Self::action_button(
-                        RichText::new("Exit sound").size(13.0),
+                        RichText::new(self.t("settings.exit_sound")).size(13.0),
                         self.settings_show_exit_sound,
                         false,
                     ),
@@ -5750,7 +5803,7 @@ impl SoundFxApp {
                     Self::draw_settings_sound_row(
                         ui,
                         &self.sounds,
-                        "Exit",
+                        &self.t("settings.exit_sound"),
                         &mut self.settings_exit_candidate,
                         &self.exit_sound_name,
                         "settings-exit-combo",
@@ -5767,9 +5820,10 @@ impl SoundFxApp {
                     .corner_radius(22.0)
                     .inner_margin(Margin::same(16))
                     .show(ui, |ui| {
+                        let animation_label = self.t("settings.animation");
                         let response = ui.checkbox(
                             &mut self.app_transition_animation,
-                            RichText::new("Animation")
+                            RichText::new(animation_label)
                                 .size(13.0)
                                 .color(Self::strong_text_color()),
                         );
@@ -5785,38 +5839,22 @@ impl SoundFxApp {
                     .corner_radius(22.0)
                     .inner_margin(Margin::same(16))
                     .show(ui, |ui| {
-                        if Self::gemini_api_key_field(
-                            ui,
-                            &mut self.gemini_api_key,
-                            &mut self.gemini_api_key_visible,
-                        ) {
-                            save_gemini = true;
-                        }
-                    });
-
-                ui.add_space(12.0);
-                Frame::new()
-                    .fill(Self::surface_fill())
-                    .stroke(Stroke::new(1.0, Self::border_color()))
-                    .corner_radius(22.0)
-                    .inner_margin(Margin::same(16))
-                    .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.label(
-                                RichText::new("Keep Vocal Model")
+                                RichText::new(self.t("settings.keep_vocal_model"))
                                     .size(13.0)
                                     .color(Self::strong_text_color())
                                     .strong(),
                             );
                             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                                 let status = if self.demucs_model_loading {
-                                    "Preparing"
+                                    self.t("settings.preparing")
                                 } else if self.demucs_model_ready {
-                                    "Ready"
+                                    self.t("settings.ready")
                                 } else if crate::vocal_separation::is_demucs_available() {
-                                    "Installed"
+                                    self.t("settings.installed")
                                 } else {
-                                    "Not installed"
+                                    self.t("settings.not_installed")
                                 };
                                 ui.label(
                                     RichText::new(status)
@@ -5828,7 +5866,7 @@ impl SoundFxApp {
                         ui.add_space(8.0);
                         ui.label(
                             RichText::new(
-                                "Prepare model warms up the offline demucs process. It can still take time on later runs because the CLI starts a fresh process each separation.",
+                                self.t("settings.keep_vocal_model_description"),
                             )
                             .size(11.5)
                             .color(Self::muted_text_color()),
@@ -5839,7 +5877,7 @@ impl SoundFxApp {
                                 !self.demucs_installing
                                     && !crate::vocal_separation::is_demucs_available(),
                                 Self::action_button(
-                                    RichText::new("Install demucs-rs").size(12.0),
+                                    RichText::new(self.t("settings.install_demucs")).size(12.0),
                                     false,
                                     false,
                                 ),
@@ -5854,9 +5892,9 @@ impl SoundFxApp {
                                     && crate::vocal_separation::is_demucs_available(),
                                 Self::action_button(
                                     RichText::new(if self.demucs_model_ready {
-                                        "Reload model"
+                                        self.t("settings.reload_model")
                                     } else {
-                                        "Prepare model"
+                                        self.t("settings.prepare_model")
                                     })
                                     .size(12.0),
                                     false,
@@ -5872,9 +5910,9 @@ impl SoundFxApp {
                                 self.demucs_model_loading || self.demucs_model_ready,
                                 Self::action_button(
                                     RichText::new(if self.demucs_model_loading {
-                                        "Stop preparing"
+                                        self.t("settings.stop_preparing")
                                     } else {
-                                        "Stop model"
+                                        self.t("settings.stop_model")
                                     })
                                     .size(12.0),
                                     false,
@@ -5891,7 +5929,7 @@ impl SoundFxApp {
                                     && !self.demucs_model_loading
                                     && crate::vocal_separation::is_demucs_available(),
                                 Self::action_button(
-                                    RichText::new("Uninstall demucs-rs").size(12.0),
+                                    RichText::new(self.t("settings.uninstall_demucs")).size(12.0),
                                     false,
                                     false,
                                 ),
@@ -5939,7 +5977,7 @@ impl SoundFxApp {
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.label(
-                                RichText::new("Stream Mic Driver")
+                                RichText::new(self.t("settings.stream_mic_driver"))
                                     .size(13.0)
                                     .color(Self::strong_text_color())
                                     .strong(),
@@ -5947,13 +5985,13 @@ impl SoundFxApp {
                             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                                 ui.label(
                                     RichText::new(if self.stream_driver_busy {
-                                        "Working"
+                                        self.t("settings.preparing")
                                     } else if !self.stream_driver_checked {
-                                        "Checking"
+                                        self.t("stream.checking")
                                     } else if self.stream_driver_installed {
-                                        "Installed"
+                                        self.t("settings.installed")
                                     } else {
-                                        "Not installed"
+                                        self.t("settings.not_installed")
                                     })
                                     .size(12.0)
                                     .color(Self::muted_text_color()),
@@ -5963,7 +6001,7 @@ impl SoundFxApp {
                         ui.add_space(8.0);
                         ui.label(
                             RichText::new(
-                                "A true system microphone endpoint needs a virtual audio driver. This installs or removes a single VB-CABLE input/output pair from inside the app with no extra setup UI.",
+                                self.t("settings.stream_driver_description"),
                             )
                             .size(11.5)
                             .color(Self::muted_text_color()),
@@ -5973,7 +6011,8 @@ impl SoundFxApp {
                             let install = ui.add_enabled(
                                 !self.stream_driver_busy && !self.stream_driver_installed,
                                 Self::action_button(
-                                    RichText::new("Install stream driver").size(12.0),
+                                    RichText::new(self.t("settings.install_stream_driver"))
+                                        .size(12.0),
                                     false,
                                     false,
                                 ),
@@ -5986,7 +6025,8 @@ impl SoundFxApp {
                             let uninstall = ui.add_enabled(
                                 !self.stream_driver_busy,
                                 Self::action_button(
-                                    RichText::new("Remove stream driver").size(12.0),
+                                    RichText::new(self.t("settings.remove_stream_driver"))
+                                        .size(12.0),
                                     false,
                                     false,
                                 ),
@@ -6001,7 +6041,7 @@ impl SoundFxApp {
                             ui.horizontal(|ui| {
                                 ui.spinner();
                                 ui.label(
-                                    RichText::new("Updating stream driver...")
+                                    RichText::new(self.t("settings.updating_stream_driver"))
                                         .size(11.5)
                                         .color(Self::muted_text_color()),
                                 );
@@ -6027,8 +6067,11 @@ impl SoundFxApp {
                 .storage
                 .save_app_transition_animation(self.app_transition_animation);
         }
-        if save_gemini {
-            let _ = self.storage.save_gemini_api_key(&self.gemini_api_key);
+        if selected_language != self.localization.current_code() {
+            self.localization.set_current_code(&selected_language);
+            let _ = self
+                .storage
+                .save_language_code(self.localization.current_code());
         }
         if install_demucs {
             self.start_demucs_install(ctx);
@@ -6319,7 +6362,7 @@ impl SoundFxApp {
         let mut copy_request = false;
         let mut folder_request = false;
         let mut delete_request = false;
-        let (_panel_bounds, panel_size, _panel_pos) =
+        let (_panel_bounds, panel_size, panel_pos) =
             self.centered_modal_placement(ctx, vec2(760.0, 620.0), vec2(360.0, 320.0), 0.0);
 
         egui::Window::new("")
@@ -6329,7 +6372,7 @@ impl SoundFxApp {
             .resizable(false)
             .collapsible(false)
             .fixed_size(panel_size)
-            .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
+            .fixed_pos(panel_pos)
             .frame(
                 Frame::new()
                     .fill(Self::overlay_panel_fill())
@@ -6627,7 +6670,7 @@ impl SoundFxApp {
         let mut toggle = None;
         let refresh_inputs = false;
         let mut close_request = false;
-        let (_panel_bounds, panel_size, _panel_pos) =
+        let (_panel_bounds, panel_size, panel_pos) =
             self.centered_modal_placement(ctx, vec2(296.0, 250.0), vec2(248.0, 220.0), 0.0);
         egui::Window::new("")
             .id(egui::Id::new("pitch-monitor-panel"))
@@ -6636,7 +6679,7 @@ impl SoundFxApp {
             .resizable(false)
             .collapsible(false)
             .fixed_size(panel_size)
-            .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
+            .fixed_pos(panel_pos)
             .frame(
                 Frame::new()
                     .fill(Self::overlay_panel_fill())
@@ -6824,10 +6867,12 @@ impl SoundFxApp {
                         .inner_margin(Margin::symmetric(12, 10))
                         .show(ui, |ui| {
                             ui.horizontal(|ui| {
+                                let animation_label = self.t("settings.animation");
+                                let sharp_label = self.t("pitch.sharp");
                                 let animation_changed = ui
                                     .checkbox(
                                         &mut self.pitch_overlay_animation,
-                                        RichText::new("Animation")
+                                        RichText::new(animation_label)
                                             .size(13.0)
                                             .color(Color32::from_rgb(58, 48, 58)),
                                     )
@@ -6836,7 +6881,7 @@ impl SoundFxApp {
                                 let sharp_changed = ui
                                     .checkbox(
                                         &mut self.pitch_show_sharps,
-                                        RichText::new("Sharp")
+                                        RichText::new(sharp_label)
                                             .size(13.0)
                                             .color(Color32::from_rgb(58, 48, 58)),
                                     )
@@ -6847,10 +6892,12 @@ impl SoundFxApp {
                                         .save_overlay_animation(self.pitch_overlay_animation);
                                     self.center_pitch_overlay_next_frame = snapshot.running;
                                     self.pitch_overlay_native_visuals_applied = false;
+                                    ctx.request_repaint();
                                 }
                                 if sharp_changed {
                                     let _ =
                                         self.storage.save_pitch_show_sharps(self.pitch_show_sharps);
+                                    ctx.request_repaint();
                                 }
                             });
                         });
@@ -6878,7 +6925,7 @@ impl SoundFxApp {
                 if self.pitch_input_source == PitchInputSource::Microphone
                     && self.selected_pitch_input_device.is_none()
                 {
-                    self.set_error_status("No microphone input found");
+                    self.set_error_status(self.t("pitch.no_microphone_input"));
                 } else {
                     match self.pitch_monitor.start(PitchMonitorConfig {
                         source: self.pitch_input_source,
@@ -6890,7 +6937,6 @@ impl SoundFxApp {
                             None
                         },
                         updates_per_second: self.pitch_update_hz,
-                        show_sharps_only: self.pitch_show_sharps,
                     }) {
                         Ok(()) => {
                             self.center_pitch_overlay_next_frame = true;
@@ -7396,6 +7442,7 @@ impl SoundFxApp {
         if sharp_response.clicked() {
             self.pitch_show_sharps = !self.pitch_show_sharps;
             let _ = self.storage.save_pitch_show_sharps(self.pitch_show_sharps);
+            ui.ctx().request_repaint();
         }
         if close_response.clicked() {
             *should_stop = true;
@@ -7425,6 +7472,13 @@ impl SoundFxApp {
         let Some((sharp_name, flat_with_octave)) = note.split_once('/') else {
             return note.to_owned();
         };
+        let Some(sharp_digit) = sharp_name
+            .char_indices()
+            .find(|(_, ch)| ch.is_ascii_digit() || *ch == '-')
+            .map(|(index, _)| index)
+        else {
+            return note.to_owned();
+        };
         let Some(first_digit) = flat_with_octave
             .char_indices()
             .find(|(_, ch)| ch.is_ascii_digit() || *ch == '-')
@@ -7433,6 +7487,7 @@ impl SoundFxApp {
             return note.to_owned();
         };
 
+        let sharp_name = &sharp_name[..sharp_digit];
         let flat_name = &flat_with_octave[..first_digit];
         let octave = &flat_with_octave[first_digit..];
         if self.pitch_show_sharps {
@@ -7485,7 +7540,7 @@ impl SoundFxApp {
             let sounds_tab = ui.add_sized(
                 [84.0, 30.0],
                 Self::action_button(
-                    RichText::new("Audio").size(12.5),
+                    RichText::new(self.t("library.audio")).size(12.5),
                     self.library_tab == LibraryTab::Sounds,
                     false,
                 ),
@@ -7499,7 +7554,7 @@ impl SoundFxApp {
             let videos_tab = ui.add_sized(
                 [84.0, 30.0],
                 Self::action_button(
-                    RichText::new("Video").size(12.5),
+                    RichText::new(self.t("library.video")).size(12.5),
                     self.library_tab == LibraryTab::Videos,
                     false,
                 ),
@@ -7583,7 +7638,11 @@ impl SoundFxApp {
                     }
                     ui.add_space(8.0);
                     ui.label(
-                        RichText::new(format!("{} col", self.library_grid_columns))
+                        RichText::new(format!(
+                            "{} {}",
+                            self.library_grid_columns,
+                            self.t("library.columns")
+                        ))
                             .size(11.5)
                             .color(Self::muted_text_color()),
                     );
@@ -7602,6 +7661,7 @@ impl SoundFxApp {
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(Self::icon(0xe8b6, 16.0, Self::muted_text_color()));
+                    let search_hint = self.t("library.search");
                     let query = if self.library_tab == LibraryTab::Videos {
                         &mut self.library_video_query
                     } else {
@@ -7610,7 +7670,7 @@ impl SoundFxApp {
                     ui.add_sized(
                         [ui.available_width(), 24.0],
                         TextEdit::singleline(query)
-                            .hint_text("Search")
+                            .hint_text(search_hint)
                             .desired_width(f32::INFINITY),
                     );
                 });
@@ -8418,12 +8478,13 @@ impl SoundFxApp {
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.label(Self::icon(0xe8b6, 16.0, Self::muted_text_color()));
-                        ui.add_sized(
-                            [ui.available_width(), 24.0],
-                            TextEdit::singleline(&mut self.library_audio_query)
-                                .hint_text("Search")
-                                .desired_width(f32::INFINITY),
-                        )
+                        let search_hint = self.t("library.search");
+                    ui.add_sized(
+                        [ui.available_width(), 24.0],
+                        TextEdit::singleline(&mut self.library_audio_query)
+                            .hint_text(search_hint)
+                            .desired_width(f32::INFINITY),
+                    )
                     })
                     .inner
                 });
@@ -8686,9 +8747,9 @@ impl SoundFxApp {
                 let controls_width = 52.0 + 52.0 + 52.0 + 64.0 + 64.0 + 36.0;
                 let name_width = (ui.available_width() - controls_width).max(180.0);
 
-                ui.horizontal(|ui| {
+                ui.vertical(|ui| {
                     let response = ui.add_sized(
-                        [name_width, 50.0],
+                        [ui.available_width(), 44.0],
                         TextEdit::singleline(&mut sound.name)
                             .font(egui::TextStyle::Heading)
                             .desired_width(name_width)
@@ -8697,6 +8758,8 @@ impl SoundFxApp {
                     if response.changed() {
                         changed = true;
                     }
+
+                    ui.add_space(8.0);
                     ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                         if Self::icon_action(ui, [52.0, 34.0], 0xe872, false, false).clicked() {
                             delete_request = true;
@@ -8724,7 +8787,7 @@ impl SoundFxApp {
                     });
                 });
 
-                ui.add_space(24.0);
+                ui.add_space(14.0);
 
                 Frame::new()
                     .fill(Self::panel_fill())
@@ -9830,14 +9893,14 @@ impl SoundFxApp {
         let selected_preset_name = self
             .selected_tts_preset_name()
             .map(str::to_owned)
-            .unwrap_or_else(|| "Custom".to_owned());
+            .unwrap_or_else(|| self.t("download.custom"));
 
         if self.tts_running {
             ctx.request_repaint_after(Duration::from_millis(JOB_POLL_REPAINT_MS));
         }
 
         ui.label(
-            RichText::new("Gemini TTS")
+            RichText::new(self.t("download.gemini_tts"))
                 .size(14.0)
                 .color(Self::strong_text_color())
                 .strong(),
@@ -9852,7 +9915,7 @@ impl SoundFxApp {
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(
-                        RichText::new("Voice")
+                        RichText::new(self.t("download.voice"))
                             .size(12.0)
                             .color(Self::muted_text_color()),
                     );
@@ -9879,7 +9942,7 @@ impl SoundFxApp {
                     });
                     ui.add_space(10.0);
                     ui.label(
-                        RichText::new("Name")
+                        RichText::new(self.t("download.name"))
                             .size(12.0)
                             .color(Self::muted_text_color()),
                     );
@@ -9893,7 +9956,7 @@ impl SoundFxApp {
                 ui.add_space(10.0);
                 ui.horizontal(|ui| {
                     ui.label(
-                        RichText::new("Prompt preset")
+                        RichText::new(self.t("download.prompt_preset"))
                             .size(12.0)
                             .color(Self::muted_text_color()),
                     );
@@ -9908,7 +9971,7 @@ impl SoundFxApp {
                                 if ui
                                     .selectable_label(
                                         self.selected_tts_preset_name().is_none(),
-                                        "Custom",
+                                        self.t("download.custom"),
                                     )
                                     .clicked()
                                 {
@@ -9934,10 +9997,11 @@ impl SoundFxApp {
                             });
                     });
                     ui.add_space(8.0);
+                    let preset_name_hint = self.t("download.preset_name");
                     ui.add_sized(
                         [ui.available_width() - 82.0, 30.0],
                         TextEdit::singleline(&mut self.tts_preset_name)
-                            .hint_text("Preset name"),
+                            .hint_text(preset_name_hint),
                     );
                     let save = ui.add_sized(
                         [30.0, 30.0],
@@ -9965,6 +10029,7 @@ impl SoundFxApp {
                     .show(ui, |ui| {
                         if Self::gemini_api_key_field(
                             ui,
+                            &self.t("download.gemini_api_key"),
                             &mut self.gemini_api_key,
                             &mut self.gemini_api_key_visible,
                         ) {
@@ -9973,7 +10038,7 @@ impl SoundFxApp {
                     });
                 ui.add_space(12.0);
                 ui.label(
-                    RichText::new("Direction / accent prompt")
+                    RichText::new(self.t("download.direction_prompt"))
                         .size(12.0)
                         .color(Self::muted_text_color()),
                 );
@@ -10023,18 +10088,20 @@ impl SoundFxApp {
                     });
                 }
                 ui.add_space(0.0);
+                let direction_hint = self.t("download.direction_hint");
                 ui.add_sized(
                     [ui.available_width(), 96.0],
                     TextEdit::multiline(&mut self.tts_direction_prompt)
                         .desired_width(f32::INFINITY)
-                        .hint_text("Accent / style / pacing guidance. Example: Southern Vietnamese female radio voice, warm and clear, medium pace."),
+                        .hint_text(direction_hint),
                 );
                 ui.add_space(10.0);
+                let enter_text_hint = self.t("download.enter_text");
                 ui.add_sized(
                     [ui.available_width(), 130.0],
                     TextEdit::multiline(&mut self.tts_text)
                         .desired_width(f32::INFINITY)
-                        .hint_text("Enter text to speak"),
+                        .hint_text(enter_text_hint),
                 );
             });
 
@@ -10044,7 +10111,7 @@ impl SoundFxApp {
                 !self.tts_running
                     && !self.tts_text.trim().is_empty()
                     && !self.gemini_api_key.trim().is_empty(),
-                Self::action_button(RichText::new("Generate").size(13.0), false, true),
+                Self::action_button(RichText::new(self.t("download.generate")).size(13.0), false, true),
             );
             Self::decorate_button_response(ui, &generate);
             if generate.clicked() {
@@ -10053,7 +10120,7 @@ impl SoundFxApp {
 
             let preview = ui.add_enabled(
                 self.tts_last_file.is_some() && !self.tts_running,
-                Self::action_button(RichText::new("Preview").size(13.0), false, false),
+                Self::action_button(RichText::new(self.t("download.preview")).size(13.0), false, false),
             );
             Self::decorate_button_response(ui, &preview);
             if preview.clicked() {
@@ -10062,7 +10129,7 @@ impl SoundFxApp {
 
             let add = ui.add_enabled(
                 self.tts_can_add_to_library,
-                Self::action_button(RichText::new("Add to library").size(13.0), false, false),
+                Self::action_button(RichText::new(self.t("download.add_to_library")).size(13.0), false, false),
             );
             Self::decorate_button_response(ui, &add);
             if add.clicked() {
@@ -10071,7 +10138,7 @@ impl SoundFxApp {
 
             let clear = ui.add_enabled(
                 self.tts_last_file.is_some() && !self.tts_running,
-                Self::action_button(RichText::new("Clear").size(13.0), false, false),
+                Self::action_button(RichText::new(self.t("download.clear")).size(13.0), false, false),
             );
             Self::decorate_button_response(ui, &clear);
             if clear.clicked() {
@@ -10084,7 +10151,7 @@ impl SoundFxApp {
             ui.horizontal(|ui| {
                 ui.add(egui::Spinner::new().size(18.0));
                 ui.label(
-                    RichText::new("Generating speech...")
+                    RichText::new(self.t("download.generating_speech"))
                         .size(12.5)
                         .color(Self::muted_text_color()),
                 );
@@ -10092,7 +10159,7 @@ impl SoundFxApp {
         } else if !self.gemini_api_key.trim().is_empty() {
             ui.add_space(10.0);
             ui.label(
-                RichText::new("Uses the Gemini API key from Settings. Save reusable prompt presets with + and choose a built-in voice from the dropdown.")
+                RichText::new(self.t("download.gemini_tts_help"))
                     .size(12.0)
                     .color(Self::muted_text_color()),
             );
@@ -10101,7 +10168,7 @@ impl SoundFxApp {
         if self.gemini_api_key.trim().is_empty() {
             ui.add_space(10.0);
             ui.label(
-                RichText::new("Gemini API key is empty in Settings.")
+                RichText::new(self.t("download.gemini_api_key_missing"))
                     .size(12.5)
                     .color(Color32::from_rgb(171, 54, 91)),
             );
@@ -10177,7 +10244,7 @@ impl SoundFxApp {
         let mut clear_result = false;
         let mut minimize_request = false;
         let mut close_request = false;
-        let (_panel_bounds, panel_size, _panel_pos) =
+        let (_panel_bounds, panel_size, panel_pos) =
             self.centered_modal_placement(ctx, vec2(520.0, 420.0), vec2(320.0, 260.0), 0.0);
 
         egui::Window::new("")
@@ -10187,7 +10254,7 @@ impl SoundFxApp {
             .resizable(false)
             .collapsible(false)
             .fixed_size(panel_size)
-            .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
+            .fixed_pos(panel_pos)
             .open(&mut open_panel)
             .frame(
                 Frame::new()
@@ -10229,7 +10296,7 @@ impl SoundFxApp {
                     let download_tab = ui.add_sized(
                         [120.0, 32.0],
                         Self::action_button(
-                            RichText::new("Download").size(12.5),
+                            RichText::new(self.t("download.download")).size(12.5),
                             self.download_panel_tab == DownloadPanelTab::Download,
                             false,
                         ),
@@ -10241,7 +10308,7 @@ impl SoundFxApp {
                     let tts_tab = ui.add_sized(
                         [120.0, 32.0],
                         Self::action_button(
-                            RichText::new("Gemini TTS").size(12.5),
+                            RichText::new(self.t("download.gemini_tts")).size(12.5),
                             self.download_panel_tab == DownloadPanelTab::Tts,
                             false,
                         ),
@@ -10312,7 +10379,7 @@ impl SoundFxApp {
                         let start_button = ui.add_enabled(
                             !snapshot.running && !self.download_url.trim().is_empty(),
                             Self::action_button(
-                                RichText::new("Download sound").size(13.0),
+                                RichText::new(self.t("download.download_sound")).size(13.0),
                                 false,
                                 true,
                             ),
@@ -10346,7 +10413,7 @@ impl SoundFxApp {
                         ui.horizontal(|ui| {
                             ui.add(egui::Spinner::new().size(18.0));
                             ui.label(
-                                RichText::new("Working...")
+                                RichText::new(self.t("download.working"))
                                     .size(12.5)
                                     .color(Self::muted_text_color()),
                             );
@@ -10468,7 +10535,7 @@ impl SoundFxApp {
         let mut stop_youtube_download = false;
         let mut clear_youtube_results = false;
         let mut more_request = false;
-        let (_panel_bounds, panel_size, _panel_pos) =
+        let (_panel_bounds, panel_size, panel_pos) =
             self.centered_modal_placement(ctx, vec2(720.0, 620.0), vec2(360.0, 300.0), 0.0);
 
         egui::Window::new("")
@@ -10478,7 +10545,7 @@ impl SoundFxApp {
             .resizable(false)
             .collapsible(false)
             .fixed_size(panel_size)
-            .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
+            .fixed_pos(panel_pos)
             .open(&mut open_panel)
             .frame(
                 Frame::new()
@@ -10506,10 +10573,11 @@ impl SoundFxApp {
                 ui.add_space(12.0);
                 ui.horizontal(|ui| {
                     let button_group_width = 236.0;
+                    let search_placeholder = self.t("download.search_placeholder");
                     let response = ui.add_sized(
                         [(ui.available_width() - button_group_width).max(180.0), 42.0],
                         TextEdit::singleline(&mut self.myinstants_query)
-                            .hint_text("sound effect")
+                            .hint_text(search_placeholder)
                             .margin(Vec2::new(14.0, 12.0)),
                     );
                     if response.lost_focus()
@@ -10520,6 +10588,7 @@ impl SoundFxApp {
                     ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                         let youtube_button = Self::youtube_search_button(
                             ui,
+                            &self.t("download.search_youtube"),
                             !snapshot.searching
                                 && !snapshot.downloading
                                 && !youtube_snapshot.running
@@ -10530,7 +10599,7 @@ impl SoundFxApp {
                             youtube_search_request = true;
                         }
                         ui.label(
-                            RichText::new("OR")
+                            RichText::new(self.t("download.or"))
                                 .size(12.5)
                                 .color(Self::muted_text_color())
                                 .strong(),
@@ -10612,7 +10681,11 @@ impl SoundFxApp {
                                 .iter()
                                 .take(self.youtube_search_visible_count)
                             {
-                                if Self::render_youtube_result_row(ui, result) {
+                                if Self::render_youtube_result_row(
+                                    ui,
+                                    result,
+                                    &self.t("download.download"),
+                                ) {
                                     youtube_download_request = Some(result.webpage_url.clone());
                                 }
                                 ui.add_space(8.0);
@@ -10851,7 +10924,7 @@ impl SoundFxApp {
         let mut close_request = false;
         let mut keep_old = false;
         let mut replace_current = false;
-        let (_panel_bounds, panel_size, _panel_pos) =
+        let (_panel_bounds, panel_size, panel_pos) =
             self.centered_modal_placement(ctx, vec2(360.0, 180.0), vec2(280.0, 160.0), 0.0);
 
         egui::Window::new("")
@@ -10861,7 +10934,7 @@ impl SoundFxApp {
             .resizable(false)
             .collapsible(false)
             .fixed_size(panel_size)
-            .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
+            .fixed_pos(panel_pos)
             .open(&mut open_panel)
             .frame(
                 Frame::new()
@@ -12389,7 +12462,7 @@ impl SoundFxApp {
         });
     }
 
-    fn youtube_search_button(ui: &mut Ui, enabled: bool) -> egui::Response {
+    fn youtube_search_button(ui: &mut Ui, label: &str, enabled: bool) -> egui::Response {
         let desired = vec2(152.0, 36.0);
         let sense = if enabled {
             Sense::click()
@@ -12431,7 +12504,7 @@ impl SoundFxApp {
         ui.painter().text(
             Pos2::new(rect.left() + 34.0, rect.center().y),
             egui::Align2::LEFT_CENTER,
-            "Search YouTube",
+            label,
             egui::FontId::proportional(13.0),
             if enabled {
                 Color32::WHITE
@@ -12485,7 +12558,11 @@ impl SoundFxApp {
         response
     }
 
-    fn render_youtube_result_row(ui: &mut Ui, result: &YoutubeSearchResult) -> bool {
+    fn render_youtube_result_row(
+        ui: &mut Ui,
+        result: &YoutubeSearchResult,
+        download_label: &str,
+    ) -> bool {
         let mut download_clicked = false;
         Frame::new()
             .fill(Self::surface_fill())
@@ -12541,7 +12618,9 @@ impl SoundFxApp {
                         let response = ui.add_sized(
                             [104.0, 34.0],
                             Self::action_button(
-                                RichText::new("Download").size(13.0).color(Color32::WHITE),
+                                RichText::new(download_label)
+                                    .size(13.0)
+                                    .color(Color32::WHITE),
                                 false,
                                 true,
                             ),

@@ -122,6 +122,7 @@ struct PreferencesFile {
     overlay_animation: Option<bool>,
     app_transition_animation: Option<bool>,
     pitch_show_sharps: Option<bool>,
+    language_code: Option<String>,
     library_grid_columns: Option<usize>,
     library_grid_scale: Option<f32>,
     dark_theme: Option<bool>,
@@ -313,6 +314,21 @@ impl Storage {
     pub fn save_pitch_show_sharps(&self, enabled: bool) -> Result<()> {
         let mut preferences = self.load_preferences()?;
         preferences.pitch_show_sharps = Some(enabled);
+        self.save_preferences(&preferences)
+    }
+
+    pub fn load_language_code(&self) -> Result<Option<String>> {
+        let preferences = self.load_preferences()?;
+        Ok(preferences
+            .language_code
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty()))
+    }
+
+    pub fn save_language_code(&self, language_code: &str) -> Result<()> {
+        let mut preferences = self.load_preferences()?;
+        let trimmed = language_code.trim();
+        preferences.language_code = (!trimmed.is_empty()).then(|| trimmed.to_owned());
         self.save_preferences(&preferences)
     }
 
