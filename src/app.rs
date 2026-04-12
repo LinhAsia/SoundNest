@@ -3972,11 +3972,6 @@ impl SoundFxApp {
         self.titlebar_drag_rect = None;
         let downloader_snapshot = self.downloader.snapshot();
         let download_titlebar_active = downloader_snapshot.running && !self.show_download_panel;
-        let build_label = format!(
-            "v{} {}",
-            env!("CARGO_PKG_VERSION"),
-            option_env!("SOUNDFX_BUILD_HASH").unwrap_or("dev"),
-        );
         ui.horizontal(|ui| {
             let drag_width = (ui.available_width() - 564.0).max(180.0);
             let drag_response = ui
@@ -3998,16 +3993,6 @@ impl SoundFxApp {
                                     Self::paint_titlebar_blob(ui);
                                     ui.add_space(10.0);
                                     Self::paint_titlebar_wave(ui);
-                                    ui.add_space(12.0);
-                                    ui.label(
-                                        RichText::new(build_label.as_str())
-                                            .size(10.5)
-                                            .color(if self.dark_theme {
-                                                Color32::from_rgb(205, 176, 196)
-                                            } else {
-                                                Color32::from_rgb(129, 86, 109)
-                                            }),
-                                    );
                                 });
                             });
                         ui.interact(
@@ -7668,7 +7653,8 @@ impl SoundFxApp {
                 let spacing = 14.0;
                 let layout_width = ui.clip_rect().width().min(ui.available_width());
                 let side_padding = (layout_width * 0.03).clamp(12.0, 28.0);
-                let available_width = (layout_width - side_padding * 2.0 - spacing).max(156.0);
+                let available_width =
+                    (layout_width - side_padding * 2.0 - spacing * 2.0).max(156.0);
                 let columns = self
                     .library_grid_columns
                     .clamp(LIBRARY_GRID_MIN_COLUMNS, LIBRARY_GRID_MAX_COLUMNS);
@@ -7971,7 +7957,7 @@ impl SoundFxApp {
         let spacing = 14.0;
         let layout_width = ui.clip_rect().width().min(ui.available_width());
         let side_padding = (layout_width * 0.03).clamp(12.0, 28.0);
-        let available_width = (layout_width - side_padding * 2.0 - spacing).max(156.0);
+        let available_width = (layout_width - side_padding * 2.0 - spacing * 2.0).max(156.0);
         let columns = self
             .library_grid_columns
             .clamp(LIBRARY_GRID_MIN_COLUMNS, LIBRARY_GRID_MAX_COLUMNS);
