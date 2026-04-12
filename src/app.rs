@@ -291,7 +291,6 @@ pub struct SoundFxApp {
     center_window_next_frame: bool,
     titlebar_drag_rect: Option<Rect>,
     app_frame_rect: Option<Rect>,
-    app_modal_host_rect: Option<Rect>,
     native_shadow_applied: bool,
     transition_window_topmost_applied: bool,
     record_overlay_open: bool,
@@ -550,7 +549,6 @@ impl SoundFxApp {
             center_window_next_frame: true,
             titlebar_drag_rect: None,
             app_frame_rect: None,
-            app_modal_host_rect: None,
             native_shadow_applied: false,
             transition_window_topmost_applied: false,
             record_overlay_open: false,
@@ -6576,8 +6574,7 @@ impl SoundFxApp {
 
     fn modal_safe_rect(&self, ctx: &Context) -> Rect {
         let host_rect = self
-            .app_modal_host_rect
-            .or(self.app_frame_rect)
+            .app_frame_rect
             .filter(|rect| rect.width() > 1.0 && rect.height() > 1.0)
             .unwrap_or_else(|| ctx.screen_rect().shrink(18.0));
         let edge_inset = (host_rect.width().min(host_rect.height()) * 0.045)
@@ -12883,7 +12880,6 @@ impl eframe::App for SoundFxApp {
                 Self::apply_overlay_only_viewport(ctx, overlay_size);
             }
             self.app_frame_rect = None;
-            self.app_modal_host_rect = None;
             CentralPanel::default()
                 .frame(Frame::new().fill(Color32::TRANSPARENT).inner_margin(0.0))
                 .show(ctx, |_ui| {});
@@ -12918,7 +12914,6 @@ impl eframe::App for SoundFxApp {
                         self.draw_titlebar(ui, ctx);
                         ui.add_space(14.0);
 
-                        self.app_modal_host_rect = Some(ui.max_rect());
                         let content_height = ui.available_height();
                         if self.app_view == AppView::Library {
                             self.draw_library_grid(ui);
