@@ -8745,7 +8745,7 @@ impl SoundFxApp {
                 color: Self::shadow_color(),
             })
             .corner_radius(36.0)
-            .inner_margin(Margin::same(20))
+            .inner_margin(Margin::same(14))
             .show(ui, |ui| {
                 let sound = &mut self.sounds[index];
                 let controls_width = 52.0 + 52.0 + 52.0 + 64.0 + 64.0 + 36.0;
@@ -8753,17 +8753,17 @@ impl SoundFxApp {
 
                 ui.vertical(|ui| {
                     let response = ui.add_sized(
-                        [ui.available_width(), 36.0],
+                        [ui.available_width(), 32.0],
                         TextEdit::singleline(&mut sound.name)
                             .font(egui::TextStyle::Heading)
                             .desired_width(name_width)
-                            .margin(Vec2::new(10.0, 10.0)),
+                            .margin(Vec2::new(8.0, 8.0)),
                     );
                     if response.changed() {
                         changed = true;
                     }
 
-                    ui.add_space(4.0);
+                    ui.add_space(0.0);
                     ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                         if Self::icon_action(ui, [52.0, 34.0], 0xe872, false, false).clicked() {
                             delete_request = true;
@@ -8791,7 +8791,7 @@ impl SoundFxApp {
                     });
                 });
 
-                ui.add_space(4.0);
+                ui.add_space(2.0);
 
                 Frame::new()
                     .fill(Self::panel_fill())
@@ -10040,7 +10040,7 @@ impl SoundFxApp {
                             save_gemini = true;
                         }
                     });
-                ui.add_space(12.0);
+                ui.add_space(8.0);
                 ui.label(
                     RichText::new(self.t("download.direction_prompt"))
                         .size(12.0)
