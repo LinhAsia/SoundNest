@@ -6580,18 +6580,9 @@ impl SoundFxApp {
             .or(self.app_frame_rect)
             .filter(|rect| rect.width() > 1.0 && rect.height() > 1.0)
             .unwrap_or_else(|| ctx.screen_rect().shrink(18.0));
-        let width_pressure = ((960.0 - host_rect.width()).max(0.0) * 0.16).clamp(0.0, 56.0);
-        let height_pressure = ((760.0 - host_rect.height()).max(0.0) * 0.12).clamp(0.0, 36.0);
-        let edge_inset_x = (APP_FRAME_RADIUS + 20.0 + width_pressure).clamp(26.0, 92.0);
-        let edge_inset_y = (APP_FRAME_RADIUS + 20.0 + height_pressure).clamp(26.0, 92.0);
-        let max_inset_x = ((host_rect.width() - 1.0) * 0.5).max(0.0);
-        let max_inset_y = ((host_rect.height() - 1.0) * 0.5).max(0.0);
-        let inset_x = edge_inset_x.min(max_inset_x);
-        let inset_y = edge_inset_y.min(max_inset_y);
-        Rect::from_min_max(
-            Pos2::new(host_rect.left() + inset_x, host_rect.top() + inset_y),
-            Pos2::new(host_rect.right() - inset_x, host_rect.bottom() - inset_y),
-        )
+        let edge_inset = (host_rect.width().min(host_rect.height()) * 0.045)
+            .clamp(APP_FRAME_RADIUS + 8.0, APP_FRAME_RADIUS + 24.0);
+        host_rect.shrink2(vec2(edge_inset, edge_inset))
     }
 
     fn fit_modal_dimension(available: f32, desired: f32, min: f32) -> f32 {
@@ -6610,11 +6601,9 @@ impl SoundFxApp {
         y_offset: f32,
     ) -> (Rect, Vec2, Pos2) {
         let safe_rect = self.modal_safe_rect(ctx);
-        let soft_width = (safe_rect.width() * 0.92).max(1.0);
-        let soft_height = (safe_rect.height() * 0.94).max(1.0);
         let panel_size = vec2(
-            Self::fit_modal_dimension(soft_width, desired_size.x, min_size.x),
-            Self::fit_modal_dimension(soft_height, desired_size.y, min_size.y),
+            Self::fit_modal_dimension(safe_rect.width(), desired_size.x, min_size.x),
+            Self::fit_modal_dimension(safe_rect.height(), desired_size.y, min_size.y),
         );
         let panel_pos = Pos2::new(
             (safe_rect.center().x - panel_size.x * 0.5)
