@@ -4077,7 +4077,7 @@ impl SoundFxApp {
                 let spn_response = Self::icon_titlebar(
                     ui,
                     [42.0, 30.0],
-                    0xe429,
+                    0xe405,
                     self.show_pitch_panel,
                     false,
                 )
