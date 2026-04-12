@@ -4074,33 +4074,27 @@ impl SoundFxApp {
                     };
                 }
 
-                let spn_response = ui.add_sized(
-                    [52.0, 30.0],
-                    Self::titlebar_button(
-                        RichText::new("SPN")
-                            .size(11.5)
-                            .color(Self::strong_text_color()),
-                        self.show_pitch_panel,
-                        false,
-                    ),
-                );
-                Self::decorate_button_response(ui, &spn_response);
+                let spn_response = Self::icon_titlebar(
+                    ui,
+                    [42.0, 30.0],
+                    0xe429,
+                    self.show_pitch_panel,
+                    false,
+                )
+                .on_hover_text("Pitch Monitor");
                 if spn_response.clicked() {
                     self.refresh_pitch_capture_devices();
                     self.show_pitch_panel = !self.show_pitch_panel;
                 }
 
-                let stream_response = ui.add_sized(
-                    [56.0, 30.0],
-                    Self::titlebar_button(
-                        RichText::new("STRM")
-                            .size(10.5)
-                            .color(Self::strong_text_color()),
-                        self.show_stream_panel,
-                        false,
-                    ),
-                );
-                Self::decorate_button_response(ui, &stream_response);
+                let stream_response = Self::icon_titlebar(
+                    ui,
+                    [42.0, 30.0],
+                    0xe029,
+                    self.show_stream_panel,
+                    false,
+                )
+                .on_hover_text("Stream Input");
                 if stream_response.clicked() {
                     self.refresh_stream_input_capture_devices();
                     self.show_stream_panel = !self.show_stream_panel;
