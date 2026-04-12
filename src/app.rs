@@ -7677,7 +7677,7 @@ impl SoundFxApp {
             .drag_to_scroll(false)
             .auto_shrink([true, false])
             .show(ui, |ui| {
-                let viewport_width = ui.available_width();
+                let viewport_width = ui.clip_rect().width().min(ui.available_width());
                 ui.set_width(viewport_width);
                 ui.set_max_width(viewport_width);
 
@@ -7692,10 +7692,9 @@ impl SoundFxApp {
                 }
 
                 let spacing = 14.0;
-                let side_padding = (ui.available_width() * 0.03).clamp(12.0, 28.0);
-                let edge_reserve = (ui.available_width() * 0.06).clamp(20.0, 52.0);
-                let available_width =
-                    (ui.available_width() - side_padding * 2.0 - edge_reserve).max(156.0);
+                let layout_width = ui.clip_rect().width().min(ui.available_width());
+                let side_padding = (layout_width * 0.03).clamp(12.0, 28.0);
+                let available_width = (layout_width - side_padding * 2.0 - spacing).max(156.0);
                 let target_card = (204.0 * self.library_grid_scale).clamp(120.0, 220.0);
                 let sounds = self.filtered_library_sounds();
                 if sounds.is_empty() {
@@ -7978,10 +7977,9 @@ impl SoundFxApp {
         }
 
         let spacing = 14.0;
-        let side_padding = (ui.available_width() * 0.03).clamp(12.0, 28.0);
-        let edge_reserve = (ui.available_width() * 0.06).clamp(20.0, 52.0);
-        let available_width =
-            (ui.available_width() - side_padding * 2.0 - edge_reserve).max(156.0);
+        let layout_width = ui.clip_rect().width().min(ui.available_width());
+        let side_padding = (layout_width * 0.03).clamp(12.0, 28.0);
+        let available_width = (layout_width - side_padding * 2.0 - spacing).max(156.0);
         let target_card = (204.0 * self.library_grid_scale).clamp(120.0, 220.0);
         let columns =
             (((available_width + spacing) / (target_card + spacing)).floor() as usize).max(1);
@@ -10854,8 +10852,17 @@ impl SoundFxApp {
         let mut playback_reapply_request = false;
         let mut changed = false;
         let mut trim_timeline_zoom = self.trim_timeline_zoom;
-        let (popup_bounds, popup_size, popup_pos) =
-            self.centered_modal_placement(ctx, vec2(840.0, 396.0), vec2(260.0, 260.0), -22.0);
+        let popup_bounds = self.modal_safe_rect(ctx).shrink2(vec2(28.0, 8.0));
+        let popup_size = vec2(
+            Self::fit_modal_dimension((popup_bounds.width() * 0.82).max(1.0), 760.0, 260.0),
+            Self::fit_modal_dimension((popup_bounds.height() * 0.94).max(1.0), 396.0, 260.0),
+        );
+        let popup_pos = Pos2::new(
+            (popup_bounds.center().x - popup_size.x * 0.5)
+                .clamp(popup_bounds.left(), popup_bounds.right() - popup_size.x),
+            (popup_bounds.center().y - popup_size.y * 0.5 - 22.0)
+                .clamp(popup_bounds.top(), popup_bounds.bottom() - popup_size.y),
+        );
         let mut open_popup = self.show_trim_popup;
         if !ctx.wants_keyboard_input()
             && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Space))
