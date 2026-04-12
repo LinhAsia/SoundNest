@@ -12937,7 +12937,7 @@ impl eframe::App for SoundFxApp {
                             });
                         }
                 });
-                self.app_frame_rect = Some(frame_response.response.rect);
+                self.app_frame_rect = Some(frame_rect);
 
                 if live_ui_overlay_alpha > 0.0 {
                     ui.painter().rect(
