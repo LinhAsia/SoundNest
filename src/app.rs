@@ -6577,9 +6577,7 @@ impl SoundFxApp {
             .app_frame_rect
             .filter(|rect| rect.width() > 1.0 && rect.height() > 1.0)
             .unwrap_or_else(|| ctx.screen_rect().shrink(18.0));
-        let edge_inset = (host_rect.width().min(host_rect.height()) * 0.045)
-            .clamp(APP_FRAME_RADIUS + 8.0, APP_FRAME_RADIUS + 24.0);
-        host_rect.shrink2(vec2(edge_inset, edge_inset))
+        host_rect.shrink2(vec2(APP_FRAME_RADIUS + 8.0, APP_FRAME_RADIUS + 8.0))
     }
 
     fn fit_modal_dimension(available: f32, desired: f32, min: f32) -> f32 {
@@ -6597,15 +6595,19 @@ impl SoundFxApp {
         min_size: Vec2,
         y_offset: f32,
     ) -> (Rect, Vec2, Pos2) {
+        let host_rect = self
+            .app_frame_rect
+            .filter(|rect| rect.width() > 1.0 && rect.height() > 1.0)
+            .unwrap_or_else(|| ctx.screen_rect().shrink(18.0));
         let safe_rect = self.modal_safe_rect(ctx);
         let panel_size = vec2(
             Self::fit_modal_dimension(safe_rect.width(), desired_size.x, min_size.x),
             Self::fit_modal_dimension(safe_rect.height(), desired_size.y, min_size.y),
         );
         let panel_pos = Pos2::new(
-            (safe_rect.center().x - panel_size.x * 0.5)
+            (host_rect.center().x - panel_size.x * 0.5)
                 .clamp(safe_rect.left(), safe_rect.right() - panel_size.x),
-            (safe_rect.center().y - panel_size.y * 0.5 + y_offset)
+            (host_rect.center().y - panel_size.y * 0.5 + y_offset)
                 .clamp(safe_rect.top(), safe_rect.bottom() - panel_size.y),
         );
         (safe_rect, panel_size, panel_pos)
