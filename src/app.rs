@@ -8749,11 +8749,11 @@ impl SoundFxApp {
             .show(ui, |ui| {
                 let sound = &mut self.sounds[index];
                 let controls_width = 52.0 + 52.0 + 52.0 + 64.0 + 64.0 + 36.0;
-                let name_width = (ui.available_width() - controls_width).max(180.0);
+                let name_width = (ui.available_width() - controls_width - 12.0).max(120.0);
 
-                ui.vertical(|ui| {
+                ui.horizontal_top(|ui| {
                     let response = ui.add_sized(
-                        [ui.available_width(), 32.0],
+                        [name_width, 32.0],
                         TextEdit::singleline(&mut sound.name)
                             .font(egui::TextStyle::Heading)
                             .desired_width(name_width)
@@ -8763,7 +8763,7 @@ impl SoundFxApp {
                         changed = true;
                     }
 
-                    ui.add_space(0.0);
+                    ui.add_space(10.0);
                     ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                         if Self::icon_action(ui, [52.0, 34.0], 0xe872, false, false).clicked() {
                             delete_request = true;
