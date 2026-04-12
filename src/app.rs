@@ -8749,9 +8749,10 @@ impl SoundFxApp {
             .show(ui, |ui| {
                 let sound = &mut self.sounds[index];
                 let controls_width = 52.0 + 52.0 + 52.0 + 64.0 + 64.0 + 36.0;
-                let name_width = (ui.available_width() - controls_width - 12.0).max(120.0);
+                let row_gap = 8.0;
+                let name_width = (ui.available_width() - controls_width - row_gap).max(120.0);
 
-                ui.horizontal_top(|ui| {
+                ui.horizontal(|ui| {
                     let response = ui.add_sized(
                         [name_width, 32.0],
                         TextEdit::singleline(&mut sound.name)
@@ -8763,32 +8764,36 @@ impl SoundFxApp {
                         changed = true;
                     }
 
-                    ui.add_space(10.0);
-                    ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                        if Self::icon_action(ui, [52.0, 34.0], 0xe872, false, false).clicked() {
-                            delete_request = true;
-                        }
-                        if Self::icon_action(ui, [52.0, 34.0], 0xe14e, false, false).clicked() {
-                            commit_trim_request = true;
-                        }
-                        if Self::icon_action(ui, [64.0, 34.0], 0xe14d, false, false).clicked() {
-                            copy_request = true;
-                        }
-                        if Self::icon_action(ui, [52.0, 34.0], 0xe2c8, false, false).clicked() {
-                            open_location_request = true;
-                        }
-                        if Self::icon_action(
-                            ui,
-                            [64.0, 34.0],
-                            if is_playing { 0xe047 } else { 0xe037 },
-                            is_playing,
-                            false,
-                        )
-                        .clicked()
-                        {
-                            preview_toggle = true;
-                        }
-                    });
+                    ui.add_space(row_gap);
+                    ui.allocate_ui_with_layout(
+                        vec2(controls_width, 34.0),
+                        egui::Layout::right_to_left(Align::Center),
+                        |ui| {
+                            if Self::icon_action(ui, [52.0, 34.0], 0xe872, false, false).clicked() {
+                                delete_request = true;
+                            }
+                            if Self::icon_action(ui, [52.0, 34.0], 0xe14e, false, false).clicked() {
+                                commit_trim_request = true;
+                            }
+                            if Self::icon_action(ui, [64.0, 34.0], 0xe14d, false, false).clicked() {
+                                copy_request = true;
+                            }
+                            if Self::icon_action(ui, [52.0, 34.0], 0xe2c8, false, false).clicked() {
+                                open_location_request = true;
+                            }
+                            if Self::icon_action(
+                                ui,
+                                [64.0, 34.0],
+                                if is_playing { 0xe047 } else { 0xe037 },
+                                is_playing,
+                                false,
+                            )
+                            .clicked()
+                            {
+                                preview_toggle = true;
+                            }
+                        },
+                    );
                 });
 
                 ui.add_space(2.0);
