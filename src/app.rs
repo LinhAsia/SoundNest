@@ -6582,12 +6582,12 @@ impl SoundFxApp {
             .unwrap_or_else(|| ctx.screen_rect().shrink(18.0));
         let width_pressure = ((960.0 - host_rect.width()).max(0.0) * 0.16).clamp(0.0, 56.0);
         let height_pressure = ((760.0 - host_rect.height()).max(0.0) * 0.12).clamp(0.0, 36.0);
-        let edge_inset = (APP_FRAME_RADIUS + 20.0 + width_pressure.max(height_pressure))
-            .clamp(26.0, 92.0);
+        let edge_inset_x = (APP_FRAME_RADIUS + 20.0 + width_pressure).clamp(26.0, 92.0);
+        let edge_inset_y = (APP_FRAME_RADIUS + 20.0 + height_pressure).clamp(26.0, 92.0);
         let max_inset_x = ((host_rect.width() - 1.0) * 0.5).max(0.0);
         let max_inset_y = ((host_rect.height() - 1.0) * 0.5).max(0.0);
-        let inset_x = edge_inset.min(max_inset_x);
-        let inset_y = edge_inset.min(max_inset_y);
+        let inset_x = edge_inset_x.min(max_inset_x);
+        let inset_y = edge_inset_y.min(max_inset_y);
         Rect::from_min_max(
             Pos2::new(host_rect.left() + inset_x, host_rect.top() + inset_y),
             Pos2::new(host_rect.right() - inset_x, host_rect.bottom() - inset_y),
