@@ -460,6 +460,10 @@ impl SoundFxApp {
         if let Ok(Some(language_code)) = storage.load_language_code() {
             localization.set_current_code(&language_code);
         }
+        if localization.current_code() != "vi" {
+            localization.set_current_code("vi");
+            let _ = storage.save_language_code("vi");
+        }
         let startup_sound_name = storage.load_startup_sound_name().ok().flatten();
         let exit_sound_name = storage.load_exit_sound_name().ok().flatten();
         let gemini_api_key = storage
