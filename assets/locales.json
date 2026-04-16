@@ -75,6 +75,10 @@
       "library.audio": "Audio",
       "library.video": "Video",
       "library.search": "Search",
+      "library.tag_filter": "Filter by tag",
+      "library.tag_all": "All",
+      "editor.tags": "Tags",
+      "editor.tags_hint": "Comma-separated tags, e.g. laugh, ui, alert",
       "library.columns": "col"
     },
     "vi": {
@@ -151,6 +155,10 @@
       "library.audio": "Audio",
       "library.video": "Video",
       "library.search": "Tìm kiếm",
+      "library.tag_filter": "Lọc theo tag",
+      "library.tag_all": "Tất cả",
+      "editor.tags": "Tags",
+      "editor.tags_hint": "Cách nhau bằng dấu phẩy, ví dụ: laugh, ui, alert",
       "library.columns": "cột"
     }
   }

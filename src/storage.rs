@@ -31,6 +31,8 @@ pub struct SoundEffect {
     pub asset_file: String,
     #[serde(default)]
     pub favorite: bool,
+    #[serde(default)]
+    pub tags: Vec<String>,
     pub duration_secs: f32,
     pub volume: f32,
     #[serde(default = "default_speed")]
@@ -605,6 +607,7 @@ impl Storage {
             name,
             asset_file,
             favorite: false,
+            tags: Vec::new(),
             duration_secs: analysis.duration_secs,
             volume: 1.0,
             speed: 1.0,
@@ -712,6 +715,7 @@ impl Storage {
             name: name.to_owned(),
             asset_file,
             favorite: false,
+            tags: Vec::new(),
             duration_secs: analysis.duration_secs,
             volume: 1.0,
             speed: 1.0,
