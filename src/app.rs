@@ -368,6 +368,7 @@ pub struct SoundFxApp {
     stream_input_router: StreamInputRouter,
     stream_input_system_audio: bool,
     stream_input_microphone: bool,
+    stream_input_monitor_microphone: bool,
     stream_input_show_waveform: bool,
 }
 
@@ -635,6 +636,7 @@ impl SoundFxApp {
             stream_input_router: StreamInputRouter::new(),
             stream_input_system_audio: false,
             stream_input_microphone: false,
+            stream_input_monitor_microphone: false,
             stream_input_show_waveform: true,
         };
         app.begin_async_library_hydration();
@@ -3493,13 +3495,16 @@ impl SoundFxApp {
     }
 
     fn apply_stream_input_routing(&mut self) {
+        let can_route_virtual_mic = self.stream_driver_installed
+            && (self.stream_input_system_audio || self.stream_input_microphone);
+        let wants_local_mic_monitor = self.stream_input_monitor_microphone;
         let config = if !self.stream_driver_busy
-            && self.stream_driver_installed
-            && (self.stream_input_system_audio || self.stream_input_microphone)
+            && (can_route_virtual_mic || wants_local_mic_monitor)
         {
             Some(StreamInputConfig {
-                capture_system_audio: self.stream_input_system_audio,
-                capture_microphone: self.stream_input_microphone,
+                route_system_audio: self.stream_driver_installed && self.stream_input_system_audio,
+                route_microphone: self.stream_driver_installed && self.stream_input_microphone,
+                monitor_microphone: self.stream_input_monitor_microphone,
                 microphone_device_name: self.selected_stream_input_device.clone(),
             })
         } else {
@@ -5592,7 +5597,7 @@ impl SoundFxApp {
         let mut uninstall_stream_driver = false;
         let mut routing_changed = false;
         let (_panel_bounds, panel_size, panel_pos) =
-            self.centered_modal_placement(ctx, vec2(344.0, 420.0), vec2(300.0, 280.0), 0.0);
+            self.centered_modal_placement(ctx, vec2(344.0, 458.0), vec2(300.0, 300.0), 0.0);
 
         egui::Window::new("")
             .id(egui::Id::new("stream-input-panel"))
@@ -5755,22 +5760,41 @@ impl SoundFxApp {
                                 .color(Self::muted_text_color()),
                         );
                         ui.add_space(10.0);
-                        ui.add_enabled_ui(self.stream_driver_installed && !self.stream_driver_busy, |ui| {
-                            let capture_system_audio_label = self.t("stream.capture_system_audio");
-                            let capture_microphone_label = self.t("stream.capture_microphone");
+                        let capture_system_audio_label = self.t("stream.capture_system_audio");
+                        let capture_microphone_label = self.t("stream.capture_microphone");
+                        let monitor_microphone_label = self.t("stream.monitor_microphone");
+                        ui.add_enabled_ui(!self.stream_driver_busy, |ui| {
+                            ui.add_enabled_ui(self.stream_driver_installed, |ui| {
+                                routing_changed |= ui
+                                    .checkbox(
+                                        &mut self.stream_input_system_audio,
+                                        capture_system_audio_label,
+                                    )
+                                    .changed();
+                                routing_changed |= ui
+                                    .checkbox(
+                                        &mut self.stream_input_microphone,
+                                        capture_microphone_label,
+                                    )
+                                    .changed();
+                            });
                             routing_changed |= ui
                                 .checkbox(
-                                    &mut self.stream_input_system_audio,
-                                    capture_system_audio_label,
-                                )
-                                .changed();
-                            routing_changed |= ui
-                                .checkbox(
-                                    &mut self.stream_input_microphone,
-                                    capture_microphone_label,
+                                    &mut self.stream_input_monitor_microphone,
+                                    monitor_microphone_label,
                                 )
                                 .changed();
                             ui.add_space(8.0);
+                            if !self.stream_driver_installed
+                                && (self.stream_input_system_audio || self.stream_input_microphone)
+                            {
+                                ui.label(
+                                    RichText::new(self.t("stream.install_driver_first"))
+                                        .size(11.0)
+                                        .color(Self::muted_text_color()),
+                                );
+                                ui.add_space(6.0);
+                            }
                             ui.horizontal(|ui| {
                                 ui.label(
                                     RichText::new(self.t("stream.mic_device"))
@@ -5805,20 +5829,29 @@ impl SoundFxApp {
                                 }
                             });
                         });
-                        if !self.stream_driver_installed {
-                            ui.add_space(6.0);
-                            ui.label(
-                                RichText::new(self.t("stream.pick_mic_hint"))
-                                    .size(11.0)
-                                    .color(Self::muted_text_color()),
-                            );
-                        }
+                        ui.add_space(6.0);
+                        ui.label(
+                            RichText::new(self.t("stream.pick_mic_hint"))
+                                .size(11.0)
+                                .color(Self::muted_text_color()),
+                        );
                         if let Some(target_name) = snapshot.target_device_name.as_ref() {
                             ui.add_space(8.0);
                             ui.label(
                                 RichText::new(format!("{}: {target_name}", self.t("stream.target")))
                                     .size(11.0)
                                     .color(Self::muted_text_color()),
+                            );
+                        }
+                        if let Some(target_name) = snapshot.monitor_device_name.as_ref() {
+                            ui.add_space(6.0);
+                            ui.label(
+                                RichText::new(format!(
+                                    "{}: {target_name}",
+                                    self.t("stream.monitor_target")
+                                ))
+                                .size(11.0)
+                                .color(Self::muted_text_color()),
                             );
                         }
                         ui.add_space(8.0);

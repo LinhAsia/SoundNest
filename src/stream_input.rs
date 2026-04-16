@@ -15,17 +15,20 @@ use std::time::Duration;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StreamInputConfig {
-    pub capture_system_audio: bool,
-    pub capture_microphone: bool,
+    pub route_system_audio: bool,
+    pub route_microphone: bool,
+    pub monitor_microphone: bool,
     pub microphone_device_name: Option<String>,
 }
 
 #[derive(Clone, Debug)]
 pub struct StreamInputSnapshot {
     pub running: bool,
-    pub capture_system_audio: bool,
-    pub capture_microphone: bool,
+    pub route_system_audio: bool,
+    pub route_microphone: bool,
+    pub monitor_microphone: bool,
     pub target_device_name: Option<String>,
+    pub monitor_device_name: Option<String>,
     pub level: f32,
     pub waveform: Vec<f32>,
     pub error: Option<String>,
@@ -35,9 +38,11 @@ impl Default for StreamInputSnapshot {
     fn default() -> Self {
         Self {
             running: false,
-            capture_system_audio: false,
-            capture_microphone: false,
+            route_system_audio: false,
+            route_microphone: false,
+            monitor_microphone: false,
             target_device_name: None,
+            monitor_device_name: None,
             level: 0.0,
             waveform: Vec::new(),
             error: None,
@@ -100,9 +105,11 @@ impl StreamInputRouter {
                 {
                     let mut state = snapshot.lock().unwrap();
                     state.running = true;
-                    state.capture_system_audio = config_for_thread.capture_system_audio;
-                    state.capture_microphone = config_for_thread.capture_microphone;
+                    state.route_system_audio = config_for_thread.route_system_audio;
+                    state.route_microphone = config_for_thread.route_microphone;
+                    state.monitor_microphone = config_for_thread.monitor_microphone;
                     state.target_device_name = None;
+                    state.monitor_device_name = None;
                     state.level = 0.0;
                     state.waveform.clear();
                     state.error = None;
@@ -150,23 +157,22 @@ struct CaptureSource {
 }
 
 #[cfg(windows)]
+struct RenderTarget {
+    audio_client: wasapi::AudioClient,
+    render_client: wasapi::AudioRenderClient,
+}
+
+#[cfg(windows)]
 fn run_loop(
     snapshot: Arc<Mutex<StreamInputSnapshot>>,
     stop_flag: Arc<AtomicBool>,
     config: StreamInputConfig,
 ) -> Result<()> {
-    use wasapi::{DeviceCollection, Direction, SampleType, StreamMode, WaveFormat, initialize_mta};
+    use wasapi::{DeviceCollection, Direction, SampleType, WaveFormat, initialize_mta};
 
     let _ = initialize_mta();
-    if !config.capture_system_audio && !config.capture_microphone {
+    if !config.route_system_audio && !config.route_microphone && !config.monitor_microphone {
         bail!("No stream sources enabled");
-    }
-
-    let render_devices = DeviceCollection::new(&Direction::Render)?;
-    let (render_device, render_name) = find_cable_render_device(render_devices)?;
-    {
-        let mut state = snapshot.lock().unwrap();
-        state.target_device_name = Some(render_name.clone());
     }
 
     let desired_format = WaveFormat::new(
@@ -177,25 +183,32 @@ fn run_loop(
         ROUTE_CHANNELS,
         None,
     );
-    let mut render_audio_client = render_device.get_iaudioclient()?;
-    let (_, render_min_time) = render_audio_client.get_device_period()?;
-    render_audio_client.initialize_client(
-        &desired_format,
-        &Direction::Render,
-        &StreamMode::EventsShared {
-            autoconvert: true,
-            buffer_duration_hns: render_min_time,
-        },
-    )?;
-    let render_event = render_audio_client.set_get_eventhandle()?;
-    let initial_frames = render_audio_client.get_buffer_size()? as usize;
-    let render_client = render_audio_client.get_audiorenderclient()?;
-    if initial_frames > 0 {
-        let silence = vec![0u8; initial_frames * ROUTE_FRAME_BYTES];
-        render_client.write_to_device(initial_frames, &silence, None)?;
-    }
+    let mut virtual_target = if config.route_system_audio || config.route_microphone {
+        let render_devices = DeviceCollection::new(&Direction::Render)?;
+        let (render_device, render_name) = find_cable_render_device(render_devices)?;
+        {
+            let mut state = snapshot.lock().unwrap();
+            state.target_device_name = Some(render_name);
+        }
+        Some(open_render_target(render_device, &desired_format)?)
+    } else {
+        None
+    };
+    let mut monitor_target = if config.monitor_microphone {
+        let monitor_device = resolve_system_loopback_device()?;
+        let monitor_name = monitor_device
+            .get_friendlyname()
+            .unwrap_or_else(|_| "Default speaker".to_owned());
+        {
+            let mut state = snapshot.lock().unwrap();
+            state.monitor_device_name = Some(monitor_name);
+        }
+        Some(open_render_target(monitor_device, &desired_format)?)
+    } else {
+        None
+    };
 
-    let mut system_source = if config.capture_system_audio {
+    let mut system_source = if config.route_system_audio {
         Some(
             open_capture_source(PitchSource::System, None, &desired_format)
                 .context("unable to capture system audio")?,
@@ -203,7 +216,7 @@ fn run_loop(
     } else {
         None
     };
-    let mut mic_source = if config.capture_microphone {
+    let mut mic_source = if config.route_microphone || config.monitor_microphone {
         Some(
             open_capture_source(
                 PitchSource::Microphone,
@@ -216,7 +229,12 @@ fn run_loop(
         None
     };
 
-    render_audio_client.start_stream()?;
+    if let Some(target) = virtual_target.as_mut() {
+        target.audio_client.start_stream()?;
+    }
+    if let Some(target) = monitor_target.as_mut() {
+        target.audio_client.start_stream()?;
+    }
 
     loop {
         if stop_flag.load(Ordering::Relaxed) {
@@ -230,9 +248,20 @@ fn run_loop(
             drain_capture_source(source)?;
         }
 
-        let available_frames = render_audio_client.get_available_space_in_frames()? as usize;
+        let mut available_frames: Option<usize> = None;
+        if let Some(target) = virtual_target.as_ref() {
+            available_frames = Some(target.audio_client.get_available_space_in_frames()? as usize);
+        }
+        if let Some(target) = monitor_target.as_ref() {
+            let monitor_frames = target.audio_client.get_available_space_in_frames()? as usize;
+            available_frames = Some(
+                available_frames.map_or(monitor_frames, |current| current.min(monitor_frames)),
+            );
+        }
+        let available_frames = available_frames.unwrap_or(0);
         if available_frames > 0 {
-            let mut data = Vec::with_capacity(available_frames * ROUTE_FRAME_BYTES);
+            let mut route_data = Vec::with_capacity(available_frames * ROUTE_FRAME_BYTES);
+            let mut monitor_data = Vec::with_capacity(available_frames * ROUTE_FRAME_BYTES);
             let mut level_sum = 0.0f32;
             for _ in 0..available_frames {
                 let system_frame = system_source
@@ -242,25 +271,62 @@ fn run_loop(
                     .as_mut()
                     .and_then(|source| pop_stereo_frame(&mut source.sample_queue));
 
-                let active_sources = usize::from(system_frame.is_some()) + usize::from(mic_frame.is_some());
-                let gain = match active_sources {
+                let routed_mic = if config.route_microphone {
+                    mic_frame
+                } else {
+                    None
+                };
+                let route_sources =
+                    usize::from(system_frame.is_some()) + usize::from(routed_mic.is_some());
+                let route_gain = match route_sources {
                     0 => 0.0,
                     1 => 0.94,
                     _ => 0.68,
                 };
-                let left = (system_frame.map(|frame| frame[0]).unwrap_or(0.0)
-                    + mic_frame.map(|frame| frame[0]).unwrap_or(0.0))
-                    * gain;
-                let right = (system_frame.map(|frame| frame[1]).unwrap_or(0.0)
-                    + mic_frame.map(|frame| frame[1]).unwrap_or(0.0))
-                    * gain;
-                let mixed_left = left.clamp(-1.0, 1.0);
-                let mixed_right = right.clamp(-1.0, 1.0);
-                level_sum += ((mixed_left.abs() + mixed_right.abs()) * 0.5).clamp(0.0, 1.0);
-                data.extend_from_slice(&mixed_left.to_le_bytes());
-                data.extend_from_slice(&mixed_right.to_le_bytes());
+                let route_left = (system_frame.map(|frame| frame[0]).unwrap_or(0.0)
+                    + routed_mic.map(|frame| frame[0]).unwrap_or(0.0))
+                    * route_gain;
+                let route_right = (system_frame.map(|frame| frame[1]).unwrap_or(0.0)
+                    + routed_mic.map(|frame| frame[1]).unwrap_or(0.0))
+                    * route_gain;
+                let mixed_left = route_left.clamp(-1.0, 1.0);
+                let mixed_right = route_right.clamp(-1.0, 1.0);
+                if virtual_target.is_some() {
+                    route_data.extend_from_slice(&mixed_left.to_le_bytes());
+                    route_data.extend_from_slice(&mixed_right.to_le_bytes());
+                }
+
+                let monitor_left = mic_frame.map(|frame| frame[0]).unwrap_or(0.0) * 0.92;
+                let monitor_right = mic_frame.map(|frame| frame[1]).unwrap_or(0.0) * 0.92;
+                let monitor_left = monitor_left.clamp(-1.0, 1.0);
+                let monitor_right = monitor_right.clamp(-1.0, 1.0);
+                if monitor_target.is_some() {
+                    monitor_data.extend_from_slice(&monitor_left.to_le_bytes());
+                    monitor_data.extend_from_slice(&monitor_right.to_le_bytes());
+                }
+
+                let level_left = if config.monitor_microphone {
+                    monitor_left
+                } else {
+                    mixed_left
+                };
+                let level_right = if config.monitor_microphone {
+                    monitor_right
+                } else {
+                    mixed_right
+                };
+                level_sum += ((level_left.abs() + level_right.abs()) * 0.5).clamp(0.0, 1.0);
             }
-            render_client.write_to_device(available_frames, &data, None)?;
+            if let Some(target) = virtual_target.as_mut() {
+                target
+                    .render_client
+                    .write_to_device(available_frames, &route_data, None)?;
+            }
+            if let Some(target) = monitor_target.as_mut() {
+                target
+                    .render_client
+                    .write_to_device(available_frames, &monitor_data, None)?;
+            }
 
             let instant_level = if available_frames == 0 {
                 0.0
@@ -273,10 +339,7 @@ fn run_loop(
             push_wave_level(&mut state.waveform, wave_level);
             state.error = None;
         }
-
-        if render_event.wait_for_event(40).is_err() {
-            thread::sleep(Duration::from_millis(8));
-        }
+        thread::sleep(Duration::from_millis(8));
     }
 
     if let Some(source) = system_source.as_mut() {
@@ -285,8 +348,43 @@ fn run_loop(
     if let Some(source) = mic_source.as_mut() {
         let _ = source.audio_client.stop_stream();
     }
-    let _ = render_audio_client.stop_stream();
+    if let Some(target) = virtual_target.as_mut() {
+        let _ = target.audio_client.stop_stream();
+    }
+    if let Some(target) = monitor_target.as_mut() {
+        let _ = target.audio_client.stop_stream();
+    }
     Ok(())
+}
+
+#[cfg(windows)]
+fn open_render_target(
+    device: wasapi::Device,
+    desired_format: &wasapi::WaveFormat,
+) -> Result<RenderTarget> {
+    use wasapi::{Direction, StreamMode};
+
+    let mut audio_client = device.get_iaudioclient()?;
+    let (_, render_min_time) = audio_client.get_device_period()?;
+    audio_client.initialize_client(
+        desired_format,
+        &Direction::Render,
+        &StreamMode::EventsShared {
+            autoconvert: true,
+            buffer_duration_hns: render_min_time,
+        },
+    )?;
+    let _ = audio_client.set_get_eventhandle()?;
+    let initial_frames = audio_client.get_buffer_size()? as usize;
+    let render_client = audio_client.get_audiorenderclient()?;
+    if initial_frames > 0 {
+        let silence = vec![0u8; initial_frames * ROUTE_FRAME_BYTES];
+        render_client.write_to_device(initial_frames, &silence, None)?;
+    }
+    Ok(RenderTarget {
+        audio_client,
+        render_client,
+    })
 }
 
 #[cfg(windows)]
@@ -409,9 +507,7 @@ fn push_wave_level(waveform: &mut Vec<f32>, level: f32) {
 }
 
 #[cfg(windows)]
-fn find_cable_render_device(
-    devices: wasapi::DeviceCollection,
-) -> Result<(wasapi::Device, String)> {
+fn find_cable_render_device(devices: wasapi::DeviceCollection) -> Result<(wasapi::Device, String)> {
     let mut fallback: Option<(wasapi::Device, String)> = None;
     let mut available_devices = Vec::new();
     for device in &devices {
