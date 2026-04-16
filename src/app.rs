@@ -2701,24 +2701,6 @@ impl SoundFxApp {
         response
     }
 
-    fn text_input_shell<R>(ui: &mut Ui, inner: impl FnOnce(&mut Ui) -> R) -> R {
-        Frame::new()
-            .fill(Self::input_shell_fill())
-            .stroke(Stroke::new(1.0, Self::border_color()))
-            .corner_radius(14.0)
-            .inner_margin(Margin::symmetric(12, 8))
-            .show(ui, inner)
-            .inner
-    }
-
-    fn input_shell_fill() -> Color32 {
-        if Self::dark_theme_enabled() {
-            Color32::from_rgb(34, 29, 40)
-        } else {
-            Color32::from_rgb(247, 243, 249)
-        }
-    }
-
     fn draw_library_tag_filter_row(&mut self, ui: &mut Ui) {
         self.reconcile_library_audio_tag_filter();
         let tags = self.distinct_sound_tags();
@@ -7880,14 +7862,13 @@ impl SoundFxApp {
                     } else {
                         &mut self.library_audio_query
                     };
-                    Self::text_input_shell(ui, |ui| {
-                        ui.add_sized(
-                            [ui.available_width(), 24.0],
-                            TextEdit::singleline(query)
-                                .hint_text(search_hint)
-                                .desired_width(f32::INFINITY),
-                        );
-                    });
+                    ui.add_sized(
+                        [ui.available_width(), 24.0],
+                        TextEdit::singleline(query)
+                            .frame(false)
+                            .hint_text(search_hint)
+                            .desired_width(f32::INFINITY),
+                    );
                 });
             });
         if columns_changed {
@@ -8690,14 +8671,13 @@ impl SoundFxApp {
                     ui.horizontal(|ui| {
                         ui.label(Self::icon(0xe8b6, 16.0, Self::muted_text_color()));
                         let search_hint = self.t("library.search");
-                        Self::text_input_shell(ui, |ui| {
-                            ui.add_sized(
-                                [ui.available_width(), 24.0],
-                                TextEdit::singleline(&mut self.library_audio_query)
-                                    .hint_text(search_hint)
-                                    .desired_width(f32::INFINITY),
-                            );
-                        })
+                        ui.add_sized(
+                            [ui.available_width(), 24.0],
+                            TextEdit::singleline(&mut self.library_audio_query)
+                                .frame(false)
+                                .hint_text(search_hint)
+                                .desired_width(f32::INFINITY),
+                        )
                     })
                     .inner
                 });
@@ -9024,17 +9004,16 @@ impl SoundFxApp {
                                         .strong(),
                                 );
                                 ui.add_space(8.0);
-                                Self::text_input_shell(ui, |ui| {
-                                    let response = ui.add_sized(
-                                        [ui.available_width(), 28.0],
-                                        TextEdit::singleline(&mut self.editor_tags_input)
-                                            .hint_text(tags_hint.as_str())
-                                            .desired_width(f32::INFINITY),
-                                    );
-                                    if response.changed() {
-                                        tags_changed = true;
-                                    }
-                                });
+                                let response = ui.add_sized(
+                                    [ui.available_width(), 28.0],
+                                    TextEdit::singleline(&mut self.editor_tags_input)
+                                        .frame(false)
+                                        .hint_text(tags_hint.as_str())
+                                        .desired_width(f32::INFINITY),
+                                );
+                                if response.changed() {
+                                    tags_changed = true;
+                                }
                             });
                             if !available_tags.is_empty() {
                                 ui.add_space(10.0);
