@@ -463,10 +463,6 @@ impl SoundFxApp {
         if let Ok(Some(language_code)) = storage.load_language_code() {
             localization.set_current_code(&language_code);
         }
-        if localization.current_code() != "vi" {
-            localization.set_current_code("vi");
-            let _ = storage.save_language_code("vi");
-        }
         let startup_sound_name = storage.load_startup_sound_name().ok().flatten();
         let exit_sound_name = storage.load_exit_sound_name().ok().flatten();
         let gemini_api_key = storage
@@ -2219,7 +2215,7 @@ impl SoundFxApp {
     }
 
     fn filtered_library_sounds(&self) -> Vec<SoundEffect> {
-        let active_tag_filter = self.library_audio_tag_filter.as_deref();
+        let active_tag_filter = self.active_audio_tag_filter();
         let filtered = self
             .sounds
             .iter()
@@ -2244,6 +2240,14 @@ impl SoundFxApp {
         let (favorites, regular): (Vec<_>, Vec<_>) =
             filtered.into_iter().partition(|video| video.favorite);
         favorites.into_iter().chain(regular).collect()
+    }
+
+    fn active_audio_tag_filter(&self) -> Option<&str> {
+        if self.app_view == AppView::Library {
+            self.library_audio_tag_filter.as_deref()
+        } else {
+            None
+        }
     }
 
     fn trim_playhead_drag_id(sound_id: Uuid) -> egui::Id {
@@ -2618,6 +2622,24 @@ impl SoundFxApp {
         }
     }
 
+    fn has_sound_tag(&self, tag: &str) -> bool {
+        self.sounds.iter().any(|sound| {
+            sound
+                .tags
+                .iter()
+                .any(|sound_tag| sound_tag.eq_ignore_ascii_case(tag))
+        })
+    }
+
+    fn reconcile_library_audio_tag_filter(&mut self) {
+        let Some(active_filter) = self.library_audio_tag_filter.as_deref() else {
+            return;
+        };
+        if !self.has_sound_tag(active_filter) {
+            self.library_audio_tag_filter = None;
+        }
+    }
+
     fn library_sound_query_matches(sound: &SoundEffect, query: &str) -> bool {
         let query = query.trim();
         if query.is_empty() {
@@ -2679,47 +2701,87 @@ impl SoundFxApp {
         response
     }
 
-    fn draw_sound_tag_filter(&mut self, ui: &mut Ui) {
+    fn text_input_shell<R>(ui: &mut Ui, inner: impl FnOnce(&mut Ui) -> R) -> R {
+        Frame::new()
+            .fill(Self::input_shell_fill())
+            .stroke(Stroke::new(1.0, Self::border_color()))
+            .corner_radius(14.0)
+            .inner_margin(Margin::symmetric(12, 8))
+            .show(ui, inner)
+            .inner
+    }
+
+    fn input_shell_fill() -> Color32 {
+        if Self::dark_theme_enabled() {
+            Color32::from_rgb(34, 29, 40)
+        } else {
+            Color32::from_rgb(247, 243, 249)
+        }
+    }
+
+    fn draw_library_tag_filter_row(&mut self, ui: &mut Ui) {
+        self.reconcile_library_audio_tag_filter();
         let tags = self.distinct_sound_tags();
         if tags.is_empty() {
             return;
         }
 
-        Frame::new()
-            .fill(Self::surface_fill())
-            .stroke(Stroke::new(1.0, Self::border_color()))
-            .corner_radius(18.0)
-            .inner_margin(Margin::symmetric(12, 8))
-            .show(ui, |ui| {
-                ui.vertical(|ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new(self.t("library.tag_filter"))
-                                .size(12.0)
-                                .color(Self::muted_text_color()),
-                        );
-                    });
-                    ui.add_space(8.0);
-                    ui.horizontal_wrapped(|ui| {
-                        ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
-                        let active_filter = self.library_audio_tag_filter.clone();
-                        let all_active = active_filter.is_none();
-                        if Self::tag_chip_button(ui, &self.t("library.tag_all"), all_active)
-                            .clicked()
-                        {
-                            self.library_audio_tag_filter = None;
-                        }
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
+            ui.label(
+                RichText::new(self.t("library.tag_filter"))
+                    .size(12.0)
+                    .color(Self::muted_text_color()),
+            );
+            let active_filter = self.library_audio_tag_filter.clone();
+            let all_active = active_filter.is_none();
+            if Self::tag_chip_button(ui, &self.t("library.tag_all"), all_active).clicked() {
+                self.library_audio_tag_filter = None;
+            }
 
-                        for tag in tags {
-                            let active = active_filter.as_deref().is_some_and(|value| value == tag);
-                            if Self::tag_chip_button(ui, &tag, active).clicked() {
-                                self.library_audio_tag_filter =
-                                    if active { None } else { Some(tag) };
-                            }
-                        }
-                    });
-                });
-            });
+            for tag in tags {
+                let active = active_filter.as_deref().is_some_and(|value| value == tag);
+                if Self::tag_chip_button(ui, &tag, active).clicked() {
+                    self.library_audio_tag_filter = if active { None } else { Some(tag) };
+                }
+            }
+        });
+    }
+
+    fn apply_tag_to_input(input: &mut String, tag: &str, active: bool) {
+        let mut tags = Self::parse_tags(input);
+        let Some(normalized) = Self::normalize_tag(tag) else {
+            return;
+        };
+        if active {
+            tags.retain(|value| !value.eq_ignore_ascii_case(&normalized));
+        } else if !tags
+            .iter()
+            .any(|value| value.eq_ignore_ascii_case(&normalized))
+        {
+            tags.push(normalized);
+        }
+        *input = Self::join_tags(&tags);
+    }
+
+    fn draw_sound_tag_picker(ui: &mut Ui, tags: &[String], current_tags: &mut String) -> bool {
+        if tags.is_empty() {
+            return false;
+        }
+
+        let selected = Self::parse_tags(current_tags);
+        let mut changed = false;
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
+            for tag in tags {
+                let active = selected.iter().any(|value| value.eq_ignore_ascii_case(tag));
+                if Self::tag_chip_button(ui, tag, active).clicked() {
+                    Self::apply_tag_to_input(current_tags, tag, active);
+                    changed = true;
+                }
+            }
+        });
+        changed
     }
 
     fn sync_editor_tags_input(&mut self) {
@@ -7711,6 +7773,11 @@ impl SoundFxApp {
                 self.library_tab = LibraryTab::Videos;
             }
 
+            if self.library_tab == LibraryTab::Sounds {
+                ui.add_space(12.0);
+                self.draw_library_tag_filter_row(ui);
+            }
+
             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                 let favorites_active = if self.library_tab == LibraryTab::Videos {
                     self.library_favorites_only_video
@@ -7813,18 +7880,16 @@ impl SoundFxApp {
                     } else {
                         &mut self.library_audio_query
                     };
-                    ui.add_sized(
-                        [ui.available_width(), 24.0],
-                        TextEdit::singleline(query)
-                            .hint_text(search_hint)
-                            .desired_width(f32::INFINITY),
-                    );
+                    Self::text_input_shell(ui, |ui| {
+                        ui.add_sized(
+                            [ui.available_width(), 24.0],
+                            TextEdit::singleline(query)
+                                .hint_text(search_hint)
+                                .desired_width(f32::INFINITY),
+                        );
+                    });
                 });
             });
-        ui.add_space(10.0);
-        if self.library_tab == LibraryTab::Sounds {
-            self.draw_sound_tag_filter(ui);
-        }
         if columns_changed {
             let _ = self
                 .storage
@@ -8625,22 +8690,18 @@ impl SoundFxApp {
                     ui.horizontal(|ui| {
                         ui.label(Self::icon(0xe8b6, 16.0, Self::muted_text_color()));
                         let search_hint = self.t("library.search");
-                        ui.add_sized(
-                            [ui.available_width(), 24.0],
-                            TextEdit::singleline(&mut self.library_audio_query)
-                                .hint_text(search_hint)
-                                .desired_width(f32::INFINITY),
-                        )
+                        Self::text_input_shell(ui, |ui| {
+                            ui.add_sized(
+                                [ui.available_width(), 24.0],
+                                TextEdit::singleline(&mut self.library_audio_query)
+                                    .hint_text(search_hint)
+                                    .desired_width(f32::INFINITY),
+                            );
+                        })
                     })
                     .inner
                 });
-            let search_block_rect = search_panel
-                .response
-                .rect
-                .union(search_panel.inner.rect)
-                .expand2(vec2(12.0, 10.0));
-            ui.add_space(12.0);
-            self.draw_sound_tag_filter(ui);
+            let search_block_rect = search_panel.response.rect.expand2(vec2(12.0, 10.0));
             ui.add_space(12.0);
             ScrollArea::vertical()
                 .auto_shrink([false, false])
@@ -8882,6 +8943,8 @@ impl SoundFxApp {
         let editor_timeline_interactive = !self.has_modal_panel();
         let tags_label = self.t("editor.tags");
         let tags_hint = self.t("editor.tags_hint");
+        let tags_available_label = self.t("editor.tags_available");
+        let available_tags = self.distinct_sound_tags();
 
         Frame::new()
             .fill(Self::surface_fill())
@@ -8952,22 +9015,42 @@ impl SoundFxApp {
                     .corner_radius(26.0)
                     .inner_margin(Margin::same(18))
                     .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                RichText::new(&tags_label)
-                                    .size(12.5)
-                                    .color(Self::muted_text_color())
-                                    .strong(),
-                            );
-                            ui.add_space(8.0);
-                            let response = ui.add_sized(
-                                [ui.available_width(), 28.0],
-                                TextEdit::singleline(&mut self.editor_tags_input)
-                                    .hint_text(tags_hint.as_str())
-                                    .desired_width(f32::INFINITY),
-                            );
-                            if response.changed() {
-                                tags_changed = true;
+                        ui.vertical(|ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new(&tags_label)
+                                        .size(12.5)
+                                        .color(Self::muted_text_color())
+                                        .strong(),
+                                );
+                                ui.add_space(8.0);
+                                Self::text_input_shell(ui, |ui| {
+                                    let response = ui.add_sized(
+                                        [ui.available_width(), 28.0],
+                                        TextEdit::singleline(&mut self.editor_tags_input)
+                                            .hint_text(tags_hint.as_str())
+                                            .desired_width(f32::INFINITY),
+                                    );
+                                    if response.changed() {
+                                        tags_changed = true;
+                                    }
+                                });
+                            });
+                            if !available_tags.is_empty() {
+                                ui.add_space(10.0);
+                                ui.label(
+                                    RichText::new(&tags_available_label)
+                                        .size(12.0)
+                                        .color(Self::muted_text_color()),
+                                );
+                                ui.add_space(6.0);
+                                if Self::draw_sound_tag_picker(
+                                    ui,
+                                    &available_tags,
+                                    &mut self.editor_tags_input,
+                                ) {
+                                    tags_changed = true;
+                                }
                             }
                         });
                     });

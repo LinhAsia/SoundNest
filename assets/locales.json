@@ -79,6 +79,7 @@
       "library.tag_all": "All",
       "editor.tags": "Tags",
       "editor.tags_hint": "Comma-separated tags, e.g. laugh, ui, alert",
+      "editor.tags_available": "Available tags",
       "library.columns": "col"
     },
     "vi": {
@@ -159,6 +160,7 @@
       "library.tag_all": "Tất cả",
       "editor.tags": "Tags",
       "editor.tags_hint": "Cách nhau bằng dấu phẩy, ví dụ: laugh, ui, alert",
+      "editor.tags_available": "Tag có sẵn",
       "library.columns": "cột"
     }
   }
