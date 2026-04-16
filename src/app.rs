@@ -17,9 +17,9 @@ use anyhow::{Context as _, Result};
 #[cfg(windows)]
 use clipboard_win::{Clipboard, Setter, formats::FileList};
 use eframe::egui::{
-    self, Align, Button, CentralPanel, Checkbox, Color32, ComboBox, Context, CornerRadius,
-    DragValue, FontFamily, Frame, Margin, Pos2, ProgressBar, Rect, RichText, ScrollArea, Sense,
-    Stroke, StrokeKind, TextEdit, TextureHandle, Ui, Vec2, ViewportCommand, vec2,
+    self, Align, Align2, Button, CentralPanel, Checkbox, Color32, ComboBox, Context, CornerRadius,
+    DragValue, FontFamily, FontId, Frame, Margin, Pos2, ProgressBar, Rect, RichText, ScrollArea,
+    Sense, Stroke, StrokeKind, TextEdit, TextureHandle, Ui, Vec2, ViewportCommand, vec2,
 };
 use eframe::epaint::Shadow;
 use std::collections::{HashMap, HashSet};
@@ -7846,7 +7846,7 @@ impl SoundFxApp {
                 }
 
                 if self.sounds.is_empty() {
-                    Self::draw_empty_editor(ui);
+                    self.draw_empty_editor(ui);
                     return;
                 }
 
@@ -7857,7 +7857,7 @@ impl SoundFxApp {
                     .clamp(LIBRARY_GRID_MIN_COLUMNS, LIBRARY_GRID_MAX_COLUMNS);
                 let sounds = self.filtered_library_sounds();
                 if sounds.is_empty() {
-                    Self::draw_empty_editor(ui);
+                    self.draw_empty_editor(ui);
                     return;
                 }
                 let mut open_sound = None;
@@ -8841,7 +8841,7 @@ impl SoundFxApp {
 
     fn draw_editor(&mut self, ui: &mut Ui, ctx: &Context) {
         let Some(index) = self.selected_sound_index() else {
-            Self::draw_empty_editor(ui);
+            self.draw_empty_editor(ui);
             return;
         };
 
@@ -9161,7 +9161,7 @@ impl SoundFxApp {
         }
     }
 
-    fn draw_empty_editor(ui: &mut Ui) {
+    fn draw_empty_editor(&mut self, ui: &mut Ui) {
         Frame::new()
             .fill(Color32::from_rgba_premultiplied(255, 255, 255, 210))
             .stroke(Stroke::new(1.0, Color32::from_rgb(236, 223, 232)))
@@ -9174,14 +9174,32 @@ impl SoundFxApp {
             .corner_radius(36.0)
             .inner_margin(Margin::same(28))
             .show(ui, |ui| {
-                ui.vertical_centered(|ui| {
-                    ui.add_space(160.0);
-                    ui.label(
-                        RichText::new("+")
-                            .size(48.0)
-                            .color(Color32::from_rgb(214, 51, 132)),
-                    );
-                });
+                let height = ui.available_height().clamp(280.0, 420.0);
+                let (rect, response) =
+                    ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click());
+                if response.hovered() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                }
+                if response.clicked() {
+                    self.add_sound();
+                }
+
+                let painter = ui.painter_at(rect);
+                let center = rect.center();
+                painter.text(
+                    center,
+                    Align2::CENTER_CENTER,
+                    "+",
+                    FontId::new(52.0, FontFamily::Proportional),
+                    Color32::from_rgb(214, 51, 132),
+                );
+                painter.text(
+                    Pos2::new(center.x, center.y + 42.0),
+                    Align2::CENTER_CENTER,
+                    "Click to import sound",
+                    FontId::new(13.5, FontFamily::Proportional),
+                    Color32::from_rgb(122, 96, 111),
+                );
             });
     }
 
