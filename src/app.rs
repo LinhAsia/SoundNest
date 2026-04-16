@@ -3495,21 +3495,25 @@ impl SoundFxApp {
     }
 
     fn apply_stream_input_routing(&mut self) {
-        let can_route_virtual_mic = self.stream_driver_installed
-            && (self.stream_input_system_audio || self.stream_input_microphone);
-        let wants_local_mic_monitor = self.stream_input_monitor_microphone;
-        let config = if !self.stream_driver_busy
-            && (can_route_virtual_mic || wants_local_mic_monitor)
-        {
-            Some(StreamInputConfig {
-                route_system_audio: self.stream_driver_installed && self.stream_input_system_audio,
-                route_microphone: self.stream_driver_installed && self.stream_input_microphone,
-                monitor_microphone: self.stream_input_monitor_microphone,
-                microphone_device_name: self.selected_stream_input_device.clone(),
-            })
-        } else {
-            None
-        };
+        let mic_available = self.selected_stream_input_device.is_some()
+            || !self.stream_input_capture_devices.is_empty();
+        let monitor_microphone = self.stream_input_monitor_microphone && mic_available;
+        let route_system_audio = self.stream_input_system_audio && !monitor_microphone;
+        let route_microphone = self.stream_input_microphone && mic_available;
+        let can_route_virtual_mic =
+            self.stream_driver_installed && (route_system_audio || route_microphone);
+        let wants_local_mic_monitor = monitor_microphone;
+        let config =
+            if !self.stream_driver_busy && (can_route_virtual_mic || wants_local_mic_monitor) {
+                Some(StreamInputConfig {
+                    route_system_audio: self.stream_driver_installed && route_system_audio,
+                    route_microphone: self.stream_driver_installed && route_microphone,
+                    monitor_microphone,
+                    microphone_device_name: self.selected_stream_input_device.clone(),
+                })
+            } else {
+                None
+            };
 
         if let Err(error) = self.stream_input_router.configure(config) {
             self.set_error_status(error);
@@ -3705,6 +3709,14 @@ impl SoundFxApp {
             Color32::from_rgb(26, 22, 31)
         } else {
             Color32::from_rgb(255, 251, 254)
+        }
+    }
+
+    fn input_fill() -> Color32 {
+        if Self::dark_theme_enabled() {
+            Color32::from_rgb(31, 26, 37)
+        } else {
+            Color32::from_rgb(250, 246, 249)
         }
     }
 
@@ -5590,6 +5602,16 @@ impl SoundFxApp {
             return;
         }
 
+        let mic_available = self.selected_stream_input_device.is_some()
+            || !self.stream_input_capture_devices.is_empty();
+        if !mic_available {
+            self.stream_input_microphone = false;
+            self.stream_input_monitor_microphone = false;
+        }
+        if self.stream_input_monitor_microphone && self.stream_input_system_audio {
+            self.stream_input_system_audio = false;
+        }
+
         let snapshot = self.stream_input_router.snapshot();
         let mut close_request = false;
         let mut open_panel = self.show_stream_panel;
@@ -5765,25 +5787,41 @@ impl SoundFxApp {
                         let monitor_microphone_label = self.t("stream.monitor_microphone");
                         ui.add_enabled_ui(!self.stream_driver_busy, |ui| {
                             ui.add_enabled_ui(self.stream_driver_installed, |ui| {
-                                routing_changed |= ui
-                                    .checkbox(
+                                let system_audio_response = ui.add_enabled(
+                                    !self.stream_input_monitor_microphone,
+                                    egui::Checkbox::new(
                                         &mut self.stream_input_system_audio,
                                         capture_system_audio_label,
-                                    )
-                                    .changed();
+                                    ),
+                                );
+                                routing_changed |= system_audio_response.changed();
                                 routing_changed |= ui
-                                    .checkbox(
-                                        &mut self.stream_input_microphone,
-                                        capture_microphone_label,
+                                    .add_enabled(
+                                        mic_available,
+                                        egui::Checkbox::new(
+                                            &mut self.stream_input_microphone,
+                                            capture_microphone_label,
+                                        ),
                                     )
                                     .changed();
                             });
+                            let before_monitor = self.stream_input_monitor_microphone;
                             routing_changed |= ui
-                                .checkbox(
-                                    &mut self.stream_input_monitor_microphone,
-                                    monitor_microphone_label,
+                                .add_enabled(
+                                    mic_available,
+                                    egui::Checkbox::new(
+                                        &mut self.stream_input_monitor_microphone,
+                                        monitor_microphone_label,
+                                    ),
                                 )
                                 .changed();
+                            if !before_monitor
+                                && self.stream_input_monitor_microphone
+                                && self.stream_input_system_audio
+                            {
+                                self.stream_input_system_audio = false;
+                                routing_changed = true;
+                            }
                             ui.add_space(8.0);
                             if !self.stream_driver_installed
                                 && (self.stream_input_system_audio || self.stream_input_microphone)
@@ -5803,22 +5841,32 @@ impl SoundFxApp {
                                 );
                                 let default_microphone_label = self.t("stream.default_microphone");
                                 let before = self.selected_stream_input_device.clone();
-                                ComboBox::from_id_salt("stream-input-mic-device")
-                                    .width(190.0)
-                                    .selected_text(
-                                        self.selected_stream_input_device
-                                            .clone()
-                                            .unwrap_or(default_microphone_label),
-                                    )
-                                    .show_ui(ui, |ui| {
-                                        for name in &self.stream_input_capture_devices {
-                                            ui.selectable_value(
-                                                &mut self.selected_stream_input_device,
-                                                Some(name.clone()),
-                                                name,
-                                            );
-                                        }
+                                Self::with_dark_combo_visuals(ui, |ui| {
+                                    ui.add_enabled_ui(mic_available, |ui| {
+                                        ComboBox::from_id_salt("stream-input-mic-device")
+                                            .width(190.0)
+                                            .selected_text(
+                                                RichText::new(
+                                                    self.selected_stream_input_device
+                                                        .as_deref()
+                                                        .map(|name| {
+                                                            Self::truncate_middle_ascii(name, 28)
+                                                        })
+                                                        .unwrap_or(default_microphone_label),
+                                                )
+                                                .color(Self::strong_text_color()),
+                                            )
+                                            .show_ui(ui, |ui| {
+                                                for name in &self.stream_input_capture_devices {
+                                                    ui.selectable_value(
+                                                        &mut self.selected_stream_input_device,
+                                                        Some(name.clone()),
+                                                        Self::truncate_middle_ascii(name, 38),
+                                                    );
+                                                }
+                                            });
                                     });
+                                });
                                 if self.selected_stream_input_device != before {
                                     routing_changed = true;
                                 }
@@ -5837,22 +5885,33 @@ impl SoundFxApp {
                         );
                         if let Some(target_name) = snapshot.target_device_name.as_ref() {
                             ui.add_space(8.0);
-                            ui.label(
-                                RichText::new(format!("{}: {target_name}", self.t("stream.target")))
-                                    .size(11.0)
-                                    .color(Self::muted_text_color()),
-                            );
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label(
+                                    RichText::new(format!("{}:", self.t("stream.target")))
+                                        .size(11.0)
+                                        .color(Self::muted_text_color()),
+                                );
+                                ui.label(
+                                    RichText::new(target_name)
+                                        .size(11.0)
+                                        .color(Self::strong_text_color()),
+                                );
+                            });
                         }
                         if let Some(target_name) = snapshot.monitor_device_name.as_ref() {
                             ui.add_space(6.0);
-                            ui.label(
-                                RichText::new(format!(
-                                    "{}: {target_name}",
-                                    self.t("stream.monitor_target")
-                                ))
-                                .size(11.0)
-                                .color(Self::muted_text_color()),
-                            );
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label(
+                                    RichText::new(format!("{}:", self.t("stream.monitor_target")))
+                                        .size(11.0)
+                                        .color(Self::muted_text_color()),
+                                );
+                                ui.label(
+                                    RichText::new(target_name)
+                                        .size(11.0)
+                                        .color(Self::strong_text_color()),
+                                );
+                            });
                         }
                         ui.add_space(8.0);
                         let show_live_wave_label = self.t("stream.show_live_wave");
@@ -6857,19 +6916,18 @@ impl SoundFxApp {
         min_size: Vec2,
         y_offset: f32,
     ) -> (Rect, Vec2, Pos2) {
-        let host_rect = self
-            .app_frame_rect
-            .filter(|rect| rect.width() > 1.0 && rect.height() > 1.0)
-            .unwrap_or_else(|| ctx.screen_rect().shrink(18.0));
         let safe_rect = self.modal_safe_rect(ctx);
         let panel_size = vec2(
             Self::fit_modal_dimension(safe_rect.width(), desired_size.x, min_size.x),
             Self::fit_modal_dimension(safe_rect.height(), desired_size.y, min_size.y),
         );
+        let center = safe_rect.center();
         let panel_pos = Pos2::new(
-            (host_rect.center().x - panel_size.x * 0.5)
+            (center.x - panel_size.x * 0.5)
+                .round()
                 .clamp(safe_rect.left(), safe_rect.right() - panel_size.x),
-            (host_rect.center().y - panel_size.y * 0.5 + y_offset)
+            (center.y - panel_size.y * 0.5 + y_offset)
+                .round()
                 .clamp(safe_rect.top(), safe_rect.bottom() - panel_size.y),
         );
         (safe_rect, panel_size, panel_pos)
@@ -8977,13 +9035,22 @@ impl SoundFxApp {
                 let name_width = (ui.available_width() - controls_width - row_gap).max(120.0);
 
                 ui.horizontal(|ui| {
-                    let response = ui.add_sized(
-                        [name_width, 32.0],
-                        TextEdit::singleline(&mut sound.name)
-                            .font(egui::TextStyle::Heading)
-                            .desired_width(name_width)
-                            .margin(Vec2::new(8.0, 8.0)),
-                    );
+                    let response = Frame::new()
+                        .fill(Self::input_fill())
+                        .stroke(Stroke::new(1.0, Self::border_color()))
+                        .corner_radius(16.0)
+                        .inner_margin(Margin::symmetric(12, 6))
+                        .show(ui, |ui| {
+                            ui.add_sized(
+                                [name_width - 24.0, 26.0],
+                                TextEdit::singleline(&mut sound.name)
+                                    .frame(false)
+                                    .font(egui::TextStyle::Heading)
+                                    .desired_width(name_width)
+                                    .margin(Vec2::new(0.0, 5.0)),
+                            )
+                        })
+                        .inner;
                     if response.changed() {
                         changed = true;
                     }
@@ -10646,13 +10713,22 @@ impl SoundFxApp {
                     ui.add_space(10.0);
 
                     ui.horizontal(|ui| {
-                        let response = ui.add_sized(
-                            [ui.available_width() - 32.0, 42.0],
-                            TextEdit::singleline(&mut self.download_url)
-                                .hint_text("https://youtube.com/watch?v=... or soundcloud / tiktok / facebook")
-                                .desired_width(f32::INFINITY)
-                                .margin(Vec2::new(14.0, 12.0)),
-                        );
+                        let response = Frame::new()
+                            .fill(Self::input_fill())
+                            .stroke(Stroke::new(1.0, Self::border_color()))
+                            .corner_radius(16.0)
+                            .inner_margin(Margin::symmetric(14, 10))
+                            .show(ui, |ui| {
+                                ui.add_sized(
+                                    [ui.available_width() - 4.0, 22.0],
+                                    TextEdit::singleline(&mut self.download_url)
+                                        .frame(false)
+                                        .hint_text("https://youtube.com/watch?v=... or soundcloud / tiktok / facebook")
+                                        .desired_width(f32::INFINITY)
+                                        .margin(Vec2::new(0.0, 4.0)),
+                                )
+                            })
+                            .inner;
                         if response.lost_focus()
                             && ui.input(|input| input.key_pressed(egui::Key::Enter))
                             && !snapshot.running
@@ -13017,21 +13093,21 @@ impl SoundFxApp {
             DownloadSiteKind::TikTok => {
                 painter.line_segment(
                     [
-                        Pos2::new(center.x + 2.0, center.y - 6.6),
-                        Pos2::new(center.x + 2.0, center.y + 1.0),
+                        Pos2::new(center.x + 2.8, center.y - 5.8),
+                        Pos2::new(center.x + 2.8, center.y + 1.0),
                     ],
-                    Stroke::new(2.4, white),
+                    Stroke::new(2.2, white),
                 );
                 painter.line_segment(
                     [
-                        Pos2::new(center.x + 2.0, center.y - 6.4),
-                        Pos2::new(center.x + 6.2, center.y - 4.3),
+                        Pos2::new(center.x + 2.8, center.y - 5.8),
+                        Pos2::new(center.x + 6.0, center.y - 4.0),
                     ],
-                    Stroke::new(2.4, white),
+                    Stroke::new(2.2, white),
                 );
                 painter.circle_stroke(
-                    Pos2::new(center.x - 1.8, center.y + 3.2),
-                    3.3,
+                    Pos2::new(center.x - 0.7, center.y + 2.8),
+                    3.0,
                     Stroke::new(2.0, white),
                 );
             }
@@ -13053,28 +13129,35 @@ impl SoundFxApp {
             DownloadSiteKind::X => {
                 painter.line_segment(
                     [
-                        Pos2::new(center.x - 5.2, center.y - 5.4),
-                        Pos2::new(center.x + 5.4, center.y + 5.4),
+                        Pos2::new(center.x - 5.4, center.y - 5.2),
+                        Pos2::new(center.x + 4.9, center.y + 5.4),
                     ],
-                    Stroke::new(2.2, white),
+                    Stroke::new(2.0, white),
                 );
                 painter.line_segment(
                     [
-                        Pos2::new(center.x + 5.2, center.y - 5.4),
-                        Pos2::new(center.x - 1.0, center.y + 0.4),
+                        Pos2::new(center.x + 5.4, center.y - 5.2),
+                        Pos2::new(center.x - 2.0, center.y + 2.4),
                     ],
-                    Stroke::new(2.2, white),
+                    Stroke::new(2.0, white),
+                );
+                painter.line_segment(
+                    [
+                        Pos2::new(center.x - 0.1, center.y - 0.1),
+                        Pos2::new(center.x - 4.5, center.y + 5.2),
+                    ],
+                    Stroke::new(2.0, white),
                 );
             }
             DownloadSiteKind::Vimeo => {
                 painter.add(egui::Shape::line(
                     vec![
-                        Pos2::new(center.x - 5.8, center.y - 2.2),
-                        Pos2::new(center.x - 2.0, center.y + 5.2),
-                        Pos2::new(center.x + 1.6, center.y - 0.8),
-                        Pos2::new(center.x + 5.2, center.y - 4.8),
+                        Pos2::new(center.x - 5.8, center.y - 1.2),
+                        Pos2::new(center.x - 2.3, center.y + 4.8),
+                        Pos2::new(center.x + 0.5, center.y + 0.6),
+                        Pos2::new(center.x + 5.1, center.y - 4.3),
                     ],
-                    Stroke::new(2.4, white),
+                    Stroke::new(2.5, white),
                 ));
             }
             DownloadSiteKind::Twitch => {
@@ -13108,24 +13191,31 @@ impl SoundFxApp {
                 );
             }
             DownloadSiteKind::GoogleDrive => {
-                let top = Pos2::new(center.x, center.y - 6.0);
-                let left = Pos2::new(center.x - 5.8, center.y + 4.8);
-                let right = Pos2::new(center.x + 5.8, center.y + 4.8);
-                let upper_left = Pos2::new(center.x - 2.0, center.y - 0.3);
-                let upper_right = Pos2::new(center.x + 2.0, center.y - 0.3);
+                painter.circle_filled(center, radius, Color32::from_rgb(252, 252, 252));
+                let top = Pos2::new(center.x, center.y - 5.8);
+                let left = Pos2::new(center.x - 5.7, center.y + 4.8);
+                let right = Pos2::new(center.x + 5.7, center.y + 4.8);
+                let upper_left = Pos2::new(center.x - 1.8, center.y - 0.2);
+                let upper_right = Pos2::new(center.x + 1.8, center.y - 0.2);
                 painter.line_segment(
                     [top, upper_left],
-                    Stroke::new(2.3, Color32::from_rgb(255, 205, 86)),
+                    Stroke::new(2.2, Color32::from_rgb(251, 188, 5)),
                 );
                 painter.line_segment(
                     [top, upper_right],
-                    Stroke::new(2.3, Color32::from_rgb(66, 133, 244)),
+                    Stroke::new(2.2, Color32::from_rgb(66, 133, 244)),
                 );
-                painter.line_segment([left, upper_left], Stroke::new(2.3, white));
-                painter.line_segment([right, upper_right], Stroke::new(2.3, white));
+                painter.line_segment(
+                    [left, upper_left],
+                    Stroke::new(2.2, Color32::from_rgb(15, 157, 88)),
+                );
+                painter.line_segment(
+                    [right, upper_right],
+                    Stroke::new(2.2, Color32::from_rgb(66, 133, 244)),
+                );
                 painter.line_segment(
                     [left, right],
-                    Stroke::new(2.3, Color32::from_rgb(15, 157, 88)),
+                    Stroke::new(2.2, Color32::from_rgb(15, 157, 88)),
                 );
             }
         }
