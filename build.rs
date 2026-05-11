@@ -15,4 +15,12 @@ fn main() {
         .unwrap_or_else(|| "dev".to_owned());
 
     println!("cargo:rustc-env=SOUNDFX_BUILD_HASH={short_hash}");
+
+    #[cfg(target_os = "windows")]
+    {
+        println!("cargo:rerun-if-changed=assets/app-icon.png");
+        println!("cargo:rerun-if-changed=assets/app-icon.ico");
+        println!("cargo:rerun-if-changed=resources/windows.rc");
+        let _ = embed_resource::compile("resources/windows.rc", embed_resource::NONE);
+    }
 }

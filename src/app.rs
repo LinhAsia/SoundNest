@@ -9449,11 +9449,12 @@ impl SoundFxApp {
             |ui| {
                 let mut scroll_area = ScrollArea::horizontal()
                     .id_salt((sound.id, "trim-timeline-scroll"))
+                    .drag_to_scroll(false)
                     .auto_shrink([false, false]);
                 if let Some(offset) = stored_zoom_scroll_offset {
                     scroll_area = scroll_area.horizontal_scroll_offset(offset);
                 }
-                scroll_area.show(ui, |ui| {
+                let scroll_output = scroll_area.show(ui, |ui| {
                     let (rect, response) =
                         ui.allocate_exact_size(timeline_size, Sense::click_and_drag());
                     let viewport_rect = rect.intersect(ui.clip_rect());
@@ -9838,10 +9839,10 @@ impl SoundFxApp {
                         }
                     }
 
-                    if next_scroll_offset.is_none() {
-                        next_scroll_offset = Some((viewport_rect.left() - rect.left()).max(0.0));
-                    }
                 });
+                if next_scroll_offset.is_none() {
+                    next_scroll_offset = Some(scroll_output.state.offset.x.max(0.0));
+                }
                 if let Some(offset) = next_scroll_offset {
                     ui.ctx().data_mut(|data| {
                         data.insert_temp(zoom_scroll_offset_id, offset);

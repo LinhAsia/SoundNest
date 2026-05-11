@@ -38,6 +38,7 @@ const MATERIAL_ICONS_FONT: &str = "material_icons";
 const UI_FONT: &str = "ui_font";
 #[cfg(windows)]
 const SINGLE_INSTANCE_MUTEX: &str = "Local\\SoundFxManagerSingleton";
+const APP_ICON_PNG: &[u8] = include_bytes!("../assets/app-icon.png");
 
 #[cfg(windows)]
 struct SingleInstanceGuard(HANDLE);
@@ -70,8 +71,10 @@ fn main() -> eframe::Result<()> {
         Err(_) => None,
     };
 
+    let app_icon = load_app_icon();
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
+            .with_icon(Arc::new(app_icon))
             .with_title("Sound FX")
             .with_inner_size([900.0, 900.0])
             .with_min_inner_size([720.0, 720.0])
@@ -91,6 +94,10 @@ fn main() -> eframe::Result<()> {
             Ok(Box::new(SoundFxApp::new()))
         }),
     )
+}
+
+fn load_app_icon() -> egui::IconData {
+    eframe::icon_data::from_png_bytes(APP_ICON_PNG).expect("app icon asset must be a valid PNG")
 }
 
 #[cfg(windows)]
