@@ -9436,7 +9436,7 @@ impl SoundFxApp {
         let stored_zoom_scroll_offset = ui
             .ctx()
             .data(|data| data.get_temp::<f32>(zoom_scroll_offset_id));
-        let mut next_scroll_offset = stored_zoom_scroll_offset;
+        let mut requested_scroll_offset: Option<f32> = None;
         let timeline_size = vec2((viewport_width * *zoom).max(viewport_width), 160.0);
         let dark_theme = Self::dark_theme_enabled();
         let mut changed = false;
@@ -9649,9 +9649,9 @@ impl SoundFxApp {
                             (false, true) => pan_step,
                             _ => 0.0,
                         };
-                        let current_offset = next_scroll_offset
+                        let current_offset = requested_scroll_offset
                             .unwrap_or_else(|| (viewport_rect.left() - rect.left()).max(0.0));
-                        next_scroll_offset = Some((current_offset + delta).clamp(0.0, max_offset));
+                        requested_scroll_offset = Some((current_offset + delta).clamp(0.0, max_offset));
                         ui.ctx().request_repaint();
                     }
 
@@ -9679,7 +9679,7 @@ impl SoundFxApp {
                             let next_anchor_content_x =
                                 (anchor_content_x / rect.width().max(1.0)) * next_timeline_width;
                             let max_offset = (next_timeline_width - viewport_width).max(0.0);
-                            next_scroll_offset = Some(
+                            requested_scroll_offset = Some(
                                 (next_anchor_content_x - anchor_viewport_x).clamp(0.0, max_offset),
                             );
                             ui.ctx().request_repaint();
@@ -9840,14 +9840,11 @@ impl SoundFxApp {
                     }
 
                 });
-                if next_scroll_offset.is_none() {
-                    next_scroll_offset = Some(scroll_output.state.offset.x.max(0.0));
-                }
-                if let Some(offset) = next_scroll_offset {
-                    ui.ctx().data_mut(|data| {
-                        data.insert_temp(zoom_scroll_offset_id, offset);
-                    });
-                }
+                let scroll_offset = requested_scroll_offset
+                    .unwrap_or_else(|| scroll_output.state.offset.x.max(0.0));
+                ui.ctx().data_mut(|data| {
+                    data.insert_temp(zoom_scroll_offset_id, scroll_offset);
+                });
             },
         );
 
