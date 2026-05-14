@@ -9008,6 +9008,7 @@ impl SoundFxApp {
         let mut commit_trim_request = false;
         let mut seek_request = false;
         let mut playback_reapply_request = false;
+        let mut normalize_request = false;
         let mut changed = false;
         let mut tags_changed = false;
         let mut trim_timeline_zoom = self.trim_timeline_zoom;
@@ -9201,17 +9202,7 @@ impl SoundFxApp {
                                     .on_hover_text("Automatically adjust volume to a standard listening level")
                                     .clicked()
                                 {
-                                    let path = sound.asset_path(self.storage.root_dir());
-                                    match calculate_normalization_gain(&path) {
-                                        Ok(gain) => {
-                                            sound.volume = gain;
-                                            changed = true;
-                                            playback_reapply_request = true;
-                                        }
-                                        Err(error) => {
-                                            self.set_error_status(error);
-                                        }
-                                    }
+                                    normalize_request = true;
                                 }
                                 ui.add_space(10.0);
                                 ui.label(Self::icon(0xe9e4, 16.0, Self::muted_text_color()));
@@ -9323,6 +9314,23 @@ impl SoundFxApp {
 
         if copy_request {
             self.copy_selected_processed_sound();
+        }
+
+        if normalize_request {
+            let path = self.sounds[index].asset_path(self.storage.root_dir());
+            let sound_id = self.sounds[index].id;
+            match calculate_normalization_gain(&path) {
+                Ok(gain) => {
+                    self.sounds[index].volume = gain;
+                    self.mark_dirty(ctx);
+                    if is_playing {
+                        self.preview_sound_from_position(sound_id, Some(preview_cursor_secs));
+                    }
+                }
+                Err(error) => {
+                    self.set_error_status(error);
+                }
+            }
         }
 
         if open_location_request {
