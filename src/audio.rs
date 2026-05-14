@@ -8,6 +8,46 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use uuid::Uuid;
 
+pub fn calculate_normalization_gain(asset_path: &Path) -> Result<f32> {
+    let (_channels, _sample_rate, samples) = decode_audio_file(asset_path)?;
+    if samples.is_empty() {
+        bail!("audio file is empty");
+    }
+
+    let mean_square = samples
+        .iter()
+        .map(|&sample| sample * sample)
+        .sum::<f32>()
+        / samples.len() as f32;
+    let current_rms = mean_square.sqrt();
+
+    if current_rms < 0.00001 {
+        return Ok(1.0);
+    }
+
+    let target_rms = 0.10; // Matches audiobookmaker target
+    let mut gain = target_rms / current_rms;
+
+    // Prevent massive clipping distortion on transient effects
+    let mut max_peak = 0.0f32;
+    for &s in &samples {
+        let abs = s.abs();
+        if abs > max_peak {
+            max_peak = abs;
+        }
+    }
+
+    if max_peak > 0.0 {
+        let peak_with_gain = max_peak * gain;
+        let safety_max = 29000.0 / 32768.0; // Matches audiobookmaker safety max (~0.885)
+        if peak_with_gain > safety_max {
+            gain = safety_max / max_peak;
+        }
+    }
+
+    Ok(gain)
+}
+
 const POP_FADE_MS: f32 = 18.0;
 
 struct CachedAudio {

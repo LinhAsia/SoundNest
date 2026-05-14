@@ -1,4 +1,4 @@
-use crate::audio::AudioEngine;
+use crate::audio::{AudioEngine, calculate_normalization_gain};
 use crate::downloader::{YoutubeAudioDownloader, YoutubeSearchResult};
 use crate::gemini_tts;
 use crate::hotkey::GlobalHotkeyManager;
@@ -9185,6 +9185,34 @@ impl SoundFxApp {
                                         .suffix("x"),
                                 );
                                 sound.volume = sound.volume.clamp(0.0, 5.0);
+                                ui.add_space(8.0);
+                                if ui
+                                    .add_sized(
+                                        [82.0, 24.0],
+                                        Button::new(
+                                            RichText::new("Normalize")
+                                                .size(11.0)
+                                                .color(Color32::from_rgb(214, 51, 132)),
+                                        )
+                                        .fill(Self::surface_fill())
+                                        .stroke(Stroke::new(1.0, Self::border_color()))
+                                        .corner_radius(12.0),
+                                    )
+                                    .on_hover_text("Automatically adjust volume to a standard listening level")
+                                    .clicked()
+                                {
+                                    let path = sound.asset_path(self.storage.root_dir());
+                                    match calculate_normalization_gain(&path) {
+                                        Ok(gain) => {
+                                            sound.volume = gain;
+                                            changed = true;
+                                            playback_reapply_request = true;
+                                        }
+                                        Err(error) => {
+                                            self.set_error_status(error);
+                                        }
+                                    }
+                                }
                                 ui.add_space(10.0);
                                 ui.label(Self::icon(0xe9e4, 16.0, Self::muted_text_color()));
                                 let (speed_response, speed_slider_changed) =
