@@ -262,10 +262,12 @@ pub struct SoundFxApp {
     selected_record_input_device: Option<String>,
     stream_input_capture_devices: Vec<String>,
     selected_stream_input_device: Option<String>,
-    record_hotkey: Option<egui::Key>,
-    pitch_hotkey: Option<egui::Key>,
+    record_hotkeys: Vec<egui::Key>,
+    pitch_hotkeys: Vec<egui::Key>,
     capture_record_hotkey: bool,
     capture_pitch_hotkey: bool,
+    preview_record_hotkey: Option<egui::Key>,
+    preview_pitch_hotkey: Option<egui::Key>,
     record_hotkey_manager: GlobalHotkeyManager,
     record_export_video_sharps: bool,
     record_export_video_animation: bool,
@@ -445,16 +447,18 @@ impl SoundFxApp {
         let selected_record_input_device = record_capture_devices.first().cloned();
         let stream_input_capture_devices = pitch_capture_devices.clone();
         let selected_stream_input_device = stream_input_capture_devices.first().cloned();
-        let record_hotkey = storage
-            .load_record_hotkey()
-            .ok()
-            .flatten()
-            .and_then(|value| Self::parse_key_name(&value));
-        let pitch_hotkey = storage
-            .load_pitch_hotkey()
-            .ok()
-            .flatten()
-            .and_then(|value| Self::parse_key_name(&value));
+        let record_hotkeys = storage
+            .load_record_hotkeys()
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|value| Self::parse_key_name(&value))
+            .collect::<Vec<_>>();
+        let pitch_hotkeys = storage
+            .load_pitch_hotkeys()
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|value| Self::parse_key_name(&value))
+            .collect::<Vec<_>>();
         let app_transition_animation = storage
             .load_app_transition_animation()
             .ok()
@@ -514,10 +518,12 @@ impl SoundFxApp {
             selected_record_input_device,
             stream_input_capture_devices,
             selected_stream_input_device,
-            record_hotkey,
-            pitch_hotkey,
+            record_hotkeys,
+            pitch_hotkeys,
             capture_record_hotkey: false,
             capture_pitch_hotkey: false,
+            preview_record_hotkey: None,
+            preview_pitch_hotkey: None,
             record_hotkey_manager: GlobalHotkeyManager::new(),
             record_export_video_sharps: pitch_show_sharps,
             record_export_video_animation: pitch_overlay_animation,
@@ -647,10 +653,10 @@ impl SoundFxApp {
 
     fn with_initial_selection(mut self) -> Self {
         self.selected = self.sounds.first().map(|sound| sound.id);
-        let _ = self.record_hotkey_manager.set_hotkey(self.record_hotkey);
+        let _ = self.record_hotkey_manager.set_hotkeys(&self.record_hotkeys);
         let _ = self
             .record_hotkey_manager
-            .set_secondary_hotkey(self.pitch_hotkey);
+            .set_secondary_hotkeys(&self.pitch_hotkeys);
         self
     }
 
@@ -2019,23 +2025,45 @@ impl SoundFxApp {
         self.record_hotkey_manager.set_repaint_context(ctx.clone());
 
         if self.capture_record_hotkey || self.capture_pitch_hotkey {
-            let mut captured_key: Option<egui::Key> = None;
+            let mut add_key: Option<egui::Key> = None;
             let mut cancel = false;
             ctx.input(|input| {
                 for event in &input.events {
-                    if let egui::Event::Key {
-                        key,
-                        pressed: true,
-                        repeat: false,
-                        ..
-                    } = event
-                    {
-                        if *key == egui::Key::Escape {
-                            cancel = true;
-                        } else {
-                            captured_key = Some(*key);
+                    match event {
+                        egui::Event::Key {
+                            key,
+                            pressed: true,
+                            repeat: false,
+                            ..
+                        } => {
+                            if *key == egui::Key::Escape {
+                                cancel = true;
+                            } else {
+                                if self.capture_record_hotkey {
+                                    self.preview_record_hotkey = Some(*key);
+                                }
+                                if self.capture_pitch_hotkey {
+                                    self.preview_pitch_hotkey = Some(*key);
+                                }
+                            }
                         }
-                        break;
+                        egui::Event::Key {
+                            key,
+                            pressed: false,
+                            ..
+                        } => {
+                            if *key == egui::Key::Escape {
+                                cancel = true;
+                            } else {
+                                if self.capture_record_hotkey && self.preview_record_hotkey == Some(*key) {
+                                    add_key = Some(*key);
+                                }
+                                if self.capture_pitch_hotkey && self.preview_pitch_hotkey == Some(*key) {
+                                    add_key = Some(*key);
+                                }
+                            }
+                        }
+                        _ => {}
                     }
                 }
             });
@@ -2043,32 +2071,35 @@ impl SoundFxApp {
             if cancel {
                 self.capture_record_hotkey = false;
                 self.capture_pitch_hotkey = false;
+                self.preview_record_hotkey = None;
+                self.preview_pitch_hotkey = None;
                 return;
             }
 
-            if let Some(key) = captured_key {
+            if let Some(key) = add_key {
                 if self.capture_record_hotkey {
-                    self.record_hotkey = Some(key);
-                    self.capture_record_hotkey = false;
-                    if let Err(error) = self.record_hotkey_manager.set_hotkey(self.record_hotkey) {
-                        self.set_error_status(error);
+                    if !self.record_hotkeys.contains(&key) {
+                        self.record_hotkeys.push(key);
+                        let names: Vec<String> = self.record_hotkeys.iter().map(|&k| Self::format_key_name(k).to_owned()).collect();
+                        let _ = self.storage.save_record_hotkeys(&names);
+                        if let Err(error) = self.record_hotkey_manager.set_hotkeys(&self.record_hotkeys) {
+                            self.set_error_status(error);
+                        }
                     }
-                    let _ = self
-                        .storage
-                        .save_record_hotkey(Some(Self::format_key_name(key)));
+                    self.capture_record_hotkey = false;
+                    self.preview_record_hotkey = None;
                 }
                 if self.capture_pitch_hotkey {
-                    self.pitch_hotkey = Some(key);
-                    self.capture_pitch_hotkey = false;
-                    if let Err(error) = self
-                        .record_hotkey_manager
-                        .set_secondary_hotkey(self.pitch_hotkey)
-                    {
-                        self.set_error_status(error);
+                    if !self.pitch_hotkeys.contains(&key) {
+                        self.pitch_hotkeys.push(key);
+                        let names: Vec<String> = self.pitch_hotkeys.iter().map(|&k| Self::format_key_name(k).to_owned()).collect();
+                        let _ = self.storage.save_pitch_hotkeys(&names);
+                        if let Err(error) = self.record_hotkey_manager.set_secondary_hotkeys(&self.pitch_hotkeys) {
+                            self.set_error_status(error);
+                        }
                     }
-                    let _ = self
-                        .storage
-                        .save_pitch_hotkey(Some(Self::format_key_name(key)));
+                    self.capture_pitch_hotkey = false;
+                    self.preview_pitch_hotkey = None;
                 }
             }
             return;
@@ -2079,7 +2110,7 @@ impl SoundFxApp {
         }
         let app_focused = ctx.input(|input| input.focused);
         let local_record_trigger = app_focused
-            && self.record_hotkey.is_some_and(|hotkey| {
+            && self.record_hotkeys.iter().any(|&hotkey| {
                 ctx.input(|input| {
                     input.events.iter().any(|event| {
                         matches!(
@@ -2096,7 +2127,7 @@ impl SoundFxApp {
                 })
             });
         let local_pitch_trigger = app_focused
-            && self.pitch_hotkey.is_some_and(|hotkey| {
+            && self.pitch_hotkeys.iter().any(|&hotkey| {
                 ctx.input(|input| {
                     input.events.iter().any(|event| {
                         matches!(

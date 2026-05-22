@@ -130,6 +130,10 @@ struct PreferencesFile {
     dark_theme: Option<bool>,
     record_hotkey: Option<String>,
     pitch_hotkey: Option<String>,
+    #[serde(default)]
+    record_hotkeys: Option<Vec<String>>,
+    #[serde(default)]
+    pitch_hotkeys: Option<Vec<String>>,
     startup_sound_name: Option<String>,
     exit_sound_name: Option<String>,
     startup_sound_cleared: Option<bool>,
@@ -375,6 +379,24 @@ impl Storage {
         self.save_preferences(&preferences)
     }
 
+    pub fn load_record_hotkeys(&self) -> Result<Vec<String>> {
+        let preferences = self.load_preferences()?;
+        if let Some(list) = preferences.record_hotkeys {
+            Ok(list)
+        } else if let Some(single) = preferences.record_hotkey {
+            Ok(vec![single])
+        } else {
+            Ok(Vec::new())
+        }
+    }
+
+    pub fn save_record_hotkeys(&self, hotkeys: &[String]) -> Result<()> {
+        let mut preferences = self.load_preferences()?;
+        preferences.record_hotkeys = Some(hotkeys.to_vec());
+        preferences.record_hotkey = hotkeys.first().cloned();
+        self.save_preferences(&preferences)
+    }
+
     pub fn load_pitch_hotkey(&self) -> Result<Option<String>> {
         let preferences = self.load_preferences()?;
         Ok(preferences.pitch_hotkey)
@@ -383,6 +405,24 @@ impl Storage {
     pub fn save_pitch_hotkey(&self, hotkey: Option<&str>) -> Result<()> {
         let mut preferences = self.load_preferences()?;
         preferences.pitch_hotkey = hotkey.map(str::to_owned);
+        self.save_preferences(&preferences)
+    }
+
+    pub fn load_pitch_hotkeys(&self) -> Result<Vec<String>> {
+        let preferences = self.load_preferences()?;
+        if let Some(list) = preferences.pitch_hotkeys {
+            Ok(list)
+        } else if let Some(single) = preferences.pitch_hotkey {
+            Ok(vec![single])
+        } else {
+            Ok(Vec::new())
+        }
+    }
+
+    pub fn save_pitch_hotkeys(&self, hotkeys: &[String]) -> Result<()> {
+        let mut preferences = self.load_preferences()?;
+        preferences.pitch_hotkeys = Some(hotkeys.to_vec());
+        preferences.pitch_hotkey = hotkeys.first().cloned();
         self.save_preferences(&preferences)
     }
 

@@ -36,8 +36,8 @@ mod windows_impl {
 
     #[derive(Default)]
     struct HookState {
-        target_vk: AtomicU32,
-        secondary_target_vk: AtomicU32,
+        target_vks: Mutex<Vec<u32>>,
+        secondary_target_vks: Mutex<Vec<u32>>,
         trigger_count: AtomicU64,
         secondary_trigger_count: AtomicU64,
         pressed: AtomicBool,
@@ -52,8 +52,8 @@ mod windows_impl {
         secondary_last_seen: u64,
         worker: Option<JoinHandle<()>>,
         thread_id: Option<u32>,
-        current_key: Option<egui::Key>,
-        secondary_key: Option<egui::Key>,
+        current_keys: Vec<egui::Key>,
+        secondary_keys: Vec<egui::Key>,
     }
 
     impl GlobalHotkeyManager {
@@ -111,34 +111,36 @@ mod windows_impl {
                 secondary_last_seen: 0,
                 worker: Some(worker),
                 thread_id: Some(thread_id),
-                current_key: None,
-                secondary_key: None,
+                current_keys: Vec::new(),
+                secondary_keys: Vec::new(),
             }
         }
 
-        pub fn set_hotkey(&mut self, key: Option<egui::Key>) -> Result<()> {
-            if self.current_key == key {
+        pub fn set_hotkeys(&mut self, keys: &[egui::Key]) -> Result<()> {
+            if self.current_keys == keys {
                 return Ok(());
             }
-            self.current_key = key;
+            self.current_keys = keys.to_vec();
             self.state.pressed.store(false, Ordering::Relaxed);
-            self.state.target_vk.store(
-                key.map(virtual_key_code).transpose()?.unwrap_or(0),
-                Ordering::Relaxed,
-            );
+            let mut vks = Vec::new();
+            for &key in keys {
+                vks.push(virtual_key_code(key)?);
+            }
+            *self.state.target_vks.lock().unwrap() = vks;
             Ok(())
         }
 
-        pub fn set_secondary_hotkey(&mut self, key: Option<egui::Key>) -> Result<()> {
-            if self.secondary_key == key {
+        pub fn set_secondary_hotkeys(&mut self, keys: &[egui::Key]) -> Result<()> {
+            if self.secondary_keys == keys {
                 return Ok(());
             }
-            self.secondary_key = key;
+            self.secondary_keys = keys.to_vec();
             self.state.secondary_pressed.store(false, Ordering::Relaxed);
-            self.state.secondary_target_vk.store(
-                key.map(virtual_key_code).transpose()?.unwrap_or(0),
-                Ordering::Relaxed,
-            );
+            let mut vks = Vec::new();
+            for &key in keys {
+                vks.push(virtual_key_code(key)?);
+            }
+            *self.state.secondary_target_vks.lock().unwrap() = vks;
             Ok(())
         }
 
@@ -169,8 +171,8 @@ mod windows_impl {
         }
 
         fn shutdown(&mut self) {
-            self.state.target_vk.store(0, Ordering::Relaxed);
-            self.state.secondary_target_vk.store(0, Ordering::Relaxed);
+            self.state.target_vks.lock().unwrap().clear();
+            self.state.secondary_target_vks.lock().unwrap().clear();
             self.state.pressed.store(false, Ordering::Relaxed);
             self.state.secondary_pressed.store(false, Ordering::Relaxed);
             if let Some(thread_id) = self.thread_id.take() {
@@ -194,13 +196,12 @@ mod windows_impl {
         if code == HC_ACTION as i32 && lparam.0 != 0 {
             let state = HOTKEY_STATE.get().cloned();
             if let Some(state) = state {
-                let target_vk = state.target_vk.load(Ordering::Relaxed);
-                let secondary_target_vk = state.secondary_target_vk.load(Ordering::Relaxed);
-                if target_vk != 0 || secondary_target_vk != 0 {
+                let target_vks = state.target_vks.lock().unwrap().clone();
+                let secondary_target_vks = state.secondary_target_vks.lock().unwrap().clone();
+                if !target_vks.is_empty() || !secondary_target_vks.is_empty() {
                     let info = unsafe { &*(lparam.0 as *const KBDLLHOOKSTRUCT) };
-                    let matches_primary = target_vk != 0 && info.vkCode == target_vk;
-                    let matches_secondary =
-                        secondary_target_vk != 0 && info.vkCode == secondary_target_vk;
+                    let matches_primary = target_vks.contains(&info.vkCode);
+                    let matches_secondary = secondary_target_vks.contains(&info.vkCode);
                     if matches_primary || matches_secondary {
                         if modifier_down() {
                             return unsafe { CallNextHookEx(None, code, wparam, lparam) };
@@ -342,7 +343,7 @@ impl GlobalHotkeyManager {
         Self
     }
 
-    pub fn set_hotkey(&mut self, _key: Option<egui::Key>) -> Result<()> {
+    pub fn set_hotkeys(&mut self, _keys: &[egui::Key]) -> Result<()> {
         Ok(())
     }
 
@@ -356,11 +357,11 @@ impl GlobalHotkeyManager {
         None
     }
 
-    pub fn set_secondary_hotkey(&mut self, _key: Option<egui::Key>) -> Result<()> {
+    pub fn set_secondary_hotkeys(&mut self, _keys: &[egui::Key]) -> Result<()> {
         Ok(())
     }
 
-    pub fn take_secondary_triggered(&self) -> bool {
+    pub fn take_secondary_triggered(&mut self) -> bool {
         false
     }
 }
