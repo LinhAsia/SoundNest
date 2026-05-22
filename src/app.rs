@@ -9033,7 +9033,7 @@ impl SoundFxApp {
                 let sound = &mut self.sounds[index];
                 let controls_width = 52.0 + 52.0 + 52.0 + 64.0 + 64.0 + 36.0;
                 let row_gap = 8.0;
-                let name_width = (ui.available_width() - controls_width - row_gap).max(70.0);
+                let name_width = (ui.available_width() - controls_width - row_gap).max(120.0);
 
                 ui.horizontal(|ui| {
                     let response = Frame::new()
@@ -9168,158 +9168,60 @@ impl SoundFxApp {
                     .inner_margin(Margin::same(22))
                     .show(ui, |ui| {
                         Self::with_slider_visuals(ui, |ui| {
-                            let available_w = ui.available_width();
-                            let single_row = available_w >= 450.0;
-
-                            let mut v_resp_val = None;
-                            let mut v_sl_ch_val = false;
-                            let mut v_input_val = None;
-                            let mut s_resp_val = None;
-                            let mut s_sl_ch_val = false;
-                            let mut s_input_val = None;
-
-                            if single_row {
-                                ui.horizontal(|ui| {
-                                    ui.label(Self::icon(0xe050, 16.0, Self::muted_text_color()));
-                                    let (volume_response, volume_slider_changed) =
-                                        Self::click_slider_deferred(
-                                            ui,
-                                            &mut sound.volume,
-                                            0.0..=5.0,
-                                            0.0,
-                                            vec2(128.0, 24.0),
-                                        );
-                                    v_resp_val = Some(volume_response);
-                                    v_sl_ch_val = volume_slider_changed;
-
-                                    let volume_input = ui.add(
-                                        DragValue::new(&mut sound.volume)
-                                            .range(0.0..=5.0)
-                                            .speed(0.01)
-                                            .max_decimals(2)
-                                            .suffix("x"),
+                            ui.horizontal(|ui| {
+                                ui.label(Self::icon(0xe050, 16.0, Self::muted_text_color()));
+                                let (volume_response, volume_slider_changed) =
+                                    Self::click_slider_deferred(
+                                        ui,
+                                        &mut sound.volume,
+                                        0.0..=5.0,
+                                        0.0,
+                                        vec2(128.0, 24.0),
                                     );
-                                    v_input_val = Some(volume_input);
-                                    sound.volume = sound.volume.clamp(0.0, 5.0);
-
-                                    ui.add_space(8.0);
-                                    if ui
-                                        .add_sized(
-                                            [82.0, 24.0],
-                                            Button::new(
-                                                RichText::new("Normalize")
-                                                    .size(11.0)
-                                                    .color(Color32::from_rgb(214, 51, 132)),
-                                            )
-                                            .fill(Self::surface_fill())
-                                            .stroke(Stroke::new(1.0, Self::border_color()))
-                                            .corner_radius(12.0),
+                                let volume_input = ui.add(
+                                    DragValue::new(&mut sound.volume)
+                                        .range(0.0..=5.0)
+                                        .speed(0.01)
+                                        .max_decimals(2)
+                                        .suffix("x"),
+                                );
+                                sound.volume = sound.volume.clamp(0.0, 5.0);
+                                ui.add_space(8.0);
+                                if ui
+                                    .add_sized(
+                                        [82.0, 24.0],
+                                        Button::new(
+                                            RichText::new("Normalize")
+                                                .size(11.0)
+                                                .color(Color32::from_rgb(214, 51, 132)),
                                         )
-                                        .on_hover_text("Automatically adjust volume to a standard listening level")
-                                        .clicked()
-                                    {
-                                        normalize_request = true;
-                                    }
-
-                                    ui.add_space(10.0);
-                                    ui.label(Self::icon(0xe9e4, 16.0, Self::muted_text_color()));
-                                    let (speed_response, speed_slider_changed) =
-                                        Self::click_slider_deferred(
-                                            ui,
-                                            &mut sound.speed,
-                                            0.25..=2.0,
-                                            0.0,
-                                            vec2(128.0, 24.0),
-                                        );
-                                    s_resp_val = Some(speed_response);
-                                    s_sl_ch_val = speed_slider_changed;
-
-                                    let speed_input = ui.add(
-                                        DragValue::new(&mut sound.speed)
-                                            .range(0.25..=2.0)
-                                            .speed(0.01)
-                                            .max_decimals(2)
-                                            .suffix("x"),
+                                        .fill(Self::surface_fill())
+                                        .stroke(Stroke::new(1.0, Self::border_color()))
+                                        .corner_radius(12.0),
+                                    )
+                                    .on_hover_text("Automatically adjust volume to a standard listening level")
+                                    .clicked()
+                                {
+                                    normalize_request = true;
+                                }
+                                ui.add_space(10.0);
+                                ui.label(Self::icon(0xe9e4, 16.0, Self::muted_text_color()));
+                                let (speed_response, speed_slider_changed) =
+                                    Self::click_slider_deferred(
+                                        ui,
+                                        &mut sound.speed,
+                                        0.25..=2.0,
+                                        0.0,
+                                        vec2(128.0, 24.0),
                                     );
-                                    s_input_val = Some(speed_input);
-                                    sound.speed = sound.speed.clamp(0.25, 2.0);
-                                });
-                            } else {
-                                ui.vertical(|ui| {
-                                    ui.horizontal(|ui| {
-                                        ui.label(Self::icon(0xe050, 16.0, Self::muted_text_color()));
-                                        let (volume_response, volume_slider_changed) =
-                                            Self::click_slider_deferred(
-                                                ui,
-                                                &mut sound.volume,
-                                                0.0..=5.0,
-                                                0.0,
-                                                vec2(128.0, 24.0),
-                                            );
-                                        v_resp_val = Some(volume_response);
-                                        v_sl_ch_val = volume_slider_changed;
-
-                                        let volume_input = ui.add(
-                                            DragValue::new(&mut sound.volume)
-                                                .range(0.0..=5.0)
-                                                .speed(0.01)
-                                                .max_decimals(2)
-                                                .suffix("x"),
-                                        );
-                                        v_input_val = Some(volume_input);
-                                        sound.volume = sound.volume.clamp(0.0, 5.0);
-
-                                        ui.add_space(8.0);
-                                        if ui
-                                            .add_sized(
-                                                [82.0, 24.0],
-                                                Button::new(
-                                                    RichText::new("Normalize")
-                                                        .size(11.0)
-                                                        .color(Color32::from_rgb(214, 51, 132)),
-                                                )
-                                                .fill(Self::surface_fill())
-                                                .stroke(Stroke::new(1.0, Self::border_color()))
-                                                .corner_radius(12.0),
-                                            )
-                                            .on_hover_text("Automatically adjust volume to a standard listening level")
-                                            .clicked()
-                                        {
-                                            normalize_request = true;
-                                        }
-                                    });
-
-                                    ui.add_space(6.0);
-
-                                    ui.horizontal(|ui| {
-                                        ui.label(Self::icon(0xe9e4, 16.0, Self::muted_text_color()));
-                                        let (speed_response, speed_slider_changed) =
-                                            Self::click_slider_deferred(
-                                                ui,
-                                                &mut sound.speed,
-                                                0.25..=2.0,
-                                                0.0,
-                                                vec2(128.0, 24.0),
-                                            );
-                                        s_resp_val = Some(speed_response);
-                                        s_sl_ch_val = speed_slider_changed;
-
-                                        let speed_input = ui.add(
-                                            DragValue::new(&mut sound.speed)
-                                                .range(0.25..=2.0)
-                                                .speed(0.01)
-                                                .max_decimals(2)
-                                                .suffix("x"),
-                                        );
-                                        s_input_val = Some(speed_input);
-                                        sound.speed = sound.speed.clamp(0.25, 2.0);
-                                    });
-                                });
-                            }
-
-                            if let (Some(volume_response), Some(speed_response), Some(volume_input), Some(speed_input)) =
-                                (v_resp_val, s_resp_val, v_input_val, s_input_val)
-                            {
+                                let speed_input = ui.add(
+                                    DragValue::new(&mut sound.speed)
+                                        .range(0.25..=2.0)
+                                        .speed(0.01)
+                                        .max_decimals(2)
+                                        .suffix("x"),
+                                );
+                                sound.speed = sound.speed.clamp(0.25, 2.0);
                                 let volume_input_commit =
                                     Self::deferred_drag_value_commit(ui.ctx(), &volume_input);
                                 let speed_input_commit =
@@ -9328,19 +9230,19 @@ impl SoundFxApp {
                                     || speed_response.changed()
                                     || volume_input.changed()
                                     || speed_input.changed()
-                                    || v_sl_ch_val
-                                    || s_sl_ch_val
+                                    || volume_slider_changed
+                                    || speed_slider_changed
                                 {
                                     changed = true;
                                 }
-                                if v_sl_ch_val
-                                    || s_sl_ch_val
+                                if volume_slider_changed
+                                    || speed_slider_changed
                                     || volume_input_commit
                                     || speed_input_commit
                                 {
                                     playback_reapply_request = true;
                                 }
-                            }
+                            });
                         });
                     });
 
