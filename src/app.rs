@@ -9167,6 +9167,7 @@ impl SoundFxApp {
                     .corner_radius(26.0)
                     .inner_margin(Margin::same(22))
                     .show(ui, |ui| {
+                        ui.set_min_width(ui.available_width());
                         Self::with_slider_visuals(ui, |ui| {
                             ui.horizontal(|ui| {
                                 ui.label(Self::icon(0xe050, 16.0, Self::muted_text_color()));
@@ -9254,6 +9255,7 @@ impl SoundFxApp {
                     .corner_radius(22.0)
                     .inner_margin(Margin::same(18))
                     .show(ui, |ui| {
+                        ui.set_min_width(ui.available_width());
                         ui.set_min_height(76.0);
                         ui.vertical_centered(|ui| {
                             ui.add_space(4.0);
