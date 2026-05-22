@@ -368,16 +368,6 @@ impl Storage {
         self.save_preferences(&preferences)
     }
 
-    pub fn load_record_hotkey(&self) -> Result<Option<String>> {
-        let preferences = self.load_preferences()?;
-        Ok(preferences.record_hotkey)
-    }
-
-    pub fn save_record_hotkey(&self, hotkey: Option<&str>) -> Result<()> {
-        let mut preferences = self.load_preferences()?;
-        preferences.record_hotkey = hotkey.map(str::to_owned);
-        self.save_preferences(&preferences)
-    }
 
     pub fn load_record_hotkeys(&self) -> Result<Vec<String>> {
         let preferences = self.load_preferences()?;
@@ -397,16 +387,6 @@ impl Storage {
         self.save_preferences(&preferences)
     }
 
-    pub fn load_pitch_hotkey(&self) -> Result<Option<String>> {
-        let preferences = self.load_preferences()?;
-        Ok(preferences.pitch_hotkey)
-    }
-
-    pub fn save_pitch_hotkey(&self, hotkey: Option<&str>) -> Result<()> {
-        let mut preferences = self.load_preferences()?;
-        preferences.pitch_hotkey = hotkey.map(str::to_owned);
-        self.save_preferences(&preferences)
-    }
 
     pub fn load_pitch_hotkeys(&self) -> Result<Vec<String>> {
         let preferences = self.load_preferences()?;

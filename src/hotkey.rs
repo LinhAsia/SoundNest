@@ -7,7 +7,7 @@ mod windows_impl {
     use anyhow::Context;
     use std::sync::{
         Arc, Mutex, OnceLock,
-        atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc,
     };
     use std::thread::{self, JoinHandle};

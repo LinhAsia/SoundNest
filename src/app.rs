@@ -3983,26 +3983,6 @@ impl SoundFxApp {
         Ok(())
     }
 
-    fn hotkey_badge(ui: &mut Ui, key: Option<egui::Key>) {
-        let text = key.map(Self::format_key_name).unwrap_or("--");
-        Frame::new()
-            .fill(Self::panel_fill())
-            .stroke(Stroke::new(1.0, Self::subtle_border_color()))
-            .corner_radius(13.0)
-            .inner_margin(Margin::symmetric(10, 5))
-            .show(ui, |ui| {
-                ui.label(
-                    RichText::new(text)
-                        .size(11.5)
-                        .color(Self::strong_text_color())
-                        .strong(),
-                );
-            });
-    }
-
-    fn hotkey_capture_text(capturing: bool) -> &'static str {
-        if capturing { "Press any key" } else { "" }
-    }
 
     fn with_dark_combo_visuals<R>(ui: &mut Ui, add_contents: impl FnOnce(&mut Ui) -> R) -> R {
         ui.scope(|ui| {
@@ -4953,33 +4933,126 @@ impl SoundFxApp {
                 ui.add_space(12.0);
                 ui.add_enabled_ui(!snapshot.running, |ui| {
                     ui.horizontal(|ui| {
+                        let capture_text = if self.capture_record_hotkey {
+                            "Capturing..."
+                        } else {
+                            "Capture"
+                        };
+                        let capture_color = if self.capture_record_hotkey {
+                            Color32::from_rgb(255, 232, 96)
+                        } else {
+                            Self::strong_text_color()
+                        };
+                        let pulse = if self.capture_record_hotkey {
+                            let capture_time = ui.ctx().input(|input| input.time) as f32;
+                            0.5 + 0.5 * (capture_time * 6.0).sin().abs()
+                        } else {
+                            0.0
+                        };
+                        let capture_fill = if self.capture_record_hotkey {
+                            Color32::from_rgba_premultiplied(
+                                (88.0 + pulse * 28.0) as u8,
+                                (84.0 + pulse * 28.0) as u8,
+                                (44.0 + pulse * 10.0) as u8,
+                                255,
+                            )
+                        } else {
+                            Self::panel_fill()
+                        };
+                        let capture_stroke = if self.capture_record_hotkey {
+                            Stroke::new(1.0, Color32::from_rgb(255, 232, 96))
+                        } else {
+                            Stroke::new(1.0, Self::border_color())
+                        };
+
                         let keyboard_response = ui.add_sized(
-                            [42.0, 36.0],
-                            Self::action_button(
-                                Self::icon(0xe312, 18.0, Self::strong_text_color()),
-                                self.capture_record_hotkey,
-                                self.capture_record_hotkey,
-                            ),
+                            [90.0, 32.0],
+                            Button::new(
+                                RichText::new(capture_text)
+                                    .color(capture_color)
+                                    .strong()
+                            )
+                            .fill(capture_fill)
+                            .stroke(capture_stroke)
                         );
                         Self::decorate_button_response(ui, &keyboard_response);
                         if keyboard_response.clicked() {
-                            self.capture_record_hotkey = true;
-                            self.capture_pitch_hotkey = false;
+                            if self.capture_record_hotkey {
+                                self.capture_record_hotkey = false;
+                                self.preview_record_hotkey = None;
+                            } else {
+                                self.capture_record_hotkey = true;
+                                self.capture_pitch_hotkey = false;
+                                self.preview_record_hotkey = None;
+                            }
                         }
+
                         if self.capture_record_hotkey {
-                            ui.add_space(6.0);
-                            ui.label(
-                                RichText::new(Self::hotkey_capture_text(true))
-                                    .size(12.5)
-                                    .color(Self::muted_text_color()),
-                            );
+                            if let Some(preview_key) = self.preview_record_hotkey {
+                                ui.add_space(6.0);
+                                Frame::new()
+                                    .fill(Color32::from_rgba_premultiplied(80, 70, 30, 255))
+                                    .stroke(Stroke::new(1.0, Color32::from_rgb(255, 220, 80)))
+                                    .corner_radius(12.0)
+                                    .inner_margin(Margin::symmetric(10, 5))
+                                    .show(ui, |ui| {
+                                        ui.label(
+                                            RichText::new(format!("Pressing: {}", Self::format_key_name(preview_key)))
+                                                .size(11.5)
+                                                .color(Color32::from_rgb(255, 232, 96))
+                                                .strong(),
+                                        );
+                                    });
+                            } else {
+                                ui.add_space(6.0);
+                                ui.label(
+                                    RichText::new("Press key...")
+                                        .size(12.5)
+                                        .color(Self::muted_text_color()),
+                                );
+                            }
                         }
-                        ui.add_space(6.0);
-                        Self::hotkey_badge(ui, self.record_hotkey);
-                        if self.record_hotkey.is_some()
-                            && Self::icon_action(ui, [34.0, 34.0], 0xe14c, false, false).clicked()
-                        {
-                            clear_hotkey = true;
+
+                        let mut key_to_remove = None;
+                        for &key in &self.record_hotkeys {
+                            ui.add_space(4.0);
+                            let key_text = format!("{} ×", Self::format_key_name(key));
+                            let chip_btn = Button::new(
+                                RichText::new(key_text)
+                                    .size(11.5)
+                                    .color(Self::strong_text_color())
+                                    .strong()
+                            )
+                            .fill(Self::surface_fill())
+                            .stroke(Stroke::new(1.0, Self::subtle_border_color()))
+                            .corner_radius(12.0);
+                            
+                            let response = ui.add(chip_btn);
+                            Self::decorate_button_response(ui, &response);
+                            if response.clicked() {
+                                key_to_remove = Some(key);
+                            }
+                            if response.hovered() {
+                                response.on_hover_text("Click to remove this hotkey");
+                            }
+                        }
+                        
+                        if let Some(key) = key_to_remove {
+                            self.record_hotkeys.retain(|&k| k != key);
+                            let names: Vec<String> = self.record_hotkeys.iter().map(|&k| Self::format_key_name(k).to_owned()).collect();
+                            let _ = self.storage.save_record_hotkeys(&names);
+                            if let Err(error) = self.record_hotkey_manager.set_hotkeys(&self.record_hotkeys) {
+                                self.set_error_status(error);
+                            }
+                        }
+
+                        if !self.record_hotkeys.is_empty() {
+                            ui.add_space(4.0);
+                            let clear_response = Self::icon_action(ui, [30.0, 30.0], 0xe14c, false, false);
+                            if clear_response.clicked() {
+                                clear_hotkey = true;
+                            }
+                            clear_response.on_hover_text("Clear all hotkeys");
                         }
                     });
                 });
@@ -5128,10 +5201,11 @@ impl SoundFxApp {
         self.show_record_panel = open_panel;
 
         if clear_hotkey {
-            self.record_hotkey = None;
+            self.record_hotkeys.clear();
             self.capture_record_hotkey = false;
-            let _ = self.record_hotkey_manager.set_hotkey(None);
-            let _ = self.storage.save_record_hotkey(None);
+            self.preview_record_hotkey = None;
+            let _ = self.record_hotkey_manager.set_hotkeys(&[]);
+            let _ = self.storage.save_record_hotkeys(&[]);
         }
 
         if refresh_inputs {
@@ -7037,36 +7111,130 @@ impl SoundFxApp {
                 ui.add_space(8.0);
                 ui.add_enabled_ui(!snapshot.running, |ui| {
                     ui.horizontal(|ui| {
+                        let capture_text = if self.capture_pitch_hotkey {
+                            "Capturing..."
+                        } else {
+                            "Capture"
+                        };
+                        let capture_color = if self.capture_pitch_hotkey {
+                            Color32::from_rgb(255, 232, 96)
+                        } else {
+                            Self::strong_text_color()
+                        };
+                        let pulse = if self.capture_pitch_hotkey {
+                            let capture_time = ui.ctx().input(|input| input.time) as f32;
+                            0.5 + 0.5 * (capture_time * 6.0).sin().abs()
+                        } else {
+                            0.0
+                        };
+                        let capture_fill = if self.capture_pitch_hotkey {
+                            Color32::from_rgba_premultiplied(
+                                (88.0 + pulse * 28.0) as u8,
+                                (84.0 + pulse * 28.0) as u8,
+                                (44.0 + pulse * 10.0) as u8,
+                                255,
+                            )
+                        } else {
+                            Self::panel_fill()
+                        };
+                        let capture_stroke = if self.capture_pitch_hotkey {
+                            Stroke::new(1.0, Color32::from_rgb(255, 232, 96))
+                        } else {
+                            Stroke::new(1.0, Self::border_color())
+                        };
+
                         let keyboard_response = ui.add_sized(
-                            [42.0, 34.0],
-                            Self::action_button(
-                                Self::icon(0xe312, 18.0, Self::strong_text_color()),
-                                self.capture_pitch_hotkey,
-                                self.capture_pitch_hotkey,
-                            ),
+                            [90.0, 32.0],
+                            Button::new(
+                                RichText::new(capture_text)
+                                    .color(capture_color)
+                                    .strong()
+                            )
+                            .fill(capture_fill)
+                            .stroke(capture_stroke)
                         );
                         Self::decorate_button_response(ui, &keyboard_response);
                         if keyboard_response.clicked() {
-                            self.capture_pitch_hotkey = true;
-                            self.capture_record_hotkey = false;
+                            if self.capture_pitch_hotkey {
+                                self.capture_pitch_hotkey = false;
+                                self.preview_pitch_hotkey = None;
+                            } else {
+                                self.capture_pitch_hotkey = true;
+                                self.capture_record_hotkey = false;
+                                self.preview_pitch_hotkey = None;
+                            }
                         }
+
                         if self.capture_pitch_hotkey {
-                            ui.add_space(6.0);
-                            ui.label(
-                                RichText::new(Self::hotkey_capture_text(true))
-                                    .size(12.5)
-                                    .color(Self::muted_text_color()),
-                            );
+                            if let Some(preview_key) = self.preview_pitch_hotkey {
+                                ui.add_space(6.0);
+                                Frame::new()
+                                    .fill(Color32::from_rgba_premultiplied(80, 70, 30, 255))
+                                    .stroke(Stroke::new(1.0, Color32::from_rgb(255, 220, 80)))
+                                    .corner_radius(12.0)
+                                    .inner_margin(Margin::symmetric(10, 5))
+                                    .show(ui, |ui| {
+                                        ui.label(
+                                            RichText::new(format!("Pressing: {}", Self::format_key_name(preview_key)))
+                                                .size(11.5)
+                                                .color(Color32::from_rgb(255, 232, 96))
+                                                .strong(),
+                                        );
+                                    });
+                            } else {
+                                ui.add_space(6.0);
+                                ui.label(
+                                    RichText::new("Press key...")
+                                        .size(12.5)
+                                        .color(Self::muted_text_color()),
+                                );
+                            }
                         }
-                        ui.add_space(6.0);
-                        Self::hotkey_badge(ui, self.pitch_hotkey);
-                        if self.pitch_hotkey.is_some()
-                            && Self::icon_action(ui, [34.0, 34.0], 0xe14c, false, false).clicked()
-                        {
-                            self.pitch_hotkey = None;
-                            self.capture_pitch_hotkey = false;
-                            let _ = self.record_hotkey_manager.set_secondary_hotkey(None);
-                            let _ = self.storage.save_pitch_hotkey(None);
+
+                        let mut key_to_remove = None;
+                        for &key in &self.pitch_hotkeys {
+                            ui.add_space(4.0);
+                            let key_text = format!("{} ×", Self::format_key_name(key));
+                            let chip_btn = Button::new(
+                                RichText::new(key_text)
+                                    .size(11.5)
+                                    .color(Self::strong_text_color())
+                                    .strong()
+                            )
+                            .fill(Self::surface_fill())
+                            .stroke(Stroke::new(1.0, Self::subtle_border_color()))
+                            .corner_radius(12.0);
+                            
+                            let response = ui.add(chip_btn);
+                            Self::decorate_button_response(ui, &response);
+                            if response.clicked() {
+                                key_to_remove = Some(key);
+                            }
+                            if response.hovered() {
+                                response.on_hover_text("Click to remove this hotkey");
+                            }
+                        }
+                        
+                        if let Some(key) = key_to_remove {
+                            self.pitch_hotkeys.retain(|&k| k != key);
+                            let names: Vec<String> = self.pitch_hotkeys.iter().map(|&k| Self::format_key_name(k).to_owned()).collect();
+                            let _ = self.storage.save_pitch_hotkeys(&names);
+                            if let Err(error) = self.record_hotkey_manager.set_secondary_hotkeys(&self.pitch_hotkeys) {
+                                self.set_error_status(error);
+                            }
+                        }
+
+                        if !self.pitch_hotkeys.is_empty() {
+                            ui.add_space(4.0);
+                            let clear_response = Self::icon_action(ui, [30.0, 30.0], 0xe14c, false, false);
+                            if clear_response.clicked() {
+                                self.pitch_hotkeys.clear();
+                                self.capture_pitch_hotkey = false;
+                                self.preview_pitch_hotkey = None;
+                                let _ = self.record_hotkey_manager.set_secondary_hotkeys(&[]);
+                                let _ = self.storage.save_pitch_hotkeys(&[]);
+                            }
+                            clear_response.on_hover_text("Clear all hotkeys");
                         }
                     });
                 });
