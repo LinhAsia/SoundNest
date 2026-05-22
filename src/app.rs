@@ -778,7 +778,7 @@ impl SoundFxApp {
     }
 
     fn desired_window_size() -> Vec2 {
-        vec2(900.0, 900.0)
+        vec2(980.0, 900.0)
     }
 
     fn centered_overlay_pos(ctx: &Context, size: Vec2) -> Pos2 {
