@@ -1,7 +1,7 @@
 use crate::audio::{AudioEngine, calculate_normalization_gain};
 use crate::downloader::{YoutubeAudioDownloader, YoutubeSearchResult};
 use crate::gemini_tts;
-use crate::hotkey::GlobalHotkeyManager;
+use crate::hotkey::{GlobalHotkeyManager, Hotkey};
 use crate::localization::Localization;
 use crate::myinstants::{MyinstantsClient, MyinstantsResult};
 use crate::pitch::{
@@ -262,12 +262,12 @@ pub struct SoundFxApp {
     selected_record_input_device: Option<String>,
     stream_input_capture_devices: Vec<String>,
     selected_stream_input_device: Option<String>,
-    record_hotkeys: Vec<egui::Key>,
-    pitch_hotkeys: Vec<egui::Key>,
+    record_hotkeys: Vec<Hotkey>,
+    pitch_hotkeys: Vec<Hotkey>,
     capture_record_hotkey: bool,
     capture_pitch_hotkey: bool,
-    preview_record_hotkey: Option<egui::Key>,
-    preview_pitch_hotkey: Option<egui::Key>,
+    preview_record_hotkey: Option<Hotkey>,
+    preview_pitch_hotkey: Option<Hotkey>,
     record_hotkey_manager: GlobalHotkeyManager,
     record_export_video_sharps: bool,
     record_export_video_animation: bool,
@@ -451,13 +451,13 @@ impl SoundFxApp {
             .load_record_hotkeys()
             .unwrap_or_default()
             .into_iter()
-            .filter_map(|value| Self::parse_key_name(&value))
+            .filter_map(|value| Hotkey::from_string(&value))
             .collect::<Vec<_>>();
         let pitch_hotkeys = storage
             .load_pitch_hotkeys()
             .unwrap_or_default()
             .into_iter()
-            .filter_map(|value| Self::parse_key_name(&value))
+            .filter_map(|value| Hotkey::from_string(&value))
             .collect::<Vec<_>>();
         let app_transition_animation = storage
             .load_app_transition_animation()
@@ -1438,143 +1438,7 @@ impl SoundFxApp {
         }
     }
 
-    fn format_key_name(key: egui::Key) -> &'static str {
-        match key {
-            egui::Key::ArrowDown => "Down",
-            egui::Key::ArrowLeft => "Left",
-            egui::Key::ArrowRight => "Right",
-            egui::Key::ArrowUp => "Up",
-            egui::Key::Escape => "Esc",
-            egui::Key::Tab => "Tab",
-            egui::Key::Backspace => "Backspace",
-            egui::Key::Enter => "Enter",
-            egui::Key::Space => "Space",
-            egui::Key::Insert => "Insert",
-            egui::Key::Delete => "Delete",
-            egui::Key::Home => "Home",
-            egui::Key::End => "End",
-            egui::Key::PageUp => "PageUp",
-            egui::Key::PageDown => "PageDown",
-            egui::Key::Num0 => "0",
-            egui::Key::Num1 => "1",
-            egui::Key::Num2 => "2",
-            egui::Key::Num3 => "3",
-            egui::Key::Num4 => "4",
-            egui::Key::Num5 => "5",
-            egui::Key::Num6 => "6",
-            egui::Key::Num7 => "7",
-            egui::Key::Num8 => "8",
-            egui::Key::Num9 => "9",
-            egui::Key::A => "A",
-            egui::Key::B => "B",
-            egui::Key::C => "C",
-            egui::Key::D => "D",
-            egui::Key::E => "E",
-            egui::Key::F => "F",
-            egui::Key::G => "G",
-            egui::Key::H => "H",
-            egui::Key::I => "I",
-            egui::Key::J => "J",
-            egui::Key::K => "K",
-            egui::Key::L => "L",
-            egui::Key::M => "M",
-            egui::Key::N => "N",
-            egui::Key::O => "O",
-            egui::Key::P => "P",
-            egui::Key::Q => "Q",
-            egui::Key::R => "R",
-            egui::Key::S => "S",
-            egui::Key::T => "T",
-            egui::Key::U => "U",
-            egui::Key::V => "V",
-            egui::Key::W => "W",
-            egui::Key::X => "X",
-            egui::Key::Y => "Y",
-            egui::Key::Z => "Z",
-            egui::Key::F1 => "F1",
-            egui::Key::F2 => "F2",
-            egui::Key::F3 => "F3",
-            egui::Key::F4 => "F4",
-            egui::Key::F5 => "F5",
-            egui::Key::F6 => "F6",
-            egui::Key::F7 => "F7",
-            egui::Key::F8 => "F8",
-            egui::Key::F9 => "F9",
-            egui::Key::F10 => "F10",
-            egui::Key::F11 => "F11",
-            egui::Key::F12 => "F12",
-            _ => "Key",
-        }
-    }
 
-    fn parse_key_name(name: &str) -> Option<egui::Key> {
-        Some(match name {
-            "Down" => egui::Key::ArrowDown,
-            "Left" => egui::Key::ArrowLeft,
-            "Right" => egui::Key::ArrowRight,
-            "Up" => egui::Key::ArrowUp,
-            "Esc" => egui::Key::Escape,
-            "Tab" => egui::Key::Tab,
-            "Backspace" => egui::Key::Backspace,
-            "Enter" => egui::Key::Enter,
-            "Space" => egui::Key::Space,
-            "Insert" => egui::Key::Insert,
-            "Delete" => egui::Key::Delete,
-            "Home" => egui::Key::Home,
-            "End" => egui::Key::End,
-            "PageUp" => egui::Key::PageUp,
-            "PageDown" => egui::Key::PageDown,
-            "0" => egui::Key::Num0,
-            "1" => egui::Key::Num1,
-            "2" => egui::Key::Num2,
-            "3" => egui::Key::Num3,
-            "4" => egui::Key::Num4,
-            "5" => egui::Key::Num5,
-            "6" => egui::Key::Num6,
-            "7" => egui::Key::Num7,
-            "8" => egui::Key::Num8,
-            "9" => egui::Key::Num9,
-            "A" => egui::Key::A,
-            "B" => egui::Key::B,
-            "C" => egui::Key::C,
-            "D" => egui::Key::D,
-            "E" => egui::Key::E,
-            "F" => egui::Key::F,
-            "G" => egui::Key::G,
-            "H" => egui::Key::H,
-            "I" => egui::Key::I,
-            "J" => egui::Key::J,
-            "K" => egui::Key::K,
-            "L" => egui::Key::L,
-            "M" => egui::Key::M,
-            "N" => egui::Key::N,
-            "O" => egui::Key::O,
-            "P" => egui::Key::P,
-            "Q" => egui::Key::Q,
-            "R" => egui::Key::R,
-            "S" => egui::Key::S,
-            "T" => egui::Key::T,
-            "U" => egui::Key::U,
-            "V" => egui::Key::V,
-            "W" => egui::Key::W,
-            "X" => egui::Key::X,
-            "Y" => egui::Key::Y,
-            "Z" => egui::Key::Z,
-            "F1" => egui::Key::F1,
-            "F2" => egui::Key::F2,
-            "F3" => egui::Key::F3,
-            "F4" => egui::Key::F4,
-            "F5" => egui::Key::F5,
-            "F6" => egui::Key::F6,
-            "F7" => egui::Key::F7,
-            "F8" => egui::Key::F8,
-            "F9" => egui::Key::F9,
-            "F10" => egui::Key::F10,
-            "F11" => egui::Key::F11,
-            "F12" => egui::Key::F12,
-            _ => return None,
-        })
-    }
 
     fn normalize_record_export_video_fps(fps: u32) -> u32 {
         match fps {
@@ -2025,8 +1889,17 @@ impl SoundFxApp {
         self.record_hotkey_manager.set_repaint_context(ctx.clone());
 
         if self.capture_record_hotkey || self.capture_pitch_hotkey {
-            let mut add_key: Option<egui::Key> = None;
+            let mut add_hotkey: Option<Hotkey> = None;
             let mut cancel = false;
+            
+            fn is_modifier_key(key: egui::Key) -> bool {
+                let name = format!("{:?}", key);
+                matches!(
+                    name.to_lowercase().as_str(),
+                    "control" | "ctrl" | "alt" | "shift" | "command" | "maccmd" | "meta" | "win"
+                )
+            }
+
             ctx.input(|input| {
                 for event in &input.events {
                     match event {
@@ -2034,16 +1907,24 @@ impl SoundFxApp {
                             key,
                             pressed: true,
                             repeat: false,
+                            modifiers,
                             ..
                         } => {
                             if *key == egui::Key::Escape {
                                 cancel = true;
-                            } else {
+                            } else if !is_modifier_key(*key) {
+                                let hotkey = Hotkey {
+                                    ctrl: modifiers.ctrl || modifiers.command,
+                                    alt: modifiers.alt,
+                                    shift: modifiers.shift,
+                                    win: modifiers.mac_cmd,
+                                    key: *key,
+                                };
                                 if self.capture_record_hotkey {
-                                    self.preview_record_hotkey = Some(*key);
+                                    self.preview_record_hotkey = Some(hotkey);
                                 }
                                 if self.capture_pitch_hotkey {
-                                    self.preview_pitch_hotkey = Some(*key);
+                                    self.preview_pitch_hotkey = Some(hotkey);
                                 }
                             }
                         }
@@ -2055,11 +1936,11 @@ impl SoundFxApp {
                             if *key == egui::Key::Escape {
                                 cancel = true;
                             } else {
-                                if self.capture_record_hotkey && self.preview_record_hotkey == Some(*key) {
-                                    add_key = Some(*key);
+                                if self.capture_record_hotkey && self.preview_record_hotkey.map(|hk| hk.key) == Some(*key) {
+                                    add_hotkey = self.preview_record_hotkey;
                                 }
-                                if self.capture_pitch_hotkey && self.preview_pitch_hotkey == Some(*key) {
-                                    add_key = Some(*key);
+                                if self.capture_pitch_hotkey && self.preview_pitch_hotkey.map(|hk| hk.key) == Some(*key) {
+                                    add_hotkey = self.preview_pitch_hotkey;
                                 }
                             }
                         }
@@ -2076,11 +1957,11 @@ impl SoundFxApp {
                 return;
             }
 
-            if let Some(key) = add_key {
+            if let Some(hotkey) = add_hotkey {
                 if self.capture_record_hotkey {
-                    if !self.record_hotkeys.contains(&key) {
-                        self.record_hotkeys.push(key);
-                        let names: Vec<String> = self.record_hotkeys.iter().map(|&k| Self::format_key_name(k).to_owned()).collect();
+                    if !self.record_hotkeys.contains(&hotkey) {
+                        self.record_hotkeys.push(hotkey);
+                        let names: Vec<String> = self.record_hotkeys.iter().map(|k| k.to_string()).collect();
                         let _ = self.storage.save_record_hotkeys(&names);
                         if let Err(error) = self.record_hotkey_manager.set_hotkeys(&self.record_hotkeys) {
                             self.set_error_status(error);
@@ -2090,9 +1971,9 @@ impl SoundFxApp {
                     self.preview_record_hotkey = None;
                 }
                 if self.capture_pitch_hotkey {
-                    if !self.pitch_hotkeys.contains(&key) {
-                        self.pitch_hotkeys.push(key);
-                        let names: Vec<String> = self.pitch_hotkeys.iter().map(|&k| Self::format_key_name(k).to_owned()).collect();
+                    if !self.pitch_hotkeys.contains(&hotkey) {
+                        self.pitch_hotkeys.push(hotkey);
+                        let names: Vec<String> = self.pitch_hotkeys.iter().map(|k| k.to_string()).collect();
                         let _ = self.storage.save_pitch_hotkeys(&names);
                         if let Err(error) = self.record_hotkey_manager.set_secondary_hotkeys(&self.pitch_hotkeys) {
                             self.set_error_status(error);
@@ -2110,36 +1991,46 @@ impl SoundFxApp {
         }
         let app_focused = ctx.input(|input| input.focused);
         let local_record_trigger = app_focused
-            && self.record_hotkeys.iter().any(|&hotkey| {
+            && self.record_hotkeys.iter().any(|hotkey| {
                 ctx.input(|input| {
                     input.events.iter().any(|event| {
-                        matches!(
-                            event,
-                            egui::Event::Key {
-                                key,
-                                pressed: true,
-                                repeat: false,
-                                modifiers,
-                                ..
-                            } if *key == hotkey && modifiers.is_none()
-                        )
+                        if let egui::Event::Key {
+                            key,
+                            pressed: true,
+                            repeat: false,
+                            modifiers,
+                            ..
+                        } = event {
+                            *key == hotkey.key
+                                && (modifiers.ctrl || modifiers.command) == hotkey.ctrl
+                                && modifiers.alt == hotkey.alt
+                                && modifiers.shift == hotkey.shift
+                                && modifiers.mac_cmd == hotkey.win
+                        } else {
+                            false
+                        }
                     })
                 })
             });
         let local_pitch_trigger = app_focused
-            && self.pitch_hotkeys.iter().any(|&hotkey| {
+            && self.pitch_hotkeys.iter().any(|hotkey| {
                 ctx.input(|input| {
                     input.events.iter().any(|event| {
-                        matches!(
-                            event,
-                            egui::Event::Key {
-                                key,
-                                pressed: true,
-                                repeat: false,
-                                modifiers,
-                                ..
-                            } if *key == hotkey && modifiers.is_none()
-                        )
+                        if let egui::Event::Key {
+                            key,
+                            pressed: true,
+                            repeat: false,
+                            modifiers,
+                            ..
+                        } = event {
+                            *key == hotkey.key
+                                && (modifiers.ctrl || modifiers.command) == hotkey.ctrl
+                                && modifiers.alt == hotkey.alt
+                                && modifiers.shift == hotkey.shift
+                                && modifiers.mac_cmd == hotkey.win
+                        } else {
+                            false
+                        }
                     })
                 })
             });
@@ -4880,7 +4771,6 @@ impl SoundFxApp {
         let mut toggle_record = false;
         let mut use_selected_sound = false;
         let refresh_inputs = false;
-        let mut clear_hotkey = false;
         let (_panel_bounds, panel_size, panel_pos) =
             self.centered_modal_placement(ctx, vec2(520.0, 420.0), vec2(320.0, 260.0), 0.0);
 
@@ -4933,49 +4823,13 @@ impl SoundFxApp {
                 ui.add_space(12.0);
                 ui.add_enabled_ui(!snapshot.running, |ui| {
                     ui.horizontal(|ui| {
-                        let capture_text = if self.capture_record_hotkey {
-                            "Capturing..."
-                        } else {
-                            "Capture"
-                        };
-                        let capture_color = if self.capture_record_hotkey {
-                            Color32::from_rgb(255, 232, 96)
-                        } else {
-                            Self::strong_text_color()
-                        };
-                        let pulse = if self.capture_record_hotkey {
-                            let capture_time = ui.ctx().input(|input| input.time) as f32;
-                            0.5 + 0.5 * (capture_time * 6.0).sin().abs()
-                        } else {
-                            0.0
-                        };
-                        let capture_fill = if self.capture_record_hotkey {
-                            Color32::from_rgba_premultiplied(
-                                (88.0 + pulse * 28.0) as u8,
-                                (84.0 + pulse * 28.0) as u8,
-                                (44.0 + pulse * 10.0) as u8,
-                                255,
-                            )
-                        } else {
-                            Self::panel_fill()
-                        };
-                        let capture_stroke = if self.capture_record_hotkey {
-                            Stroke::new(1.0, Color32::from_rgb(255, 232, 96))
-                        } else {
-                            Stroke::new(1.0, Self::border_color())
-                        };
-
-                        let keyboard_response = ui.add_sized(
-                            [90.0, 32.0],
-                            Button::new(
-                                RichText::new(capture_text)
-                                    .color(capture_color)
-                                    .strong()
-                            )
-                            .fill(capture_fill)
-                            .stroke(capture_stroke)
+                        let keyboard_response = Self::icon_action(
+                            ui,
+                            [42.0, 34.0],
+                            0xe312,
+                            self.capture_record_hotkey,
+                            self.capture_record_hotkey,
                         );
-                        Self::decorate_button_response(ui, &keyboard_response);
                         if keyboard_response.clicked() {
                             if self.capture_record_hotkey {
                                 self.capture_record_hotkey = false;
@@ -4997,7 +4851,7 @@ impl SoundFxApp {
                                     .inner_margin(Margin::symmetric(10, 5))
                                     .show(ui, |ui| {
                                         ui.label(
-                                            RichText::new(format!("Pressing: {}", Self::format_key_name(preview_key)))
+                                            RichText::new(format!("Pressing: {}", preview_key.to_string()))
                                                 .size(11.5)
                                                 .color(Color32::from_rgb(255, 232, 96))
                                                 .strong(),
@@ -5016,7 +4870,7 @@ impl SoundFxApp {
                         let mut key_to_remove = None;
                         for &key in &self.record_hotkeys {
                             ui.add_space(4.0);
-                            let key_text = format!("{} ×", Self::format_key_name(key));
+                            let key_text = key.to_string();
                             let chip_btn = Button::new(
                                 RichText::new(key_text)
                                     .size(11.5)
@@ -5039,20 +4893,11 @@ impl SoundFxApp {
                         
                         if let Some(key) = key_to_remove {
                             self.record_hotkeys.retain(|&k| k != key);
-                            let names: Vec<String> = self.record_hotkeys.iter().map(|&k| Self::format_key_name(k).to_owned()).collect();
+                            let names: Vec<String> = self.record_hotkeys.iter().map(|&k| k.to_string()).collect();
                             let _ = self.storage.save_record_hotkeys(&names);
                             if let Err(error) = self.record_hotkey_manager.set_hotkeys(&self.record_hotkeys) {
                                 self.set_error_status(error);
                             }
-                        }
-
-                        if !self.record_hotkeys.is_empty() {
-                            ui.add_space(4.0);
-                            let clear_response = Self::icon_action(ui, [30.0, 30.0], 0xe14c, false, false);
-                            if clear_response.clicked() {
-                                clear_hotkey = true;
-                            }
-                            clear_response.on_hover_text("Clear all hotkeys");
                         }
                     });
                 });
@@ -5199,14 +5044,6 @@ impl SoundFxApp {
             }
         }
         self.show_record_panel = open_panel;
-
-        if clear_hotkey {
-            self.record_hotkeys.clear();
-            self.capture_record_hotkey = false;
-            self.preview_record_hotkey = None;
-            let _ = self.record_hotkey_manager.set_hotkeys(&[]);
-            let _ = self.storage.save_record_hotkeys(&[]);
-        }
 
         if refresh_inputs {
             self.refresh_record_capture_devices();
@@ -7111,49 +6948,13 @@ impl SoundFxApp {
                 ui.add_space(8.0);
                 ui.add_enabled_ui(!snapshot.running, |ui| {
                     ui.horizontal(|ui| {
-                        let capture_text = if self.capture_pitch_hotkey {
-                            "Capturing..."
-                        } else {
-                            "Capture"
-                        };
-                        let capture_color = if self.capture_pitch_hotkey {
-                            Color32::from_rgb(255, 232, 96)
-                        } else {
-                            Self::strong_text_color()
-                        };
-                        let pulse = if self.capture_pitch_hotkey {
-                            let capture_time = ui.ctx().input(|input| input.time) as f32;
-                            0.5 + 0.5 * (capture_time * 6.0).sin().abs()
-                        } else {
-                            0.0
-                        };
-                        let capture_fill = if self.capture_pitch_hotkey {
-                            Color32::from_rgba_premultiplied(
-                                (88.0 + pulse * 28.0) as u8,
-                                (84.0 + pulse * 28.0) as u8,
-                                (44.0 + pulse * 10.0) as u8,
-                                255,
-                            )
-                        } else {
-                            Self::panel_fill()
-                        };
-                        let capture_stroke = if self.capture_pitch_hotkey {
-                            Stroke::new(1.0, Color32::from_rgb(255, 232, 96))
-                        } else {
-                            Stroke::new(1.0, Self::border_color())
-                        };
-
-                        let keyboard_response = ui.add_sized(
-                            [90.0, 32.0],
-                            Button::new(
-                                RichText::new(capture_text)
-                                    .color(capture_color)
-                                    .strong()
-                            )
-                            .fill(capture_fill)
-                            .stroke(capture_stroke)
+                        let keyboard_response = Self::icon_action(
+                            ui,
+                            [42.0, 34.0],
+                            0xe312,
+                            self.capture_pitch_hotkey,
+                            self.capture_pitch_hotkey,
                         );
-                        Self::decorate_button_response(ui, &keyboard_response);
                         if keyboard_response.clicked() {
                             if self.capture_pitch_hotkey {
                                 self.capture_pitch_hotkey = false;
@@ -7175,7 +6976,7 @@ impl SoundFxApp {
                                     .inner_margin(Margin::symmetric(10, 5))
                                     .show(ui, |ui| {
                                         ui.label(
-                                            RichText::new(format!("Pressing: {}", Self::format_key_name(preview_key)))
+                                            RichText::new(format!("Pressing: {}", preview_key.to_string()))
                                                 .size(11.5)
                                                 .color(Color32::from_rgb(255, 232, 96))
                                                 .strong(),
@@ -7194,7 +6995,7 @@ impl SoundFxApp {
                         let mut key_to_remove = None;
                         for &key in &self.pitch_hotkeys {
                             ui.add_space(4.0);
-                            let key_text = format!("{} ×", Self::format_key_name(key));
+                            let key_text = key.to_string();
                             let chip_btn = Button::new(
                                 RichText::new(key_text)
                                     .size(11.5)
@@ -7217,24 +7018,11 @@ impl SoundFxApp {
                         
                         if let Some(key) = key_to_remove {
                             self.pitch_hotkeys.retain(|&k| k != key);
-                            let names: Vec<String> = self.pitch_hotkeys.iter().map(|&k| Self::format_key_name(k).to_owned()).collect();
+                            let names: Vec<String> = self.pitch_hotkeys.iter().map(|&k| k.to_string()).collect();
                             let _ = self.storage.save_pitch_hotkeys(&names);
                             if let Err(error) = self.record_hotkey_manager.set_secondary_hotkeys(&self.pitch_hotkeys) {
                                 self.set_error_status(error);
                             }
-                        }
-
-                        if !self.pitch_hotkeys.is_empty() {
-                            ui.add_space(4.0);
-                            let clear_response = Self::icon_action(ui, [30.0, 30.0], 0xe14c, false, false);
-                            if clear_response.clicked() {
-                                self.pitch_hotkeys.clear();
-                                self.capture_pitch_hotkey = false;
-                                self.preview_pitch_hotkey = None;
-                                let _ = self.record_hotkey_manager.set_secondary_hotkeys(&[]);
-                                let _ = self.storage.save_pitch_hotkeys(&[]);
-                            }
-                            clear_response.on_hover_text("Clear all hotkeys");
                         }
                     });
                 });
