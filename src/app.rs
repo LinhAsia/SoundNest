@@ -205,7 +205,7 @@ struct DownloadSiteBadge {
     color: Color32,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum DownloadSiteKind {
     Youtube,
     SoundCloud,
@@ -784,29 +784,31 @@ impl SoundFxApp {
         vec2(980.0, 900.0)
     }
 
-    fn centered_overlay_pos(ctx: &Context, size: Vec2) -> Pos2 {
-        let rect = ctx
-            .input(|input| input.viewport().outer_rect.or(input.viewport().inner_rect))
-            .unwrap_or_else(|| ctx.screen_rect());
+    fn popup_safe_rect(&self, ctx: &Context) -> Rect {
+        self.modal_safe_rect(ctx)
+    }
+
+    fn centered_overlay_pos(&self, ctx: &Context, size: Vec2) -> Pos2 {
+        let rect = self.popup_safe_rect(ctx);
+        let center = rect.center();
         Pos2::new(
-            rect.center().x - size.x * 0.5,
-            rect.center().y - size.y * 0.5,
+            (center.x - size.x * 0.5).round(),
+            (center.y - size.y * 0.5).round(),
         )
     }
 
-    fn clamp_overlay_pos(ctx: &Context, size: Vec2, pos: Pos2) -> Pos2 {
-        let rect = ctx
-            .input(|input| input.viewport().outer_rect.or(input.viewport().inner_rect))
-            .unwrap_or_else(|| ctx.screen_rect());
+    fn clamp_overlay_pos(&self, ctx: &Context, size: Vec2, pos: Pos2) -> Pos2 {
+        let rect = self.popup_safe_rect(ctx);
         let max_x = (rect.right() - size.x).max(rect.left());
         let max_y = (rect.bottom() - size.y).max(rect.top());
         Pos2::new(
-            pos.x.clamp(rect.left(), max_x),
-            pos.y.clamp(rect.top(), max_y),
+            pos.x.round().clamp(rect.left(), max_x),
+            pos.y.round().clamp(rect.top(), max_y),
         )
     }
 
     fn update_overlay_drag_position(
+        &self,
         ctx: &Context,
         response: &egui::Response,
         size: Vec2,
@@ -822,7 +824,7 @@ impl SoundFxApp {
             || (response.is_pointer_button_down_on() && response.drag_delta().length_sq() > 0.0))
             && let Some(origin) = ctx.data(|data| data.get_temp::<Pos2>(drag_origin_id))
         {
-            *position = Some(Self::clamp_overlay_pos(
+            *position = Some(self.clamp_overlay_pos(
                 ctx,
                 size,
                 origin + response.drag_delta(),
@@ -2748,9 +2750,10 @@ impl SoundFxApp {
         let anchor_rect = ctx
             .input(|input| input.viewport().outer_rect.or(input.viewport().inner_rect))
             .unwrap_or_else(|| ctx.screen_rect());
+        let center = anchor_rect.center();
         Pos2::new(
-            anchor_rect.center().x - size.x * 0.5,
-            anchor_rect.center().y - size.y * 0.5,
+            (center.x - size.x * 0.5).round(),
+            (center.y - size.y * 0.5).round(),
         )
     }
 
@@ -7243,7 +7246,7 @@ impl SoundFxApp {
         };
         let overlay_pos =
             if self.center_pitch_overlay_next_frame || self.pitch_overlay_pos.is_none() {
-                let centered = Self::centered_overlay_pos(ctx, overlay_size);
+                let centered = self.centered_overlay_pos(ctx, overlay_size);
                 self.pitch_overlay_pos = Some(centered);
                 centered
             } else {
@@ -7254,7 +7257,7 @@ impl SoundFxApp {
         egui::Area::new(area_id)
             .order(egui::Order::Foreground)
             .current_pos(overlay_pos)
-            .constrain_to(ctx.screen_rect())
+            .constrain_to(self.popup_safe_rect(ctx))
             .interactable(true)
             .show(ctx, |ui| {
                 ui.allocate_ui_with_layout(
@@ -7268,9 +7271,9 @@ impl SoundFxApp {
                         }
                     },
                 );
-            });
+        });
         if let Some(state) = egui::AreaState::load(ctx, area_id) {
-            self.pitch_overlay_pos = Some(Self::clamp_overlay_pos(
+            self.pitch_overlay_pos = Some(self.clamp_overlay_pos(
                 ctx,
                 overlay_size,
                 state.left_top_pos(),
@@ -7340,7 +7343,7 @@ impl SoundFxApp {
                         overlay_ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
                     }
                 } else {
-                    Self::update_overlay_drag_position(
+                    self.update_overlay_drag_position(
                         overlay_ctx,
                         &_drag_response,
                         vec2(430.0, 104.0),
@@ -7444,7 +7447,7 @@ impl SoundFxApp {
                 overlay_ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
             }
         } else {
-            Self::update_overlay_drag_position(
+            self.update_overlay_drag_position(
                 overlay_ctx,
                 &drag_response,
                 vec2(276.0, 276.0),
@@ -8562,7 +8565,7 @@ impl SoundFxApp {
         let overlay_size = vec2(430.0, 118.0);
         let overlay_pos =
             if self.center_record_overlay_next_frame || self.record_overlay_pos.is_none() {
-                let centered = Self::centered_overlay_pos(ctx, overlay_size);
+                let centered = self.centered_overlay_pos(ctx, overlay_size);
                 self.record_overlay_pos = Some(centered);
                 centered
             } else {
@@ -8573,7 +8576,7 @@ impl SoundFxApp {
         egui::Area::new(area_id)
             .order(egui::Order::Foreground)
             .current_pos(overlay_pos)
-            .constrain_to(ctx.screen_rect())
+            .constrain_to(self.popup_safe_rect(ctx))
             .interactable(true)
             .show(ctx, |ui| {
                 ui.allocate_ui_with_layout(
@@ -8581,9 +8584,9 @@ impl SoundFxApp {
                     egui::Layout::top_down(Align::Min),
                     |ui| self.render_record_blob_overlay(ui, ctx, &snapshot, &mut should_stop),
                 );
-            });
+        });
         if let Some(state) = egui::AreaState::load(ctx, area_id) {
-            self.record_overlay_pos = Some(Self::clamp_overlay_pos(
+            self.record_overlay_pos = Some(self.clamp_overlay_pos(
                 ctx,
                 overlay_size,
                 state.left_top_pos(),
@@ -8614,7 +8617,7 @@ impl SoundFxApp {
                 overlay_ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
             }
         } else {
-            Self::update_overlay_drag_position(
+            self.update_overlay_drag_position(
                 overlay_ctx,
                 &response,
                 vec2(430.0, 118.0),
@@ -13074,182 +13077,249 @@ impl SoundFxApp {
         let center = rect.center();
         let white = Color32::WHITE;
         let radius = rect.width().min(rect.height()) * 0.5;
-        painter.circle_filled(center, radius, badge.color);
+        let s = radius / 12.0;
+
+        // Except for Google Drive which has a white background circle drawn inside the match,
+        // all other badges draw their background circle using badge.color.
+        if badge.kind != DownloadSiteKind::GoogleDrive {
+            painter.circle_filled(center, radius, badge.color);
+        }
 
         match badge.kind {
             DownloadSiteKind::Youtube => {
-                let body = Rect::from_center_size(center, vec2(15.0, 10.4));
-                painter.rect_filled(body, 4.0, white);
+                // YouTube: Red/pink backing circle, white rounded rect, inner red/pink play triangle.
+                let body = Rect::from_center_size(center, vec2(14.0 * s, 9.8 * s));
+                painter.rect_filled(body, 3.0 * s, white);
                 painter.add(egui::Shape::convex_polygon(
                     vec![
-                        Pos2::new(center.x - 2.6, center.y - 3.4),
-                        Pos2::new(center.x - 2.6, center.y + 3.4),
-                        Pos2::new(center.x + 4.2, center.y),
+                        center + vec2(-2.0 * s, -2.8 * s),
+                        center + vec2(-2.0 * s, 2.8 * s),
+                        center + vec2(3.0 * s, 0.0),
                     ],
                     badge.color,
                     Stroke::NONE,
                 ));
             }
             DownloadSiteKind::SoundCloud => {
-                let base_y = center.y + 4.2;
-                for (index, height) in [5.0, 6.6, 8.2, 9.2, 9.2].into_iter().enumerate() {
-                    let x = center.x - 7.0 + index as f32 * 2.1;
+                // SoundCloud: Orange backing circle, 6 vertical soundwave bars, overlapping cloud circles & base.
+                // Draw left-side bars
+                let bar_heights = [3.5, 5.0, 6.5, 8.0, 9.0, 9.5];
+                for (index, height) in bar_heights.into_iter().enumerate() {
+                    let dx = -8.0 + (index as f32) * 1.6;
                     let bar = Rect::from_min_max(
-                        Pos2::new(x, base_y - height),
-                        Pos2::new(x + 1.4, base_y + 0.8),
+                        center + vec2((dx - 0.5) * s, -height * s + 4.5 * s),
+                        center + vec2((dx + 0.5) * s, 4.5 * s),
                     );
-                    painter.rect_filled(bar, 1.0, white);
+                    painter.rect_filled(bar, 0.5 * s, white);
                 }
-                painter.circle_filled(Pos2::new(center.x + 2.4, center.y + 0.2), 4.4, white);
-                painter.circle_filled(Pos2::new(center.x + 5.6, center.y + 1.4), 3.2, white);
+                // Draw cloud body circles
+                painter.circle_filled(center + vec2(2.5 * s, 0.5 * s), 4.0 * s, white);
+                painter.circle_filled(center + vec2(6.0 * s, 1.5 * s), 3.0 * s, white);
+                // Draw flat connector base
                 painter.rect_filled(
                     Rect::from_min_max(
-                        Pos2::new(center.x - 0.2, center.y + 1.0),
-                        Pos2::new(center.x + 8.0, center.y + 4.8),
+                        center + vec2(0.0 * s, 0.5 * s),
+                        center + vec2(9.0 * s, 4.5 * s),
                     ),
-                    2.0,
+                    0.0,
                     white,
                 );
             }
             DownloadSiteKind::Bandcamp => {
+                // Bandcamp: Blue backing circle, white slanted parallelogram.
                 painter.add(egui::Shape::convex_polygon(
                     vec![
-                        Pos2::new(center.x - 6.6, center.y + 5.4),
-                        Pos2::new(center.x - 0.6, center.y - 5.4),
-                        Pos2::new(center.x + 7.0, center.y - 5.4),
-                        Pos2::new(center.x + 1.0, center.y + 5.4),
+                        center + vec2(-1.5 * s, -4.5 * s),
+                        center + vec2(7.5 * s, -4.5 * s),
+                        center + vec2(1.5 * s, 4.5 * s),
+                        center + vec2(-7.5 * s, 4.5 * s),
                     ],
                     white,
                     Stroke::NONE,
                 ));
             }
             DownloadSiteKind::TikTok => {
-                painter.line_segment(
-                    [
-                        Pos2::new(center.x + 2.8, center.y - 5.8),
-                        Pos2::new(center.x + 2.8, center.y + 1.0),
-                    ],
-                    Stroke::new(2.2, white),
-                );
-                painter.line_segment(
-                    [
-                        Pos2::new(center.x + 2.8, center.y - 5.8),
-                        Pos2::new(center.x + 6.0, center.y - 4.0),
-                    ],
-                    Stroke::new(2.2, white),
-                );
-                painter.circle_stroke(
-                    Pos2::new(center.x - 0.7, center.y + 2.8),
-                    3.0,
-                    Stroke::new(2.0, white),
-                );
+                // TikTok: Dark backing circle, music note with cyan & red/magenta offset fringes.
+                let paint_note = |painter: &egui::Painter, offset: Vec2, color: Color32| {
+                    let n_center = center + offset;
+                    // Note head (filled circle at bottom-left)
+                    painter.circle_filled(n_center + vec2(-2.0 * s, 3.0 * s), 2.8 * s, color);
+
+                    // Stem (vertical line)
+                    painter.line_segment(
+                        [
+                            n_center + vec2(0.8 * s, 3.0 * s),
+                            n_center + vec2(0.8 * s, -4.0 * s),
+                        ],
+                        Stroke::new(2.0 * s, color),
+                    );
+
+                    // Hook (quarter circle arc from PI to 1.5 PI, centered at 4.8, -4.0)
+                    let mut hook_pts = Vec::new();
+                    for i in 0..=8 {
+                        let theta = std::f32::consts::PI * (1.0 + (i as f32) / 16.0);
+                        let pt = n_center + vec2(
+                            (4.8 + 4.0 * theta.cos()) * s,
+                            (-4.0 + 4.0 * theta.sin()) * s,
+                        );
+                        hook_pts.push(pt);
+                    }
+                    painter.add(egui::Shape::line(hook_pts, Stroke::new(2.0 * s, color)));
+                };
+
+                // Offset passes for chromatic aberration
+                paint_note(painter, vec2(-0.8 * s, -0.5 * s), Color32::from_rgb(0, 242, 234)); // Cyan
+                paint_note(painter, vec2(0.8 * s, 0.5 * s), Color32::from_rgb(254, 44, 85));  // Red/Magenta
+                paint_note(painter, vec2(0.0, 0.0), white);                                  // White
             }
             DownloadSiteKind::Facebook => {
-                painter.text(
-                    Pos2::new(center.x, center.y + 0.3),
-                    egui::Align2::CENTER_CENTER,
-                    "f",
-                    egui::FontId::proportional(18.0),
-                    white,
+                // Facebook: Blue backing circle, custom vector Facebook "f" logo.
+                let mut stem_pts = vec![
+                    center + vec2(1.5 * s, 8.0 * s),
+                    center + vec2(1.5 * s, -3.0 * s),
+                ];
+                for i in 1..=6 {
+                    let theta = std::f32::consts::PI * (1.0 + (i as f32) / 12.0);
+                    stem_pts.push(center + vec2(
+                        (4.5 + 3.0 * theta.cos()) * s,
+                        (-3.0 + 3.0 * theta.sin()) * s,
+                    ));
+                }
+                // Draw stem and hook
+                painter.add(egui::Shape::line(
+                    stem_pts,
+                    Stroke::new(3.2 * s, white),
+                ));
+                // Draw crossbar
+                painter.line_segment(
+                    [
+                        center + vec2(-2.0 * s, -1.0 * s),
+                        center + vec2(4.5 * s, -1.0 * s),
+                    ],
+                    Stroke::new(3.2 * s, white),
                 );
             }
             DownloadSiteKind::Instagram => {
-                let body = Rect::from_center_size(center, vec2(12.8, 12.8));
-                painter.rect_stroke(body, 4.0, Stroke::new(1.8, white), StrokeKind::Outside);
-                painter.circle_stroke(center, 3.3, Stroke::new(1.8, white));
-                painter.circle_filled(Pos2::new(center.x + 3.8, center.y - 3.8), 1.1, white);
+                // Instagram: Purple/pink backing circle, camera body outline, inner lens, and flash dot.
+                let body = Rect::from_center_size(center, vec2(13.0 * s, 13.0 * s));
+                painter.rect_stroke(body, 4.0 * s, Stroke::new(1.8 * s, white), StrokeKind::Outside);
+                painter.circle_stroke(center, 3.3 * s, Stroke::new(1.8 * s, white));
+                painter.circle_filled(center + vec2(3.8 * s, -3.8 * s), 1.0 * s, white);
             }
             DownloadSiteKind::X => {
-                painter.line_segment(
-                    [
-                        Pos2::new(center.x - 5.4, center.y - 5.2),
-                        Pos2::new(center.x + 4.9, center.y + 5.4),
-                    ],
-                    Stroke::new(2.0, white),
-                );
-                painter.line_segment(
-                    [
-                        Pos2::new(center.x + 5.4, center.y - 5.2),
-                        Pos2::new(center.x - 2.0, center.y + 2.4),
-                    ],
-                    Stroke::new(2.0, white),
-                );
-                painter.line_segment(
-                    [
-                        Pos2::new(center.x - 0.1, center.y - 0.1),
-                        Pos2::new(center.x - 4.5, center.y + 5.2),
-                    ],
-                    Stroke::new(2.0, white),
-                );
-            }
-            DownloadSiteKind::Vimeo => {
-                painter.add(egui::Shape::line(
-                    vec![
-                        Pos2::new(center.x - 5.8, center.y - 1.2),
-                        Pos2::new(center.x - 2.3, center.y + 4.8),
-                        Pos2::new(center.x + 0.5, center.y + 0.6),
-                        Pos2::new(center.x + 5.1, center.y - 4.3),
-                    ],
-                    Stroke::new(2.5, white),
-                ));
-            }
-            DownloadSiteKind::Twitch => {
+                // X: Black backing circle, custom double-struck X layout using solid polygon and parallel line strokes.
                 painter.add(egui::Shape::convex_polygon(
                     vec![
-                        Pos2::new(center.x - 6.2, center.y - 5.6),
-                        Pos2::new(center.x + 5.4, center.y - 5.6),
-                        Pos2::new(center.x + 5.4, center.y + 2.0),
-                        Pos2::new(center.x + 1.4, center.y + 5.8),
-                        Pos2::new(center.x + 1.2, center.y + 2.0),
-                        Pos2::new(center.x - 6.2, center.y + 2.0),
+                        center + vec2(3.0 * s, -5.0 * s),
+                        center + vec2(5.5 * s, -5.0 * s),
+                        center + vec2(-3.0 * s, 5.0 * s),
+                        center + vec2(-5.5 * s, 5.0 * s),
                     ],
                     white,
                     Stroke::NONE,
                 ));
+                painter.line_segment(
+                    [
+                        center + vec2(-5.5 * s, -5.0 * s),
+                        center + vec2(4.5 * s, 5.0 * s),
+                    ],
+                    Stroke::new(1.2 * s, white),
+                );
+                painter.line_segment(
+                    [
+                        center + vec2(-3.0 * s, -5.0 * s),
+                        center + vec2(7.0 * s, 5.0 * s),
+                    ],
+                    Stroke::new(1.2 * s, white),
+                );
+            }
+            DownloadSiteKind::Vimeo => {
+                // Vimeo: Blue backing circle, custom curved "v".
+                painter.add(egui::Shape::line(
+                    vec![
+                        center + vec2(-5.5 * s, -2.5 * s),
+                        center + vec2(-3.0 * s, 3.5 * s),
+                        center + vec2(-1.0 * s, 4.0 * s),
+                        center + vec2(1.0 * s, 0.5 * s),
+                        center + vec2(5.0 * s, -4.5 * s),
+                    ],
+                    Stroke::new(2.6 * s, white),
+                ));
+            }
+            DownloadSiteKind::Twitch => {
+                // Twitch: Purple backing circle, chat bubble (rounded rect, left bottom block, and beak) with eye slots.
+                let body = Rect::from_min_max(
+                    center + vec2(-6.0 * s, -6.0 * s),
+                    center + vec2(6.0 * s, 2.0 * s),
+                );
+                painter.rect_filled(body, 1.0 * s, white);
+                
+                let left_ext = Rect::from_min_max(
+                    center + vec2(-6.0 * s, 2.0 * s),
+                    center + vec2(-2.0 * s, 4.0 * s),
+                );
+                painter.rect_filled(left_ext, 0.0, white);
+                
+                painter.add(egui::Shape::convex_polygon(
+                    vec![
+                        center + vec2(-2.0 * s, 2.0 * s),
+                        center + vec2(-2.0 * s, 5.5 * s),
+                        center + vec2(1.5 * s, 2.0 * s),
+                    ],
+                    white,
+                    Stroke::NONE,
+                ));
+
+                // Draw purple eye slots
                 painter.rect_filled(
                     Rect::from_min_max(
-                        Pos2::new(center.x - 2.4, center.y - 2.4),
-                        Pos2::new(center.x - 0.9, center.y + 1.2),
+                        center + vec2(-2.5 * s, -2.5 * s),
+                        center + vec2(-1.0 * s, 1.0 * s),
                     ),
-                    0.5,
+                    0.5 * s,
                     badge.color,
                 );
                 painter.rect_filled(
                     Rect::from_min_max(
-                        Pos2::new(center.x + 0.8, center.y - 2.4),
-                        Pos2::new(center.x + 2.3, center.y + 1.2),
+                        center + vec2(1.0 * s, -2.5 * s),
+                        center + vec2(2.5 * s, 1.0 * s),
                     ),
-                    0.5,
+                    0.5 * s,
                     badge.color,
                 );
             }
             DownloadSiteKind::GoogleDrive => {
+                // Google Drive: White backing circle, interlocking trapezoid bands (green, blue, yellow).
                 painter.circle_filled(center, radius, Color32::from_rgb(252, 252, 252));
-                let top = Pos2::new(center.x, center.y - 5.8);
-                let left = Pos2::new(center.x - 5.7, center.y + 4.8);
-                let right = Pos2::new(center.x + 5.7, center.y + 4.8);
-                let upper_left = Pos2::new(center.x - 1.8, center.y - 0.2);
-                let upper_right = Pos2::new(center.x + 1.8, center.y - 0.2);
-                painter.line_segment(
-                    [top, upper_left],
-                    Stroke::new(2.2, Color32::from_rgb(251, 188, 5)),
-                );
-                painter.line_segment(
-                    [top, upper_right],
-                    Stroke::new(2.2, Color32::from_rgb(66, 133, 244)),
-                );
-                painter.line_segment(
-                    [left, upper_left],
-                    Stroke::new(2.2, Color32::from_rgb(15, 157, 88)),
-                );
-                painter.line_segment(
-                    [right, upper_right],
-                    Stroke::new(2.2, Color32::from_rgb(66, 133, 244)),
-                );
-                painter.line_segment(
-                    [left, right],
-                    Stroke::new(2.2, Color32::from_rgb(15, 157, 88)),
-                );
+                
+                let outer_top = center + vec2(0.0 * s, -6.7 * s);
+                let outer_bottom_left = center + vec2(-6.0 * s, 3.3 * s);
+                let outer_bottom_right = center + vec2(6.0 * s, 3.3 * s);
+                
+                let inner_top = center + vec2(-1.0 * s, -4.7 * s);
+                let inner_bottom_left = center + vec2(-1.8 * s, 1.3 * s);
+                let inner_bottom_right = center + vec2(2.8 * s, 1.3 * s);
+
+                // Green band (bottom)
+                painter.add(egui::Shape::convex_polygon(
+                    vec![outer_bottom_left, outer_bottom_right, inner_bottom_right, inner_bottom_left],
+                    Color32::from_rgb(15, 157, 88),
+                    Stroke::NONE,
+                ));
+
+                // Blue band (right)
+                painter.add(egui::Shape::convex_polygon(
+                    vec![outer_bottom_right, outer_top, inner_top, inner_bottom_right],
+                    Color32::from_rgb(66, 133, 244),
+                    Stroke::NONE,
+                ));
+
+                // Yellow band (left)
+                painter.add(egui::Shape::convex_polygon(
+                    vec![outer_top, outer_bottom_left, inner_bottom_left, inner_top],
+                    Color32::from_rgb(251, 188, 5),
+                    Stroke::NONE,
+                ));
             }
         }
     }
