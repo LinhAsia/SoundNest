@@ -4567,6 +4567,7 @@ impl SoundFxApp {
             .title_bar(false)
             .resizable(false)
             .collapsible(false)
+            .pivot(egui::Align2::CENTER_CENTER)
             .fixed_size(panel_size)
             .fixed_pos(panel_pos)
             .open(&mut open_panel)
@@ -4779,6 +4780,7 @@ impl SoundFxApp {
             .title_bar(false)
             .resizable(false)
             .collapsible(false)
+            .pivot(egui::Align2::CENTER_CENTER)
             .fixed_size(panel_size)
             .fixed_pos(panel_pos)
             .open(&mut open_panel)
@@ -5117,6 +5119,7 @@ impl SoundFxApp {
             .title_bar(false)
             .resizable(false)
             .collapsible(false)
+            .pivot(egui::Align2::CENTER_CENTER)
             .fixed_size(panel_size)
             .fixed_pos(panel_pos)
             .open(&mut open_panel)
@@ -5568,6 +5571,7 @@ impl SoundFxApp {
             .title_bar(false)
             .resizable(false)
             .collapsible(false)
+            .pivot(egui::Align2::CENTER_CENTER)
             .fixed_size(panel_size)
             .fixed_pos(panel_pos)
             .frame(
@@ -5938,6 +5942,7 @@ impl SoundFxApp {
             .title_bar(false)
             .resizable(false)
             .collapsible(false)
+            .pivot(egui::Align2::CENTER_CENTER)
             .fixed_size(panel_size)
             .fixed_pos(panel_pos)
             .open(&mut open_panel)
@@ -6595,6 +6600,7 @@ impl SoundFxApp {
             .title_bar(false)
             .resizable(false)
             .collapsible(false)
+            .pivot(egui::Align2::CENTER_CENTER)
             .fixed_size(panel_size)
             .fixed_pos(panel_pos)
             .frame(
@@ -6863,14 +6869,7 @@ impl SoundFxApp {
             Self::fit_modal_dimension(safe_rect.height(), desired_size.y, min_size.y),
         );
         let center = safe_rect.center();
-        let panel_pos = Pos2::new(
-            (center.x - panel_size.x * 0.5)
-                .round()
-                .clamp(safe_rect.left(), safe_rect.right() - panel_size.x),
-            (center.y - panel_size.y * 0.5 + y_offset)
-                .round()
-                .clamp(safe_rect.top(), safe_rect.bottom() - panel_size.y),
-        );
+        let panel_pos = Pos2::new(center.x.round(), (center.y + y_offset).round());
         (safe_rect, panel_size, panel_pos)
     }
 
@@ -6901,6 +6900,7 @@ impl SoundFxApp {
             .title_bar(false)
             .resizable(false)
             .collapsible(false)
+            .pivot(egui::Align2::CENTER_CENTER)
             .fixed_size(panel_size)
             .fixed_pos(panel_pos)
             .frame(
@@ -10678,6 +10678,7 @@ impl SoundFxApp {
             .title_bar(false)
             .resizable(false)
             .collapsible(false)
+            .pivot(egui::Align2::CENTER_CENTER)
             .fixed_size(panel_size)
             .fixed_pos(panel_pos)
             .open(&mut open_panel)
@@ -10978,6 +10979,7 @@ impl SoundFxApp {
             .title_bar(false)
             .resizable(false)
             .collapsible(false)
+            .pivot(egui::Align2::CENTER_CENTER)
             .fixed_size(panel_size)
             .fixed_pos(panel_pos)
             .open(&mut open_panel)
@@ -11367,6 +11369,7 @@ impl SoundFxApp {
             .title_bar(false)
             .resizable(false)
             .collapsible(false)
+            .pivot(egui::Align2::CENTER_CENTER)
             .fixed_size(panel_size)
             .fixed_pos(panel_pos)
             .open(&mut open_panel)
