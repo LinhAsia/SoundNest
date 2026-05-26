@@ -9245,10 +9245,10 @@ impl SoundFxApp {
                                 editor_timeline_interactive,
                             );
                         changed |= timeline_changed;
-                        processed_export_dirty |= timeline_changed;
                         seek_request |= timeline_seek_request;
                         if timeline_preview_commit {
                             seek_request = true;
+                            processed_export_dirty = true;
                         }
                     });
 
