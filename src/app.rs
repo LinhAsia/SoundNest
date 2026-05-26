@@ -808,8 +808,8 @@ impl SoundFxApp {
     }
 
     fn update_overlay_drag_position(
-        &self,
         ctx: &Context,
+        rect: Rect,
         response: &egui::Response,
         size: Vec2,
         position: &mut Option<Pos2>,
@@ -824,10 +824,12 @@ impl SoundFxApp {
             || (response.is_pointer_button_down_on() && response.drag_delta().length_sq() > 0.0))
             && let Some(origin) = ctx.data(|data| data.get_temp::<Pos2>(drag_origin_id))
         {
-            *position = Some(self.clamp_overlay_pos(
-                ctx,
-                size,
-                origin + response.drag_delta(),
+            let max_x = (rect.right() - size.x).max(rect.left());
+            let max_y = (rect.bottom() - size.y).max(rect.top());
+            let next = origin + response.drag_delta();
+            *position = Some(Pos2::new(
+                next.x.round().clamp(rect.left(), max_x),
+                next.y.round().clamp(rect.top(), max_y),
             ));
         }
         if !ctx.input(|input| input.pointer.primary_down()) {
@@ -7338,18 +7340,20 @@ impl SoundFxApp {
                     ui.id().with("pitch-overlay-drag"),
                     Sense::click_and_drag(),
                 );
-                if self.overlay_only_mode {
-                    if _drag_response.drag_started() {
-                        overlay_ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
-                    }
-                } else {
-                    self.update_overlay_drag_position(
-                        overlay_ctx,
-                        &_drag_response,
-                        vec2(430.0, 104.0),
-                        &mut self.pitch_overlay_pos,
-                    );
-                }
+        if self.overlay_only_mode {
+            if _drag_response.drag_started() {
+                overlay_ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+            }
+        } else {
+            let overlay_rect = self.popup_safe_rect(overlay_ctx);
+            Self::update_overlay_drag_position(
+                overlay_ctx,
+                overlay_rect,
+                &_drag_response,
+                vec2(430.0, 104.0),
+                &mut self.pitch_overlay_pos,
+            );
+        }
                 let top_highlight = Rect::from_min_max(
                     Pos2::new(ui.min_rect().left() + 18.0, ui.min_rect().top() + 1.0),
                     Pos2::new(ui.min_rect().right() - 58.0, ui.min_rect().top() + 14.0),
@@ -7447,8 +7451,10 @@ impl SoundFxApp {
                 overlay_ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
             }
         } else {
-            self.update_overlay_drag_position(
+            let overlay_rect = self.popup_safe_rect(overlay_ctx);
+            Self::update_overlay_drag_position(
                 overlay_ctx,
+                overlay_rect,
                 &drag_response,
                 vec2(276.0, 276.0),
                 &mut self.pitch_overlay_pos,
@@ -8617,8 +8623,10 @@ impl SoundFxApp {
                 overlay_ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
             }
         } else {
-            self.update_overlay_drag_position(
+            let overlay_rect = self.popup_safe_rect(overlay_ctx);
+            Self::update_overlay_drag_position(
                 overlay_ctx,
+                overlay_rect,
                 &response,
                 vec2(430.0, 118.0),
                 &mut self.record_overlay_pos,
