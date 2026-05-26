@@ -109,6 +109,13 @@ enum RecordVideoExportMessage {
     Finished(Result<RecordVideoExportResult, String>),
 }
 
+enum ProcessedExportMessage {
+    Finished {
+        export_path: PathBuf,
+        result: Result<PathBuf, String>,
+    },
+}
+
 enum MyinstantsWaveformMessage {
     Ready {
         audio_url: String,
@@ -344,6 +351,10 @@ pub struct SoundFxApp {
     startup_sound_played: bool,
     pending_save: bool,
     last_edit_at: f64,
+    pending_processed_export_sound: Option<Uuid>,
+    processed_export_inflight: HashSet<PathBuf>,
+    processed_export_tx: Sender<ProcessedExportMessage>,
+    processed_export_rx: Receiver<ProcessedExportMessage>,
     demucs_installing: bool,
     demucs_install_error: Option<String>,
     demucs_install_tx: Sender<Result<(), String>>,
@@ -416,6 +427,7 @@ impl SoundFxApp {
         let (transition_analysis_tx, transition_analysis_rx) = mpsc::channel();
         let (stream_driver_tx, stream_driver_rx) = mpsc::channel();
         let (vocal_separation_tx, vocal_separation_rx) = mpsc::channel();
+        let (processed_export_tx, processed_export_rx) = mpsc::channel();
         let video_assets = storage.load_video_library().unwrap_or_else(|error| {
             status = Some(error.to_string());
             Vec::new()
@@ -616,6 +628,10 @@ impl SoundFxApp {
             startup_sound_played: false,
             pending_save: false,
             last_edit_at: 0.0,
+            pending_processed_export_sound: None,
+            processed_export_inflight: HashSet::new(),
+            processed_export_tx,
+            processed_export_rx,
             demucs_installing: false,
             demucs_install_error: None,
             demucs_install_tx,
@@ -2118,16 +2134,26 @@ impl SoundFxApp {
             return;
         };
 
-        let asset_path = sound.asset_path(self.storage.root_dir());
         let Some(audio) = self.audio.as_mut() else {
             self.set_error_status("Audio unavailable");
             return;
         };
         self.myinstants_preview_audio_url = None;
 
-        let playback = match start_position_secs {
-            Some(start_position_secs) => audio.play_from(&sound, &asset_path, start_position_secs),
-            None => audio.play(&sound, &asset_path),
+        let playback = if sound.needs_processed_export()
+            && Storage::processed_export_exists(self.storage.root_dir(), &sound)
+        {
+            let asset_path = Storage::processed_export_path(self.storage.root_dir(), &sound);
+            let start_position_secs = start_position_secs.unwrap_or(sound.trim_start_secs);
+            audio.play_processed_file(&sound, &asset_path, start_position_secs)
+        } else {
+            let asset_path = sound.asset_path(self.storage.root_dir());
+            match start_position_secs {
+                Some(start_position_secs) => {
+                    audio.play_from(&sound, &asset_path, start_position_secs)
+                }
+                None => audio.play(&sound, &asset_path),
+            }
         };
 
         match playback {
@@ -3469,13 +3495,70 @@ impl SoundFxApp {
         }
     }
 
-    fn save_now(&mut self) {
+    fn save_now(&mut self) -> bool {
         match self.storage.save_library(&self.sounds) {
             Ok(()) => {
                 self.pending_save = false;
+                if let Some(sound_id) = self.pending_processed_export_sound.take() {
+                    self.spawn_processed_export_job(sound_id);
+                }
                 self.clear_status();
+                true
             }
-            Err(error) => self.set_error_status(error),
+            Err(error) => {
+                self.set_error_status(error);
+                false
+            }
+        }
+    }
+
+    fn schedule_processed_export(&mut self, sound_id: Uuid) {
+        self.pending_processed_export_sound = Some(sound_id);
+    }
+
+    fn spawn_processed_export_job(&mut self, sound_id: Uuid) {
+        let Some(sound) = self.sounds.iter().find(|sound| sound.id == sound_id).cloned() else {
+            return;
+        };
+        if !sound.needs_processed_export() {
+            return;
+        }
+
+        let root_dir = self.storage.root_dir().to_path_buf();
+        let export_path = Storage::processed_export_path(&root_dir, &sound);
+        if self.processed_export_inflight.contains(&export_path) || export_path.exists() {
+            return;
+        }
+        self.processed_export_inflight.insert(export_path.clone());
+        let tx = self.processed_export_tx.clone();
+
+        thread::spawn(move || {
+            let result = Storage::export_processed_sound_at(&root_dir, &sound).map_err(|error| error.to_string());
+            let _ = tx.send(ProcessedExportMessage::Finished {
+                export_path,
+                result,
+            });
+        });
+    }
+
+    fn poll_processed_export_jobs(&mut self, ctx: &Context) {
+        let mut finished_exports = Vec::new();
+        while let Ok(message) = self.processed_export_rx.try_recv() {
+            match message {
+                ProcessedExportMessage::Finished { export_path, result } => {
+                    self.processed_export_inflight.remove(&export_path);
+                    if let Err(error) = result {
+                        if self.selected.is_some() {
+                            self.set_error_status(error);
+                        }
+                    }
+                    finished_exports.push(export_path);
+                }
+            }
+        }
+
+        if !finished_exports.is_empty() {
+            ctx.request_repaint();
         }
     }
 
@@ -9002,6 +9085,7 @@ impl SoundFxApp {
         let mut playback_reapply_request = false;
         let mut normalize_request = false;
         let mut changed = false;
+        let mut processed_export_dirty = false;
         let mut tags_changed = false;
         let mut trim_timeline_zoom = self.trim_timeline_zoom;
         let editor_timeline_interactive = !self.has_modal_panel();
@@ -9161,6 +9245,7 @@ impl SoundFxApp {
                                 editor_timeline_interactive,
                             );
                         changed |= timeline_changed;
+                        processed_export_dirty |= timeline_changed;
                         seek_request |= timeline_seek_request;
                         if timeline_preview_commit {
                             seek_request = true;
@@ -9243,6 +9328,7 @@ impl SoundFxApp {
                                     || speed_slider_changed
                                 {
                                     changed = true;
+                                    processed_export_dirty = true;
                                 }
                                 if volume_slider_changed
                                     || speed_slider_changed
@@ -9333,6 +9419,7 @@ impl SoundFxApp {
                 Ok(gain) => {
                     self.sounds[index].volume = gain;
                     self.mark_dirty(ctx);
+                    processed_export_dirty = true;
                     if is_playing {
                         self.preview_sound_from_position(sound_id, Some(preview_cursor_secs));
                     }
@@ -9341,6 +9428,10 @@ impl SoundFxApp {
                     self.set_error_status(error);
                 }
             }
+        }
+
+        if processed_export_dirty {
+            self.schedule_processed_export(sound_id);
         }
 
         if open_location_request {
@@ -13350,6 +13441,7 @@ impl eframe::App for SoundFxApp {
         self.poll_library_hydration_jobs(ctx);
         self.poll_transition_analysis_jobs(ctx);
         self.poll_myinstants_waveform_jobs();
+        self.poll_processed_export_jobs(ctx);
         self.poll_demucs_install_result(ctx);
         self.poll_demucs_model_result(ctx);
         self.poll_stream_driver_result(ctx);

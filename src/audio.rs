@@ -193,6 +193,57 @@ impl AudioEngine {
         Ok(())
     }
 
+    pub fn play_processed_file(
+        &mut self,
+        sound: &SoundEffect,
+        asset_path: &Path,
+        start_position_secs: f32,
+    ) -> Result<()> {
+        self.stop();
+
+        self.ensure_cached_audio(asset_path)?;
+        let cached = self
+            .cached_audio
+            .as_ref()
+            .expect("cached audio should exist after ensure_cached_audio");
+        let channels = cached.channels;
+        let sample_rate = cached.sample_rate;
+        if cached.samples.is_empty() {
+            bail!("audio file is empty");
+        }
+
+        let speed = sound.speed.clamp(0.25, 2.0);
+        let total_duration_secs = sound.trimmed_length().max(0.05);
+        let original_offset_secs =
+            (start_position_secs - sound.trim_start_secs).clamp(0.0, total_duration_secs);
+        let file_offset_secs = (original_offset_secs / speed).clamp(0.0, total_duration_secs);
+        let total_frames = cached.samples.len() / channels as usize;
+        let start_frame = ((file_offset_secs * sample_rate as f32).floor() as usize)
+            .min(total_frames.saturating_sub(1));
+        let start_sample = start_frame * channels as usize;
+
+        let preview = SharedSamplesSource {
+            samples: Arc::clone(&cached.samples),
+            index: start_sample,
+            end: cached.samples.len(),
+            channels,
+            sample_rate,
+        };
+
+        let sink = Sink::try_new(&self.handle).context("unable to create audio sink")?;
+        sink.append(preview);
+        sink.play();
+
+        self.current_id = Some(sound.id);
+        self.current_file_path = Some(asset_path.to_path_buf());
+        self.current_total_duration_secs = total_duration_secs;
+        self.current_trim_start_secs = sound.trim_start_secs;
+        self.current_start_offset_secs = original_offset_secs;
+        self.current_speed = speed;
+        self.sink = Some(sink);
+        Ok(())
+    }
+
     pub fn play_file(&mut self, asset_path: &Path) -> Result<()> {
         self.play_file_from(asset_path, 0.0)
     }

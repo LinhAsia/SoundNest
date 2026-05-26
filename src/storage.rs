@@ -672,12 +672,44 @@ impl Storage {
     }
 
     pub fn export_processed_sound(&self, sound: &SoundEffect) -> Result<PathBuf> {
-        self.export_processed_sound_from_path(&sound.asset_path(&self.root_dir), sound)
+        if sound.needs_processed_export() {
+            Self::export_processed_sound_at(&self.root_dir, sound)
+        } else {
+            self.export_processed_sound_from_path(&sound.asset_path(&self.root_dir), sound)
+        }
+    }
+
+    pub fn processed_export_path(root_dir: &Path, sound: &SoundEffect) -> PathBuf {
+        Self::processed_export_path_in(&root_dir.join("exports"), sound)
+    }
+
+    pub fn processed_export_path_in(exports_dir: &Path, sound: &SoundEffect) -> PathBuf {
+        let extension = "wav";
+        let export_name = format!(
+            "{}-{}{}.{}",
+            sanitize_stem(&sound.name),
+            &sound.id.to_string()[..8],
+            Self::processed_export_suffix(sound),
+            extension
+        );
+        exports_dir.join(export_name)
+    }
+
+    pub fn processed_export_exists(root_dir: &Path, sound: &SoundEffect) -> bool {
+        Self::processed_export_path(root_dir, sound).exists()
+    }
+
+    pub fn export_processed_sound_at(root_dir: &Path, sound: &SoundEffect) -> Result<PathBuf> {
+        Self::export_processed_sound_from_path_at(root_dir, &sound.asset_path(root_dir), sound)
     }
 
     pub fn drag_sound_source_path(&self, sound: &SoundEffect) -> Result<PathBuf> {
         if sound.needs_processed_export() {
-            self.export_processed_sound(sound)
+            if Self::processed_export_path_in(&self.exports_dir, sound).exists() {
+                Ok(Self::processed_export_path_in(&self.exports_dir, sound))
+            } else {
+                self.export_processed_sound(sound)
+            }
         } else {
             Ok(sound.asset_path(&self.root_dir))
         }
