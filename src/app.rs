@@ -36,9 +36,6 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::Duration;
 use uuid::Uuid;
-#[cfg(windows)]
-use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
-
 const AUDIO_FILTERS: &[&str] = &["wav", "mp3", "ogg", "flac", "m4a", "aac"];
 const APP_FRAME_RADIUS: f32 = 30.0;
 const APP_OUTER_MARGIN: f32 = 0.0;
@@ -2743,30 +2740,23 @@ impl SoundFxApp {
         ctx.request_repaint();
     }
 
-    #[cfg(windows)]
-    fn centered_outer_position(size: Vec2) -> Pos2 {
-        unsafe {
-            let screen_w = GetSystemMetrics(SM_CXSCREEN).max(0) as f32;
-            let screen_h = GetSystemMetrics(SM_CYSCREEN).max(0) as f32;
-            Pos2::new(
-                ((screen_w - size.x) * 0.5).max(0.0),
-                ((screen_h - size.y) * 0.5).max(0.0),
-            )
-        }
-    }
-
-    #[cfg(not(windows))]
-    fn centered_outer_position(_size: Vec2) -> Pos2 {
-        Pos2::ZERO
+    fn centered_outer_position(ctx: &Context, size: Vec2) -> Pos2 {
+        let anchor_rect = ctx
+            .input(|input| input.viewport().outer_rect.or(input.viewport().inner_rect))
+            .unwrap_or_else(|| ctx.screen_rect());
+        Pos2::new(
+            anchor_rect.center().x - size.x * 0.5,
+            anchor_rect.center().y - size.y * 0.5,
+        )
     }
 
     fn apply_overlay_only_viewport(ctx: &Context, size: Vec2) {
         ctx.send_viewport_cmd(ViewportCommand::Visible(true));
         ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
         ctx.send_viewport_cmd(ViewportCommand::InnerSize(size));
-        ctx.send_viewport_cmd(ViewportCommand::OuterPosition(
-            Self::centered_outer_position(size),
-        ));
+        ctx.send_viewport_cmd(ViewportCommand::OuterPosition(Self::centered_outer_position(
+            ctx, size,
+        )));
         ctx.send_viewport_cmd(ViewportCommand::Focus);
         ctx.request_repaint();
     }
@@ -2776,9 +2766,9 @@ impl SoundFxApp {
         ctx.send_viewport_cmd(ViewportCommand::Visible(true));
         ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
         ctx.send_viewport_cmd(ViewportCommand::InnerSize(size));
-        ctx.send_viewport_cmd(ViewportCommand::OuterPosition(
-            Self::centered_outer_position(size),
-        ));
+        ctx.send_viewport_cmd(ViewportCommand::OuterPosition(Self::centered_outer_position(
+            ctx, size,
+        )));
         ctx.send_viewport_cmd(ViewportCommand::Focus);
         ctx.request_repaint();
     }
