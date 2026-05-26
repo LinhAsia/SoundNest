@@ -3605,7 +3605,7 @@ impl SoundFxApp {
         if Self::dark_theme_enabled() {
             Color32::from_rgb(17, 14, 20)
         } else {
-            Color32::from_rgb(248, 247, 251)
+            Color32::from_rgb(248, 248, 248)
         }
     }
 
