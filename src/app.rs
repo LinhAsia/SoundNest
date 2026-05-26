@@ -3499,9 +3499,6 @@ impl SoundFxApp {
         match self.storage.save_library(&self.sounds) {
             Ok(()) => {
                 self.pending_save = false;
-                if let Some(sound_id) = self.pending_processed_export_sound.take() {
-                    self.spawn_processed_export_job(sound_id);
-                }
                 self.clear_status();
                 true
             }
@@ -3514,6 +3511,22 @@ impl SoundFxApp {
 
     fn schedule_processed_export(&mut self, sound_id: Uuid) {
         self.pending_processed_export_sound = Some(sound_id);
+    }
+
+    fn maybe_start_pending_processed_export(&mut self) {
+        let Some(sound_id) = self.pending_processed_export_sound else {
+            return;
+        };
+        if self.selected == Some(sound_id) {
+            return;
+        }
+
+        if self.pending_save && !self.save_now() {
+            return;
+        }
+
+        self.pending_processed_export_sound = None;
+        self.spawn_processed_export_job(sound_id);
     }
 
     fn spawn_processed_export_job(&mut self, sound_id: Uuid) {
@@ -13677,6 +13690,7 @@ impl eframe::App for SoundFxApp {
         self.render_trim_commit_panel(ctx);
         self.render_pitch_overlay_viewport(ctx);
         self.render_custom_window_resize_handles(ctx);
+        self.maybe_start_pending_processed_export();
 
         let external_file_hover = self.app_view == AppView::Editor
             && !self.has_modal_panel()
