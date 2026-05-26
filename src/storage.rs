@@ -698,23 +698,17 @@ impl Storage {
                 .unwrap_or("wav")
                 .to_owned()
         };
-        let export_suffix = if sound.needs_processed_export() {
-            Self::processed_export_suffix(sound)
-        } else {
-            String::new()
-        };
         let export_name = format!(
-            "{}-{}{}.{}",
+            "{}-{}.{}",
             sanitize_stem(&sound.name),
             &sound.id.to_string()[..8],
-            export_suffix,
             extension
         );
         let export_path = self.exports_dir.join(export_name);
-        if export_path.exists() {
-            return Ok(export_path);
-        }
         if !sound.needs_processed_export() {
+            if export_path.exists() {
+                return Ok(export_path);
+            }
             match fs::hard_link(source_path, &export_path) {
                 Ok(()) => return Ok(export_path),
                 Err(_) => {
@@ -726,17 +720,6 @@ impl Storage {
         }
         write_processed_wav(source_path, &export_path, sound)?;
         Ok(export_path)
-    }
-
-    fn processed_export_suffix(sound: &SoundEffect) -> String {
-        let volume = (sound.volume.clamp(0.0, 5.0) * 1000.0).round() as u32;
-        let speed = (sound.speed.clamp(0.25, 2.0) * 1000.0).round() as u32;
-        let trim_start = (sound.trim_start_secs.max(0.0) * 1000.0).round() as u32;
-        let trim_end = (sound.trim_end_secs.max(0.0) * 1000.0).round() as u32;
-        format!(
-            "-proc-v{:04}-s{:04}-a{:06}-b{:06}",
-            volume, speed, trim_start, trim_end
-        )
     }
 
     pub fn analyze_sound_as_effect(&self, path: &Path, name: &str) -> Result<SoundEffect> {
