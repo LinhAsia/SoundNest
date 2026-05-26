@@ -13421,7 +13421,7 @@ impl eframe::App for SoundFxApp {
                     frame_rect,
                     frame_radius,
                     Stroke::new(1.0, Self::border_color()),
-                    StrokeKind::Outside,
+                    StrokeKind::Inside,
                 );
                 let frame_response = Frame::new()
                     .fill(Color32::TRANSPARENT)
@@ -13476,7 +13476,7 @@ impl eframe::App for SoundFxApp {
                                 (124.0 * live_ui_overlay_alpha).round().clamp(0.0, 255.0) as u8,
                             ),
                         ),
-                        StrokeKind::Outside,
+                        StrokeKind::Inside,
                     );
                 }
             });
