@@ -2118,16 +2118,34 @@ impl SoundFxApp {
             return;
         };
 
-        let asset_path = sound.asset_path(self.storage.root_dir());
-        let Some(audio) = self.audio.as_mut() else {
-            self.set_error_status("Audio unavailable");
-            return;
-        };
         self.myinstants_preview_audio_url = None;
 
-        let playback = match start_position_secs {
-            Some(start_position_secs) => audio.play_from(&sound, &asset_path, start_position_secs),
-            None => audio.play(&sound, &asset_path),
+        let playback = if sound.needs_processed_export() {
+            let asset_path = match self.storage.export_processed_sound(&sound) {
+                Ok(path) => path,
+                Err(error) => {
+                    self.set_error_status(error);
+                    return;
+                }
+            };
+            let Some(audio) = self.audio.as_mut() else {
+                self.set_error_status("Audio unavailable");
+                return;
+            };
+            let preview_start = start_position_secs.unwrap_or(sound.trim_start_secs);
+            audio.play_processed(&sound, &asset_path, preview_start)
+        } else {
+            let Some(audio) = self.audio.as_mut() else {
+                self.set_error_status("Audio unavailable");
+                return;
+            };
+            let asset_path = sound.asset_path(self.storage.root_dir());
+            match start_position_secs {
+                Some(start_position_secs) => {
+                    audio.play_from(&sound, &asset_path, start_position_secs)
+                }
+                None => audio.play(&sound, &asset_path),
+            }
         };
 
         match playback {
