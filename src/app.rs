@@ -785,7 +785,9 @@ impl SoundFxApp {
     }
 
     fn centered_overlay_pos(ctx: &Context, size: Vec2) -> Pos2 {
-        let rect = ctx.screen_rect();
+        let rect = ctx
+            .input(|input| input.viewport().outer_rect.or(input.viewport().inner_rect))
+            .unwrap_or_else(|| ctx.screen_rect());
         Pos2::new(
             rect.center().x - size.x * 0.5,
             rect.center().y - size.y * 0.5,
@@ -793,7 +795,9 @@ impl SoundFxApp {
     }
 
     fn clamp_overlay_pos(ctx: &Context, size: Vec2, pos: Pos2) -> Pos2 {
-        let rect = ctx.screen_rect();
+        let rect = ctx
+            .input(|input| input.viewport().outer_rect.or(input.viewport().inner_rect))
+            .unwrap_or_else(|| ctx.screen_rect());
         let max_x = (rect.right() - size.x).max(rect.left());
         let max_y = (rect.bottom() - size.y).max(rect.top());
         Pos2::new(
