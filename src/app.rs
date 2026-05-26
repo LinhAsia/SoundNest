@@ -9092,13 +9092,29 @@ impl SoundFxApp {
                                         .strong(),
                                 );
                                 ui.add_space(8.0);
-                                let response = ui.add_sized(
-                                    [ui.available_width(), 28.0],
-                                    TextEdit::singleline(&mut self.editor_tags_input)
-                                        .frame(false)
-                                        .hint_text(tags_hint.as_str())
-                                        .desired_width(f32::INFINITY),
+                                let hint_color = Color32::from_rgba_premultiplied(
+                                    Self::muted_text_color().r(),
+                                    Self::muted_text_color().g(),
+                                    Self::muted_text_color().b(),
+                                    128,
                                 );
+                                let response = Frame::new()
+                                    .fill(Self::input_fill())
+                                    .stroke(Stroke::new(1.0, Self::subtle_border_color()))
+                                    .corner_radius(14.0)
+                                    .inner_margin(Margin::symmetric(12, 5))
+                                    .show(ui, |ui| {
+                                        ui.add_sized(
+                                            [ui.available_width(), 28.0],
+                                            TextEdit::singleline(&mut self.editor_tags_input)
+                                                .frame(false)
+                                                .hint_text(
+                                                    RichText::new(tags_hint.as_str()).color(hint_color),
+                                                )
+                                                .desired_width(f32::INFINITY),
+                                        )
+                                    })
+                                    .inner;
                                 if response.changed() {
                                     tags_changed = true;
                                 }
