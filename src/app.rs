@@ -359,6 +359,7 @@ pub struct SoundFxApp {
     pending_save: bool,
     last_edit_at: f64,
     pending_processed_export_sound: Option<Uuid>,
+    pending_preview_after_preload: Option<(Uuid, Option<f32>)>,
     processed_export_inflight: HashSet<PathBuf>,
     processed_export_tx: Sender<ProcessedExportMessage>,
     processed_export_rx: Receiver<ProcessedExportMessage>,
@@ -640,6 +641,7 @@ impl SoundFxApp {
             pending_save: false,
             last_edit_at: 0.0,
             pending_processed_export_sound: None,
+            pending_preview_after_preload: None,
             processed_export_inflight: HashSet::new(),
             processed_export_tx,
             processed_export_rx,
@@ -2139,6 +2141,16 @@ impl SoundFxApp {
         self.preview_sound_from_position(sound_id, None);
     }
 
+    fn preview_asset_path_for_sound(&self, sound: &SoundEffect) -> PathBuf {
+        if sound.needs_processed_export()
+            && Storage::processed_export_exists(self.storage.root_dir(), sound)
+        {
+            Storage::processed_export_path(self.storage.root_dir(), sound)
+        } else {
+            sound.asset_path(self.storage.root_dir())
+        }
+    }
+
     fn preview_sound_from_position(&mut self, sound_id: Uuid, start_position_secs: Option<f32>) {
         let Some(sound) = self
             .sounds
@@ -2149,20 +2161,27 @@ impl SoundFxApp {
             return;
         };
 
+        let asset_path = self.preview_asset_path_for_sound(&sound);
         let Some(audio) = self.audio.as_mut() else {
             self.set_error_status("Audio unavailable");
             return;
         };
         self.myinstants_preview_audio_url = None;
 
+        if !audio.has_cached_audio(&asset_path) {
+            self.schedule_audio_preload(asset_path.clone());
+            self.pending_preview_after_preload = Some((sound.id, start_position_secs));
+            self.clear_status();
+            return;
+        }
+
+        self.pending_preview_after_preload = None;
         let playback = if sound.needs_processed_export()
             && Storage::processed_export_exists(self.storage.root_dir(), &sound)
         {
-            let asset_path = Storage::processed_export_path(self.storage.root_dir(), &sound);
             let start_position_secs = start_position_secs.unwrap_or(sound.trim_start_secs);
             audio.play_processed_file(&sound, &asset_path, start_position_secs)
         } else {
-            let asset_path = sound.asset_path(self.storage.root_dir());
             match start_position_secs {
                 Some(start_position_secs) => {
                     audio.play_from(&sound, &asset_path, start_position_secs)
@@ -3616,15 +3635,18 @@ impl SoundFxApp {
         let Some(index) = self.selected_sound_index() else {
             return;
         };
-        let asset_path = self.sounds[index].asset_path(self.storage.root_dir());
+        let sound = &self.sounds[index];
+        let asset_path = self.preview_asset_path_for_sound(sound);
         self.schedule_audio_preload(asset_path);
     }
 
     fn poll_audio_preload_jobs(&mut self, ctx: &Context) {
         let mut changed = false;
+        let mut pending_preview_to_play = None;
         while let Ok(message) = self.audio_preload_rx.try_recv() {
             match message {
                 AudioPreloadMessage::Finished { asset_path, result } => {
+                    let asset_path_for_match = asset_path.clone();
                     self.audio_preload_inflight.remove(&asset_path);
                     if let Ok((channels, sample_rate, samples)) = result
                         && let Some(audio) = self.audio.as_mut()
@@ -3632,12 +3654,34 @@ impl SoundFxApp {
                         audio.insert_cached_audio(asset_path, channels, sample_rate, samples);
                         changed = true;
                     }
+                    if let Some((pending_sound_id, start_position_secs)) =
+                        self.pending_preview_after_preload
+                        && self
+                            .sounds
+                            .iter()
+                            .find(|sound| sound.id == pending_sound_id)
+                            .is_some_and(|sound| {
+                                self.preview_asset_path_for_sound(sound) == asset_path_for_match
+                            })
+                    {
+                        self.pending_preview_after_preload = None;
+                        if self.selected == Some(pending_sound_id) {
+                            pending_preview_to_play = Some((pending_sound_id, start_position_secs));
+                        }
+                    }
                 }
             }
         }
 
+        if let Some((sound_id, start_position_secs)) = pending_preview_to_play {
+            self.preview_sound_from_position(sound_id, start_position_secs);
+            return;
+        }
+
         if changed {
             ctx.request_repaint();
+        } else if !self.audio_preload_inflight.is_empty() || self.pending_preview_after_preload.is_some() {
+            ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
         }
     }
 
@@ -9132,7 +9176,8 @@ impl SoundFxApp {
         };
 
         let sound_id = self.sounds[index].id;
-        self.schedule_audio_preload(self.sounds[index].asset_path(self.storage.root_dir()));
+        let preview_asset_path = self.preview_asset_path_for_sound(&self.sounds[index]);
+        self.schedule_audio_preload(preview_asset_path);
         self.sync_editor_tags_input();
         let is_playing = self
             .audio
@@ -9186,7 +9231,19 @@ impl SoundFxApp {
             .corner_radius(36.0)
             .inner_margin(Margin::same(14))
             .show(ui, |ui| {
+                let storage_root = self.storage.root_dir().to_path_buf();
                 let sound = &mut self.sounds[index];
+                let editor_asset_path = if sound.needs_processed_export()
+                    && Storage::processed_export_exists(&storage_root, sound)
+                {
+                    Storage::processed_export_path(&storage_root, sound)
+                } else {
+                    sound.asset_path(&storage_root)
+                };
+                let editor_audio_loading = self.audio_preload_inflight.contains(&editor_asset_path)
+                    || self
+                        .pending_preview_after_preload
+                        .is_some_and(|(pending_sound_id, _)| pending_sound_id == sound.id);
                 let controls_width = 52.0 + 52.0 + 52.0 + 64.0 + 64.0 + 36.0;
                 let row_gap = 8.0;
                 let name_width = (ui.available_width() - controls_width - row_gap).max(120.0);
@@ -9213,6 +9270,10 @@ impl SoundFxApp {
                     }
 
                     ui.add_space(row_gap);
+                    if editor_audio_loading {
+                        ui.add(egui::Spinner::new().size(18.0));
+                        ui.add_space(6.0);
+                    }
                     ui.allocate_ui_with_layout(
                         vec2(controls_width, 34.0),
                         egui::Layout::right_to_left(Align::Center),
