@@ -681,6 +681,14 @@ impl Storage {
     }
 
     pub fn import_sound(&self, source_path: &Path) -> Result<SoundEffect> {
+        Self::import_sound_into_dir(&self.sounds_dir, source_path)
+    }
+
+    pub fn import_sound_at(root_dir: &Path, source_path: &Path) -> Result<SoundEffect> {
+        Self::import_sound_into_dir(&root_dir.join("sounds"), source_path)
+    }
+
+    fn import_sound_into_dir(sounds_dir: &Path, source_path: &Path) -> Result<SoundEffect> {
         if !source_path.exists() {
             bail!("file not found");
         }
@@ -691,7 +699,7 @@ impl Storage {
             .unwrap_or("bin");
         let id = Uuid::new_v4();
         let asset_file = format!("{id}.{extension}");
-        let target_path = self.sounds_dir.join(&asset_file);
+        let target_path = sounds_dir.join(&asset_file);
 
         fs::copy(source_path, &target_path).context("unable to copy imported sound")?;
 
@@ -727,6 +735,22 @@ impl Storage {
             reverb_enabled: false,
             telephone_enabled: false,
             waveform: analysis.waveform,
+        })
+    }
+
+    pub fn duplicate_trimmed_sound_at(root_dir: &Path, sound: &SoundEffect) -> Result<SoundEffect> {
+        let export_path = Self::export_processed_sound_at(root_dir, sound)?;
+        if export_path.exists() {
+            let import_result = Self::import_sound_at(root_dir, &export_path).map(|mut imported_sound| {
+                imported_sound.name = format!("{} trim", sound.name);
+                imported_sound
+            });
+            let _ = fs::remove_file(&export_path);
+            return import_result;
+        }
+        Self::import_sound_at(root_dir, &export_path).map(|mut imported_sound| {
+            imported_sound.name = format!("{} trim", sound.name);
+            imported_sound
         })
     }
 
@@ -976,17 +1000,28 @@ impl Storage {
         self.save_preferences(&preferences)
     }
 
+    #[allow(dead_code)]
     pub fn replace_sound_with_processed(&self, sound: &mut SoundEffect) -> Result<()> {
-        let source_path = sound.playback_asset_path(&self.root_dir);
+        let updated = Self::replace_sound_with_processed_at(&self.root_dir, sound)?;
+        *sound = updated;
+        Ok(())
+    }
+
+    pub fn replace_sound_with_processed_at(
+        root_dir: &Path,
+        sound: &SoundEffect,
+    ) -> Result<SoundEffect> {
+        let source_path = sound.playback_asset_path(root_dir);
         if !source_path.exists() {
             bail!("sound source file is missing");
         }
 
-        let target_file = format!("{}.wav", sound.id);
-        let target_path = self.sounds_dir.join(&target_file);
-        let temp_path = self
-            .sounds_dir
-            .join(format!("{}.trimmed.tmp.wav", sound.id));
+        let mut updated = sound.clone();
+        let target_file = format!("{}.wav", updated.id);
+        let target_path = root_dir.join("sounds").join(&target_file);
+        let temp_path = root_dir
+            .join("sounds")
+            .join(format!("{}.trimmed.tmp.wav", updated.id));
 
         if temp_path.exists() {
             let _ = fs::remove_file(&temp_path);
@@ -994,34 +1029,34 @@ impl Storage {
 
         write_processed_wav(&source_path, &temp_path, sound)?;
 
-        if target_path != source_path && target_path.exists() {
+        if target_path.exists() {
             fs::remove_file(&target_path).context("unable to replace existing trimmed sound")?;
         }
 
         fs::rename(&temp_path, &target_path).context("unable to finalize trimmed sound")?;
 
-        let preserve_source = sound
-            .vocal_asset_path(&self.root_dir)
+        let preserve_source = updated
+            .vocal_asset_path(root_dir)
             .is_some_and(|path| path == source_path)
-            || sound
-                .music_asset_path(&self.root_dir)
+            || updated
+                .music_asset_path(root_dir)
                 .is_some_and(|path| path == source_path);
         if source_path != target_path && source_path.exists() && !preserve_source {
             fs::remove_file(&source_path).context("unable to remove previous sound source")?;
         }
 
         let analysis = analyze_audio_file(&target_path, WAVEFORM_BUCKETS)?;
-        sound.asset_file = target_file;
-        sound.duration_secs = analysis.duration_secs;
-        sound.waveform = analysis.waveform;
-        sound.volume = 1.0;
-        sound.speed = 1.0;
-        sound.trim_start_secs = 0.0;
-        sound.trim_end_secs = sound.duration_secs;
-        sound.reverb_enabled = false;
-        sound.telephone_enabled = false;
-        sound.clamp_trim();
-        Ok(())
+        updated.asset_file = target_file;
+        updated.duration_secs = analysis.duration_secs;
+        updated.waveform = analysis.waveform;
+        updated.volume = 1.0;
+        updated.speed = 1.0;
+        updated.trim_start_secs = 0.0;
+        updated.trim_end_secs = updated.duration_secs;
+        updated.reverb_enabled = false;
+        updated.telephone_enabled = false;
+        updated.clamp_trim();
+        Ok(updated)
     }
 
     pub fn analyze_waveform_preview(&self, path: &Path, buckets: usize) -> Result<Vec<f32>> {

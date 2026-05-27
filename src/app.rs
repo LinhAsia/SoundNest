@@ -119,6 +119,14 @@ enum ProcessedExportMessage {
     },
 }
 
+enum TrimCommitMessage {
+    Finished {
+        sound_id: Uuid,
+        keep_old: bool,
+        result: Result<SoundEffect, String>,
+    },
+}
+
 enum AudioPreloadMessage {
     Finished {
         asset_path: PathBuf,
@@ -397,9 +405,12 @@ pub struct SoundFxApp {
     pending_processed_export_sound: Option<Uuid>,
     pending_preview_after_preload: Option<(Uuid, Option<f32>)>,
     normalize_inflight: HashSet<Uuid>,
+    trim_commit_inflight: HashSet<Uuid>,
     processed_export_inflight: HashSet<PathBuf>,
     processed_export_tx: Sender<ProcessedExportMessage>,
     processed_export_rx: Receiver<ProcessedExportMessage>,
+    trim_commit_tx: Sender<TrimCommitMessage>,
+    trim_commit_rx: Receiver<TrimCommitMessage>,
     audio_preload_inflight: HashSet<PathBuf>,
     audio_preload_tx: Sender<AudioPreloadMessage>,
     audio_preload_rx: Receiver<AudioPreloadMessage>,
@@ -478,6 +489,7 @@ impl SoundFxApp {
         let (stream_driver_tx, stream_driver_rx) = mpsc::channel();
         let (vocal_separation_tx, vocal_separation_rx) = mpsc::channel();
         let (processed_export_tx, processed_export_rx) = mpsc::channel();
+        let (trim_commit_tx, trim_commit_rx) = mpsc::channel();
         let (audio_preload_tx, audio_preload_rx) = mpsc::channel();
         let (normalize_tx, normalize_rx) = mpsc::channel();
         let video_assets = storage.load_video_library().unwrap_or_else(|error| {
@@ -690,9 +702,12 @@ impl SoundFxApp {
             pending_processed_export_sound: None,
             pending_preview_after_preload: None,
             normalize_inflight: HashSet::new(),
+            trim_commit_inflight: HashSet::new(),
             processed_export_inflight: HashSet::new(),
             processed_export_tx,
             processed_export_rx,
+            trim_commit_tx,
+            trim_commit_rx,
             audio_preload_inflight: HashSet::new(),
             audio_preload_tx,
             audio_preload_rx,
@@ -3332,63 +3347,46 @@ impl SoundFxApp {
     }
 
     fn commit_selected_trimmed_sound(&mut self, ctx: &Context) {
-        let Some(index) = self.selected_sound_index() else {
-            return;
-        };
-
-        let sound_id = self.sounds[index].id;
-        if let Some(audio) = self.audio.as_mut()
-            && audio.is_playing(sound_id)
-        {
-            audio.stop();
-        }
-
-        match self
-            .storage
-            .replace_sound_with_processed(&mut self.sounds[index])
-        {
-            Ok(()) => {
-                self.save_now();
-                ctx.request_repaint();
-                self.clear_status();
-            }
-            Err(error) => self.set_error_status(error),
-        }
+        self.start_trim_commit_job(ctx, false);
     }
 
-    fn duplicate_selected_trimmed_sound(&mut self) {
+    fn duplicate_selected_trimmed_sound(&mut self, ctx: &Context) {
+        self.start_trim_commit_job(ctx, true);
+    }
+
+    fn start_trim_commit_job(&mut self, ctx: &Context, keep_old: bool) {
         let Some(index) = self.selected_sound_index() else {
             return;
         };
 
         let sound_id = self.sounds[index].id;
+        if self.trim_commit_inflight.contains(&sound_id) {
+            return;
+        }
         if let Some(audio) = self.audio.as_mut()
             && audio.is_playing(sound_id)
         {
             audio.stop();
         }
 
-        let source_name = self.sounds[index].name.clone();
-        let export_path = match self.storage.export_processed_sound(&self.sounds[index]) {
-            Ok(path) => path,
-            Err(error) => {
-                self.set_error_status(error);
-                return;
+        let sound = self.sounds[index].clone();
+        let root_dir = self.storage.root_dir().to_path_buf();
+        let tx = self.trim_commit_tx.clone();
+        self.trim_commit_inflight.insert(sound_id);
+        thread::spawn(move || {
+            let result = if keep_old {
+                Storage::duplicate_trimmed_sound_at(&root_dir, &sound)
+            } else {
+                Storage::replace_sound_with_processed_at(&root_dir, &sound)
             }
-        };
-
-        match self.storage.import_sound(&export_path) {
-            Ok(mut sound) => {
-                sound.name = format!("{source_name} trim");
-                self.selected = Some(sound.id);
-                self.sounds.insert(0, sound);
-                self.save_now();
-                self.clear_status();
-            }
-            Err(error) => self.set_error_status(error),
-        }
-
-        let _ = fs::remove_file(export_path);
+            .map_err(|error| error.to_string());
+            let _ = tx.send(TrimCommitMessage::Finished {
+                sound_id,
+                keep_old,
+                result,
+            });
+        });
+        ctx.request_repaint();
     }
 
     fn copy_sound_file_to_clipboard(&self, sound: &SoundEffect) -> Result<()> {
@@ -4080,6 +4078,42 @@ impl SoundFxApp {
         }
 
         if !finished_exports.is_empty() {
+            ctx.request_repaint();
+        }
+    }
+
+    fn poll_trim_commit_jobs(&mut self, ctx: &Context) {
+        let mut changed = false;
+        while let Ok(message) = self.trim_commit_rx.try_recv() {
+            match message {
+                TrimCommitMessage::Finished {
+                    sound_id,
+                    keep_old,
+                    result,
+                } => {
+                    self.trim_commit_inflight.remove(&sound_id);
+                    match result {
+                        Ok(sound) => {
+                            if keep_old {
+                                self.selected = Some(sound.id);
+                                self.sounds.insert(0, sound);
+                            } else if let Some(index) =
+                                self.sounds.iter().position(|item| item.id == sound_id)
+                            {
+                                self.sounds[index] = sound;
+                            }
+                            if self.save_now() {
+                                self.clear_status();
+                            }
+                            changed = true;
+                        }
+                        Err(error) => self.set_error_status(error),
+                    }
+                }
+            }
+        }
+
+        if changed {
             ctx.request_repaint();
         }
     }
@@ -12831,7 +12865,7 @@ impl SoundFxApp {
 
         if keep_old {
             self.show_trim_commit_panel = false;
-            self.duplicate_selected_trimmed_sound();
+            self.duplicate_selected_trimmed_sound(ctx);
         }
         if replace_current {
             self.show_trim_commit_panel = false;
@@ -14749,6 +14783,7 @@ impl eframe::App for SoundFxApp {
         self.poll_transition_analysis_jobs(ctx);
         self.poll_myinstants_waveform_jobs();
         self.poll_processed_export_jobs(ctx);
+        self.poll_trim_commit_jobs(ctx);
         self.poll_audio_preload_jobs(ctx);
         self.poll_normalize_jobs(ctx);
         self.poll_demucs_install_result(ctx);
@@ -14791,6 +14826,9 @@ impl eframe::App for SoundFxApp {
         }
         if !self.normalize_inflight.is_empty() {
             ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
+        }
+        if !self.trim_commit_inflight.is_empty() {
+            ctx.request_repaint_after(Duration::from_millis(JOB_POLL_REPAINT_MS));
         }
         if self.playback_needs_live_repaint() {
             ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
