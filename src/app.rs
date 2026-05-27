@@ -9569,13 +9569,13 @@ impl SoundFxApp {
                     .fill(Self::panel_fill())
                     .stroke(Stroke::new(1.0, Self::subtle_border_color()))
                     .corner_radius(26.0)
-                    .inner_margin(Margin::same(18))
+                    .inner_margin(Margin::same(12))
                     .show(ui, |ui| {
                         ui.vertical(|ui| {
                             ui.horizontal(|ui| {
                                 ui.label(
                                     RichText::new(&tags_label)
-                                        .size(12.5)
+                                        .size(11.5)
                                         .color(Self::muted_text_color())
                                         .strong(),
                                 );
@@ -9590,10 +9590,10 @@ impl SoundFxApp {
                                     .fill(Self::input_fill())
                                     .stroke(Stroke::new(1.0, Self::subtle_border_color()))
                                     .corner_radius(14.0)
-                                    .inner_margin(Margin::symmetric(12, 5))
+                                    .inner_margin(Margin::symmetric(10, 4))
                                     .show(ui, |ui| {
                                         ui.add_sized(
-                                            [ui.available_width(), 28.0],
+                                            [ui.available_width(), 24.0],
                                             TextEdit::singleline(&mut self.editor_tags_input)
                                                 .frame(false)
                                                 .hint_text(
@@ -9608,13 +9608,12 @@ impl SoundFxApp {
                                 }
                             });
                             if !available_tags.is_empty() {
-                                ui.add_space(10.0);
+                                ui.add_space(6.0);
                                 ui.label(
                                     RichText::new(&tags_available_label)
-                                        .size(12.0)
+                                        .size(11.0)
                                         .color(Self::muted_text_color()),
                                 );
-                                ui.add_space(6.0);
                                 if Self::draw_sound_tag_picker(
                                     ui,
                                     &available_tags,
@@ -9751,17 +9750,19 @@ impl SoundFxApp {
                     .fill(Self::panel_fill())
                     .stroke(Stroke::new(1.0, Self::subtle_border_color()))
                     .corner_radius(22.0)
-                    .inner_margin(Margin::same(16))
+                    .inner_margin(Margin::same(12))
                     .show(ui, |ui| {
                         ui.vertical(|ui| {
                             ui.horizontal(|ui| {
                                 ui.label(
                                     RichText::new(&vocal_only_label)
-                                        .size(12.5)
+                                        .size(11.5)
                                         .color(Self::strong_text_color())
                                         .strong(),
                                 );
-                                let vocal_toggle = ui.add(Checkbox::new(&mut sound.vocal_only, ""));
+                                let vocal_toggle = ui
+                                    .add(Checkbox::new(&mut sound.vocal_only, ""))
+                                    .on_hover_text(&vocal_hint_label);
                                 if vocal_toggle.changed() {
                                     changed = true;
                                     vocal_reapply_request = true;
@@ -9782,18 +9783,18 @@ impl SoundFxApp {
                                     ui.spinner();
                                     ui.label(
                                         RichText::new(&vocal_loading_label)
-                                            .size(11.5)
+                                            .size(11.0)
                                             .color(Self::muted_text_color()),
                                     );
                                     let stop = ui.add(
                                         Button::new(
                                             RichText::new(&vocal_stop_label)
-                                                .size(11.0)
+                                                .size(10.5)
                                                 .color(Color32::from_rgb(214, 51, 132)),
                                         )
                                         .fill(Self::surface_fill())
                                         .stroke(Stroke::new(1.0, Self::border_color()))
-                                        .corner_radius(12.0),
+                                        .corner_radius(10.0),
                                     );
                                     if stop.clicked() {
                                         stop_vocal_job = true;
@@ -9801,19 +9802,19 @@ impl SoundFxApp {
                                 } else if vocal_ready {
                                     ui.label(
                                         RichText::new(&vocal_ready_label)
-                                            .size(11.5)
+                                            .size(11.0)
                                             .color(Color32::from_rgb(100, 200, 100)),
                                     );
                                 } else {
                                     let separate = ui.add(
                                         Button::new(
                                             RichText::new(&vocal_separate_label)
-                                                .size(11.0)
+                                                .size(10.5)
                                                 .color(Color32::from_rgb(214, 51, 132)),
                                         )
                                         .fill(Self::surface_fill())
                                         .stroke(Stroke::new(1.0, Self::border_color()))
-                                        .corner_radius(12.0),
+                                        .corner_radius(10.0),
                                     );
                                     if separate.clicked() {
                                         if !vocal_job_running {
@@ -9824,12 +9825,6 @@ impl SoundFxApp {
                                     }
                                 }
                             });
-                            ui.add_space(8.0);
-                            ui.label(
-                                RichText::new(&vocal_hint_label)
-                                    .size(11.5)
-                                    .color(Self::muted_text_color()),
-                            );
                         });
                     });
 
