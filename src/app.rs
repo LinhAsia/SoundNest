@@ -47,6 +47,8 @@ const ACTIVE_UI_REPAINT_MS: u64 = 33;
 const JOB_POLL_REPAINT_MS: u64 = 90;
 const DEFAULT_INTRO_DURATION_SEC: f32 = 1.35;
 const DEFAULT_OUTRO_DURATION_SEC: f32 = 0.72;
+const DEFAULT_OUTRO_PLAYBACK_DURATION_SEC: f32 = 2.0;
+const DEFAULT_OUTRO_FADE_START_RATIO: f32 = 0.75;
 const TRANSITION_WAVE_BUCKETS: usize = 160;
 const LIBRARY_GRID_MIN_COLUMNS: usize = 3;
 const LIBRARY_GRID_MAX_COLUMNS: usize = 8;
@@ -994,6 +996,42 @@ impl SoundFxApp {
             .unwrap_or_else(|_| (Vec::new(), 0.0))
     }
 
+    fn outro_transition_visual(&self) -> Option<(Vec<f32>, f32)> {
+        let audio = self.audio.as_ref()?;
+        if !audio.has_active_playback() {
+            return None;
+        }
+        if let Some(sound_id) = audio.current_sound_id() {
+            let sound = self.sounds.iter().find(|sound| sound.id == sound_id)?;
+            let waveform = if sound.waveform.is_empty() {
+                Self::load_transition_sound_visual(
+                    &self.storage,
+                    Some(sound.playback_asset_path(self.storage.root_dir())),
+                )
+                .0
+            } else {
+                sound.waveform.clone()
+            };
+            return Some((waveform, DEFAULT_OUTRO_PLAYBACK_DURATION_SEC));
+        }
+
+        if let Some(path) = audio.current_file_path() {
+            let (waveform, _) = Self::load_transition_sound_visual(&self.storage, Some(path));
+            return Some((waveform, DEFAULT_OUTRO_PLAYBACK_DURATION_SEC));
+        }
+
+        Some((Vec::new(), DEFAULT_OUTRO_PLAYBACK_DURATION_SEC))
+    }
+
+    fn update_outro_audio_fade(&mut self, progress: f32) {
+        if let Some(audio) = self.audio.as_mut() {
+            let fade_start = DEFAULT_OUTRO_FADE_START_RATIO.clamp(0.0, 1.0);
+            let fade_progress = ((progress - fade_start) / (1.0 - fade_start)).clamp(0.0, 1.0);
+            let volume = 1.0 - Self::ease_in_out_cubic(fade_progress);
+            audio.set_volume(volume);
+        }
+    }
+
     fn request_close(&mut self, ctx: &Context) {
         if !self.app_transition_animation {
             self.startup.close_sent = true;
@@ -1012,37 +1050,42 @@ impl SoundFxApp {
             return;
         }
 
+        let Some((sound_waveform, sound_duration_sec)) = self.outro_transition_visual() else {
+            self.startup.close_sent = true;
+            if let Some(audio) = self.audio.as_mut() {
+                audio.stop();
+            }
+            if self.recorder.snapshot().running {
+                self.stop_recording_for_close(ctx);
+            }
+            if self.pending_save {
+                let _ = self.storage.save_library(&self.sounds);
+                self.pending_save = false;
+            }
+            self.finalize_close_cleanup(ctx);
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            return;
+        };
+
         if self.startup.phase == TransitionPhase::Outro {
             return;
         }
 
-        if let Some(audio) = self.audio.as_mut() {
-            audio.stop();
-        }
         if self.recorder.snapshot().running {
             self.stop_recording_for_close(ctx);
-        }
-        let exit_sound_path = self.storage.resolved_exit_sound_path().ok().flatten();
-        if let Some(path) = exit_sound_path.as_ref() {
-            let _ = self.play_file_detached_if_exists(path);
         }
         if self.pending_save {
             let _ = self.storage.save_library(&self.sounds);
             self.pending_save = false;
         }
 
-        let exit_transition_sound =
-            Self::load_transition_sound_visual(&self.storage, exit_sound_path.clone());
         self.startup.phase = TransitionPhase::Outro;
         self.startup.started_at = None;
         self.startup.live_started_at = None;
-        self.startup.duration_sec = Self::custom_transition_duration_secs_opt(
-            &self.storage,
-            exit_sound_path.as_deref(),
-            DEFAULT_OUTRO_DURATION_SEC,
-        );
-        self.startup.sound_waveform = exit_transition_sound.0;
-        self.startup.sound_duration_sec = exit_transition_sound.1;
+        self.startup.duration_sec = DEFAULT_OUTRO_PLAYBACK_DURATION_SEC;
+        self.startup.sound_waveform = sound_waveform;
+        self.startup.sound_duration_sec = sound_duration_sec;
+        self.update_outro_audio_fade(0.0);
         ctx.request_repaint();
     }
 
@@ -1072,21 +1115,6 @@ impl SoundFxApp {
         if let Some(audio) = self.audio.as_mut() {
             audio.play_file(path)?;
         }
-        Ok(())
-    }
-
-    fn play_file_detached_if_exists(&self, path: &Path) -> Result<()> {
-        if !path.exists() {
-            return Ok(());
-        }
-
-        let exe_path = std::env::current_exe().context("unable to resolve current executable")?;
-        let mut cmd = Command::new(exe_path);
-        cmd.arg("--play-file-detached").arg(path);
-        #[cfg(windows)]
-        cmd.creation_flags(0x08000000);
-        cmd.spawn()
-            .context("unable to launch detached audio player")?;
         Ok(())
     }
 
@@ -12884,6 +12912,10 @@ impl SoundFxApp {
         let progress =
             ((now - *started_at) / self.startup.duration_sec as f64).clamp(0.0, 1.0) as f32;
 
+        if phase == TransitionPhase::Outro {
+            self.update_outro_audio_fade(progress);
+        }
+
         if progress >= 1.0 {
             match phase {
                 TransitionPhase::Intro => {
@@ -12895,10 +12927,11 @@ impl SoundFxApp {
                 }
                 TransitionPhase::Outro => {
                     if !self.startup.close_sent {
-                        self.finalize_close_cleanup(ctx);
                         if let Some(audio) = self.audio.as_mut() {
+                            audio.set_volume(0.0);
                             audio.stop();
                         }
+                        self.finalize_close_cleanup(ctx);
                         self.startup.close_sent = true;
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     }

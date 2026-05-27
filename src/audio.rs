@@ -354,6 +354,20 @@ impl AudioEngine {
         self.sink.is_some()
     }
 
+    pub fn current_sound_id(&self) -> Option<Uuid> {
+        self.current_id
+    }
+
+    pub fn current_file_path(&self) -> Option<PathBuf> {
+        self.current_file_path.clone()
+    }
+
+    pub fn set_volume(&mut self, volume: f32) {
+        if let Some(sink) = self.sink.as_ref() {
+            sink.set_volume(volume.clamp(0.0, 1.0));
+        }
+    }
+
     pub fn has_cached_audio(&self, asset_path: &Path) -> bool {
         self.cached_audio.contains_key(asset_path)
     }
