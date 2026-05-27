@@ -123,6 +123,13 @@ enum AudioPreloadMessage {
     },
 }
 
+enum NormalizeMessage {
+    Finished {
+        sound_id: Uuid,
+        result: Result<f32, String>,
+    },
+}
+
 enum MyinstantsWaveformMessage {
     Ready {
         audio_url: String,
@@ -360,12 +367,15 @@ pub struct SoundFxApp {
     last_edit_at: f64,
     pending_processed_export_sound: Option<Uuid>,
     pending_preview_after_preload: Option<(Uuid, Option<f32>)>,
+    normalize_inflight: HashSet<Uuid>,
     processed_export_inflight: HashSet<PathBuf>,
     processed_export_tx: Sender<ProcessedExportMessage>,
     processed_export_rx: Receiver<ProcessedExportMessage>,
     audio_preload_inflight: HashSet<PathBuf>,
     audio_preload_tx: Sender<AudioPreloadMessage>,
     audio_preload_rx: Receiver<AudioPreloadMessage>,
+    normalize_tx: Sender<NormalizeMessage>,
+    normalize_rx: Receiver<NormalizeMessage>,
     demucs_installing: bool,
     demucs_install_error: Option<String>,
     demucs_install_tx: Sender<Result<(), String>>,
@@ -440,6 +450,7 @@ impl SoundFxApp {
         let (vocal_separation_tx, vocal_separation_rx) = mpsc::channel();
         let (processed_export_tx, processed_export_rx) = mpsc::channel();
         let (audio_preload_tx, audio_preload_rx) = mpsc::channel();
+        let (normalize_tx, normalize_rx) = mpsc::channel();
         let video_assets = storage.load_video_library().unwrap_or_else(|error| {
             status = Some(error.to_string());
             Vec::new()
@@ -642,12 +653,15 @@ impl SoundFxApp {
             last_edit_at: 0.0,
             pending_processed_export_sound: None,
             pending_preview_after_preload: None,
+            normalize_inflight: HashSet::new(),
             processed_export_inflight: HashSet::new(),
             processed_export_tx,
             processed_export_rx,
             audio_preload_inflight: HashSet::new(),
             audio_preload_tx,
             audio_preload_rx,
+            normalize_tx,
+            normalize_rx,
             demucs_installing: false,
             demucs_install_error: None,
             demucs_install_tx,
@@ -3588,6 +3602,25 @@ impl SoundFxApp {
         });
     }
 
+    fn start_normalize_job(&mut self, sound_id: Uuid) {
+        if self.normalize_inflight.contains(&sound_id) {
+            return;
+        }
+
+        let Some(sound) = self.sounds.iter().find(|sound| sound.id == sound_id).cloned() else {
+            return;
+        };
+
+        let asset_path = sound.asset_path(self.storage.root_dir());
+        self.normalize_inflight.insert(sound_id);
+        let tx = self.normalize_tx.clone();
+
+        thread::spawn(move || {
+            let result = calculate_normalization_gain(&asset_path).map_err(|error| error.to_string());
+            let _ = tx.send(NormalizeMessage::Finished { sound_id, result });
+        });
+    }
+
     fn poll_processed_export_jobs(&mut self, ctx: &Context) {
         let mut finished_exports = Vec::new();
         while let Ok(message) = self.processed_export_rx.try_recv() {
@@ -3605,6 +3638,44 @@ impl SoundFxApp {
         }
 
         if !finished_exports.is_empty() {
+            ctx.request_repaint();
+        }
+    }
+
+    fn poll_normalize_jobs(&mut self, ctx: &Context) {
+        let mut changed = false;
+        while let Ok(message) = self.normalize_rx.try_recv() {
+            match message {
+                NormalizeMessage::Finished { sound_id, result } => {
+                    self.normalize_inflight.remove(&sound_id);
+                    match result {
+                        Ok(gain) => {
+                            if let Some(index) =
+                                self.sounds.iter().position(|sound| sound.id == sound_id)
+                            {
+                                self.sounds[index].volume = gain;
+                                self.mark_dirty(ctx);
+                                self.schedule_processed_export(sound_id);
+                                if self
+                                    .audio
+                                    .as_ref()
+                                    .is_some_and(|audio| audio.is_playing(sound_id))
+                                {
+                                    let cursor_secs = self.preview_cursor_secs_for(&self.sounds[index]);
+                                    self.preview_sound_from_position(sound_id, Some(cursor_secs));
+                                }
+                                changed = true;
+                            }
+                        }
+                        Err(error) => {
+                            self.set_error_status(error);
+                        }
+                    }
+                }
+            }
+        }
+
+        if changed {
             ctx.request_repaint();
         }
     }
@@ -9215,6 +9286,7 @@ impl SoundFxApp {
         let mut tags_changed = false;
         let mut trim_timeline_zoom = self.trim_timeline_zoom;
         let editor_timeline_interactive = !self.has_modal_panel();
+        let normalize_loading = self.normalize_inflight.contains(&sound_id);
         let tags_label = self.t("editor.tags");
         let tags_hint = self.t("editor.tags_hint");
         let tags_available_label = self.t("editor.tags_available");
@@ -9420,22 +9492,26 @@ impl SoundFxApp {
                                 );
                                 sound.volume = sound.volume.clamp(0.0, 5.0);
                                 ui.add_space(8.0);
-                                if ui
-                                    .add_sized(
-                                        [82.0, 24.0],
-                                        Button::new(
-                                            RichText::new("Normalize")
-                                                .size(11.0)
-                                                .color(Color32::from_rgb(214, 51, 132)),
-                                        )
-                                        .fill(Self::surface_fill())
-                                        .stroke(Stroke::new(1.0, Self::border_color()))
-                                        .corner_radius(12.0),
+                                let normalize_response = ui.add_enabled(
+                                    !normalize_loading,
+                                    Button::new(
+                                        RichText::new("Normalize")
+                                            .size(11.0)
+                                            .color(Color32::from_rgb(214, 51, 132)),
                                     )
+                                    .fill(Self::surface_fill())
+                                    .stroke(Stroke::new(1.0, Self::border_color()))
+                                    .corner_radius(12.0),
+                                );
+                                if normalize_response
                                     .on_hover_text("Automatically adjust volume to a standard listening level")
                                     .clicked()
                                 {
                                     normalize_request = true;
+                                }
+                                if normalize_loading {
+                                    ui.add_space(6.0);
+                                    ui.add(egui::Spinner::new().size(16.0));
                                 }
                                 ui.add_space(10.0);
                                 ui.label(Self::icon(0xe9e4, 16.0, Self::muted_text_color()));
@@ -9552,21 +9628,7 @@ impl SoundFxApp {
         }
 
         if normalize_request {
-            let path = self.sounds[index].asset_path(self.storage.root_dir());
-            let sound_id = self.sounds[index].id;
-            match calculate_normalization_gain(&path) {
-                Ok(gain) => {
-                    self.sounds[index].volume = gain;
-                    self.mark_dirty(ctx);
-                    processed_export_dirty = true;
-                    if is_playing {
-                        self.preview_sound_from_position(sound_id, Some(preview_cursor_secs));
-                    }
-                }
-                Err(error) => {
-                    self.set_error_status(error);
-                }
-            }
+            self.start_normalize_job(sound_id);
         }
 
         if processed_export_dirty {
@@ -13587,6 +13649,7 @@ impl eframe::App for SoundFxApp {
         self.poll_myinstants_waveform_jobs();
         self.poll_processed_export_jobs(ctx);
         self.poll_audio_preload_jobs(ctx);
+        self.poll_normalize_jobs(ctx);
         self.poll_demucs_install_result(ctx);
         self.poll_demucs_model_result(ctx);
         self.poll_stream_driver_result(ctx);
@@ -13624,6 +13687,9 @@ impl eframe::App for SoundFxApp {
             if self.myinstants_preview_audio_url.is_some() && !audio.has_active_playback() {
                 self.myinstants_preview_audio_url = None;
             }
+        }
+        if !self.normalize_inflight.is_empty() {
+            ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
         }
         if self.playback_needs_live_repaint() {
             ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
