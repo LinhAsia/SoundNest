@@ -232,7 +232,16 @@ pub fn preload_demucs_model_cancellable(
 
 /// Separate audio and extract only the vocal stem using demucs-rs CLI.
 /// Returns the path to the vocal-only WAV file.
+#[allow(dead_code)]
 pub fn extract_vocals(input_path: &Path, output_dir: &Path) -> Result<PathBuf, String> {
+    extract_vocals_cancellable(input_path, output_dir, Arc::new(AtomicBool::new(false)))
+}
+
+pub fn extract_vocals_cancellable(
+    input_path: &Path,
+    output_dir: &Path,
+    cancel: Arc<AtomicBool>,
+) -> Result<PathBuf, String> {
     if !is_demucs_available() {
         return Err(
             "demucs-rs CLI not installed. Please install it from the Keep Vocal toggle."
@@ -242,14 +251,33 @@ pub fn extract_vocals(input_path: &Path, output_dir: &Path) -> Result<PathBuf, S
 
     fs::create_dir_all(output_dir).map_err(|e| format!("Failed to create output dir: {e}"))?;
 
-    let output = demucs_command()
+    let mut child = demucs_command()
         .arg(input_path)
         .arg("-s")
         .arg("vocals")
         .arg("-o")
         .arg(output_dir)
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .map_err(|e| format!("Failed to run demucs: {e}"))?;
+
+    loop {
+        if cancel.load(Ordering::Relaxed) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("Cancelled".to_string());
+        }
+
+        match child.try_wait().map_err(|e| format!("Failed waiting for demucs: {e}"))? {
+            Some(_) => break,
+            None => thread::sleep(Duration::from_millis(200)),
+        }
+    }
+
+    let output = child
+        .wait_with_output()
+        .map_err(|e| format!("Failed waiting for demucs: {e}"))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);

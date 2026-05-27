@@ -40,6 +40,10 @@ pub struct SoundEffect {
     pub trim_start_secs: f32,
     pub trim_end_secs: f32,
     #[serde(default)]
+    pub vocal_only: bool,
+    #[serde(default)]
+    pub vocal_asset_file: Option<String>,
+    #[serde(default)]
     pub waveform: Vec<f32>,
 }
 
@@ -78,6 +82,22 @@ impl SoundEffect {
         storage_dir.join("sounds").join(&self.asset_file)
     }
 
+    pub fn vocal_asset_path(&self, storage_dir: &Path) -> Option<PathBuf> {
+        self.vocal_asset_file
+            .as_ref()
+            .map(|asset_file| storage_dir.join("sound-vocals").join(asset_file))
+    }
+
+    pub fn playback_asset_path(&self, storage_dir: &Path) -> PathBuf {
+        if self.vocal_only
+            && let Some(path) = self.vocal_asset_path(storage_dir)
+            && path.exists()
+        {
+            return path;
+        }
+        self.asset_path(storage_dir)
+    }
+
     pub fn safe_duration(&self) -> f32 {
         self.duration_secs.max(0.05)
     }
@@ -104,6 +124,19 @@ impl SoundEffect {
             || (self.speed - 1.0).abs() > EPSILON
             || self.trim_start_secs.abs() > EPSILON
             || (self.trim_end_secs - self.safe_duration()).abs() > 0.02
+    }
+}
+
+impl Storage {
+    pub fn vocal_asset_file_name(sound_id: Uuid) -> String {
+        format!("{sound_id}.wav")
+    }
+
+    pub fn vocal_asset_path_for(&self, sound: &SoundEffect) -> Option<PathBuf> {
+        sound
+            .vocal_asset_file
+            .as_ref()
+            .map(|asset_file| self.vocal_sounds_dir.join(asset_file))
     }
 }
 
@@ -146,6 +179,7 @@ struct PreferencesFile {
 pub struct Storage {
     root_dir: PathBuf,
     sounds_dir: PathBuf,
+    vocal_sounds_dir: PathBuf,
     videos_dir: PathBuf,
     settings_sounds_dir: PathBuf,
     bundled_sounds_dir: PathBuf,
@@ -160,11 +194,14 @@ impl Storage {
         let root_dir = preferred_storage_root()?;
         migrate_storage_root_if_needed(&root_dir)?;
         let sounds_dir = root_dir.join("sounds");
+        let vocal_sounds_dir = root_dir.join("sound-vocals");
         let videos_dir = root_dir.join("videos");
         let settings_sounds_dir = root_dir.join("settings-sounds");
         let bundled_sounds_dir = root_dir.join("bundled-sounds");
         let exports_dir = root_dir.join("exports");
         fs::create_dir_all(&sounds_dir).context("unable to create sounds directory")?;
+        fs::create_dir_all(&vocal_sounds_dir)
+            .context("unable to create vocal sounds directory")?;
         fs::create_dir_all(&videos_dir).context("unable to create videos directory")?;
         fs::create_dir_all(&settings_sounds_dir)
             .context("unable to create settings sounds directory")?;
@@ -178,6 +215,7 @@ impl Storage {
         Ok(Self {
             root_dir,
             sounds_dir,
+            vocal_sounds_dir,
             videos_dir,
             settings_sounds_dir,
             bundled_sounds_dir,
@@ -203,7 +241,12 @@ impl Storage {
 
         library
             .sounds
-            .retain(|sound| sound.asset_path(&self.root_dir).exists());
+            .retain(|sound| {
+                sound.asset_path(&self.root_dir).exists()
+                    || sound
+                        .vocal_asset_path(&self.root_dir)
+                        .is_some_and(|path| path.exists())
+            });
 
         for sound in &mut library.sounds {
             sound.clamp_trim();
@@ -240,11 +283,14 @@ impl Storage {
                 video.fps = normalized_fps;
                 changed = true;
             }
-            if video.waveform.is_empty()
-                && let Ok(analysis) = analyze_audio_file(&video.asset_path(&self.root_dir), 96)
-            {
-                video.waveform = analysis.waveform;
-                changed = true;
+            if video.waveform.is_empty() {
+                if let Ok(analysis) = analyze_audio_file(&video.asset_path(&self.root_dir), 96) {
+                    video.waveform = analysis.waveform;
+                    changed = true;
+                } else {
+                    video.waveform = vec![0.0];
+                    changed = true;
+                }
             }
         }
         if changed {
@@ -633,6 +679,8 @@ impl Storage {
             speed: 1.0,
             trim_start_secs: 0.0,
             trim_end_secs: analysis.duration_secs,
+            vocal_only: false,
+            vocal_asset_file: None,
             waveform: analysis.waveform,
         })
     }
@@ -643,7 +691,7 @@ impl Storage {
             return Ok(false);
         }
 
-        let analysis = analyze_audio_file(&sound.asset_path(&self.root_dir), WAVEFORM_BUCKETS)?;
+        let analysis = analyze_audio_file(&sound.playback_asset_path(&self.root_dir), WAVEFORM_BUCKETS)?;
         sound.duration_secs = analysis.duration_secs;
         if sound.waveform.is_empty() {
             sound.waveform = analysis.waveform;
@@ -660,6 +708,11 @@ impl Storage {
         if path.exists() {
             fs::remove_file(path).context("unable to delete audio asset")?;
         }
+        if let Some(vocal_path) = sound.vocal_asset_path(&self.root_dir)
+            && vocal_path.exists()
+        {
+            fs::remove_file(vocal_path).context("unable to delete vocal asset")?;
+        }
         Ok(())
     }
 
@@ -675,7 +728,7 @@ impl Storage {
         if sound.needs_processed_export() {
             Self::export_processed_sound_at(&self.root_dir, sound)
         } else {
-            self.export_processed_sound_from_path(&sound.asset_path(&self.root_dir), sound)
+            self.export_processed_sound_from_path(&sound.playback_asset_path(&self.root_dir), sound)
         }
     }
 
@@ -700,7 +753,7 @@ impl Storage {
     }
 
     pub fn export_processed_sound_at(root_dir: &Path, sound: &SoundEffect) -> Result<PathBuf> {
-        Self::export_processed_sound_from_path_at(root_dir, &sound.asset_path(root_dir), sound)
+        Self::export_processed_sound_from_path_at(root_dir, &sound.playback_asset_path(root_dir), sound)
     }
 
     pub fn drag_sound_source_path(&self, sound: &SoundEffect) -> Result<PathBuf> {
@@ -711,7 +764,7 @@ impl Storage {
                 self.export_processed_sound(sound)
             }
         } else {
-            Ok(sound.asset_path(&self.root_dir))
+            Ok(sound.playback_asset_path(&self.root_dir))
         }
     }
 
@@ -720,38 +773,70 @@ impl Storage {
         source_path: &Path,
         sound: &SoundEffect,
     ) -> Result<PathBuf> {
-        let extension = if sound.needs_processed_export() {
-            "wav".to_owned()
-        } else {
-            source_path
-                .extension()
-                .and_then(|value| value.to_str())
-                .filter(|value| !value.is_empty())
-                .unwrap_or("wav")
-                .to_owned()
-        };
+        Self::export_processed_sound_from_path_at(&self.root_dir, source_path, sound)
+    }
+
+    pub fn export_processed_sound_from_path_at(
+        root_dir: &Path,
+        source_path: &Path,
+        sound: &SoundEffect,
+    ) -> Result<PathBuf> {
+        if sound.needs_processed_export() {
+            let export_path = Self::processed_export_path(root_dir, sound);
+            if export_path.exists() {
+                return Ok(export_path);
+            }
+            let temp_path = export_path.with_extension("tmp.wav");
+            if temp_path.exists() {
+                let _ = fs::remove_file(&temp_path);
+            }
+            write_processed_wav(source_path, &temp_path, sound)?;
+            if export_path.exists() {
+                let _ = fs::remove_file(&temp_path);
+                return Ok(export_path);
+            }
+            fs::rename(&temp_path, &export_path).with_context(|| {
+                format!("unable to finalize {}", export_path.display())
+            })?;
+            return Ok(export_path);
+        }
+
+        let extension = source_path
+            .extension()
+            .and_then(|value| value.to_str())
+            .filter(|value| !value.is_empty())
+            .unwrap_or("wav")
+            .to_owned();
         let export_name = format!(
             "{}-{}.{}",
             sanitize_stem(&sound.name),
             &sound.id.to_string()[..8],
             extension
         );
-        let export_path = self.exports_dir.join(export_name);
-        if !sound.needs_processed_export() {
-            if export_path.exists() {
-                return Ok(export_path);
-            }
-            match fs::hard_link(source_path, &export_path) {
-                Ok(()) => return Ok(export_path),
-                Err(_) => {
-                    fs::copy(source_path, &export_path)
-                        .with_context(|| format!("unable to export {}", export_path.display()))?;
-                    return Ok(export_path);
-                }
+        let export_path = root_dir.join("exports").join(export_name);
+        if export_path.exists() {
+            return Ok(export_path);
+        }
+        match fs::hard_link(source_path, &export_path) {
+            Ok(()) => Ok(export_path),
+            Err(_) => {
+                fs::copy(source_path, &export_path)
+                    .with_context(|| format!("unable to export {}", export_path.display()))?;
+                Ok(export_path)
             }
         }
-        write_processed_wav(source_path, &export_path, sound)?;
-        Ok(export_path)
+    }
+
+    fn processed_export_suffix(sound: &SoundEffect) -> String {
+        let volume = (sound.volume.clamp(0.0, 5.0) * 1000.0).round() as u32;
+        let speed = (sound.speed.clamp(0.25, 2.0) * 1000.0).round() as u32;
+        let trim_start = (sound.trim_start_secs.max(0.0) * 1000.0).round() as u32;
+        let trim_end = (sound.trim_end_secs.max(0.0) * 1000.0).round() as u32;
+        let vocal = if sound.vocal_only { "-voc" } else { "" };
+        format!(
+            "-proc-v{:04}-s{:04}-a{:06}-b{:06}{}",
+            volume, speed, trim_start, trim_end, vocal
+        )
     }
 
     pub fn analyze_sound_as_effect(&self, path: &Path, name: &str) -> Result<SoundEffect> {
@@ -773,6 +858,8 @@ impl Storage {
             speed: 1.0,
             trim_start_secs: 0.0,
             trim_end_secs: analysis.duration_secs,
+            vocal_only: false,
+            vocal_asset_file: None,
             waveform: analysis.waveform,
         })
     }
@@ -828,7 +915,7 @@ impl Storage {
     }
 
     pub fn replace_sound_with_processed(&self, sound: &mut SoundEffect) -> Result<()> {
-        let source_path = sound.asset_path(&self.root_dir);
+        let source_path = sound.playback_asset_path(&self.root_dir);
         if !source_path.exists() {
             bail!("sound source file is missing");
         }
@@ -851,7 +938,10 @@ impl Storage {
 
         fs::rename(&temp_path, &target_path).context("unable to finalize trimmed sound")?;
 
-        if source_path != target_path && source_path.exists() {
+        let preserve_source = sound
+            .vocal_asset_path(&self.root_dir)
+            .is_some_and(|path| path == source_path);
+        if source_path != target_path && source_path.exists() && !preserve_source {
             fs::remove_file(&source_path).context("unable to remove previous sound source")?;
         }
 

@@ -82,6 +82,14 @@
       "editor.tags": "Tags",
       "editor.tags_hint": "e.g. funny, alert",
       "editor.tags_available": "Available tags",
+      "editor.vocal_only": "Vocal only",
+      "editor.vocal_separate": "Separate vocals",
+      "editor.vocal_stop": "Stop",
+      "editor.vocal_ready": "Vocal ready",
+      "editor.vocal_loading": "Separating vocals...",
+      "editor.vocal_hint": "Keeps the vocal stem on disk so you can switch back later.",
+      "editor.vocal_source_missing": "Sound source file is missing",
+      "editor.vocal_stopping": "Stopping vocal separation",
       "library.columns": "col"
     },
     "vi": {
@@ -165,7 +173,15 @@
       "editor.tags": "Tags",
       "editor.tags_hint": "VD: funny, alert",
       "editor.tags_available": "Tag có sẵn",
-      "library.columns": "cột"
+      "library.columns": "cột",
+      "editor.vocal_only": "Ch? vocal",
+      "editor.vocal_separate": "T?ch vocal",
+      "editor.vocal_stop": "D?ng",
+      "editor.vocal_ready": "?? c? vocal",
+      "editor.vocal_loading": "?ang t?ch vocal...",
+      "editor.vocal_hint": "Gi? file vocal ri?ng tr?n m?y ?? sau n?y b?t l?i kh?ng c?n t?ch l?i.",
+      "editor.vocal_source_missing": "Thi?u file ngu?n c?a sound",
+      "editor.vocal_stopping": "?ang d?ng t?ch vocal"
     }
   }
 }

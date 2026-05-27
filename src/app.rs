@@ -144,8 +144,20 @@ enum MyinstantsWaveformMessage {
 
 enum VocalSeparationMessage {
     Finished {
-        source_path: PathBuf,
+        target: VocalSeparationTarget,
         result: Result<PathBuf, String>,
+    },
+    Cancelled,
+}
+
+#[derive(Clone)]
+enum VocalSeparationTarget {
+    RecordingReview {
+        source_path: PathBuf,
+    },
+    LibrarySound {
+        sound_id: Uuid,
+        source_path: PathBuf,
     },
 }
 
@@ -359,6 +371,8 @@ pub struct SoundFxApp {
     tts_tx: Sender<GeminiTtsMessage>,
     tts_rx: Receiver<GeminiTtsMessage>,
     vocal_separation_running: bool,
+    vocal_separation_cancel: Option<Arc<AtomicBool>>,
+    vocal_separation_target: Option<VocalSeparationTarget>,
     vocal_separation_tx: Sender<VocalSeparationMessage>,
     vocal_separation_rx: Receiver<VocalSeparationMessage>,
     reveal_record_review_on_open: bool,
@@ -645,6 +659,8 @@ impl SoundFxApp {
             tts_tx,
             tts_rx,
             vocal_separation_running: false,
+            vocal_separation_cancel: None,
+            vocal_separation_target: None,
             vocal_separation_tx,
             vocal_separation_rx,
             reveal_record_review_on_open: false,
@@ -2161,7 +2177,7 @@ impl SoundFxApp {
         {
             Storage::processed_export_path(self.storage.root_dir(), sound)
         } else {
-            sound.asset_path(self.storage.root_dir())
+            sound.playback_asset_path(self.storage.root_dir())
         }
     }
 
@@ -2346,6 +2362,46 @@ impl SoundFxApp {
         response
     }
 
+    fn start_vocal_separation_job(
+        &mut self,
+        target: VocalSeparationTarget,
+        source_path: PathBuf,
+        output_dir: PathBuf,
+    ) {
+        if self.vocal_separation_running {
+            return;
+        }
+
+        let tx = self.vocal_separation_tx.clone();
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.vocal_separation_running = true;
+        self.vocal_separation_cancel = Some(Arc::clone(&cancel));
+        self.vocal_separation_target = Some(target.clone());
+        self.clear_status();
+        thread::spawn(move || {
+            let result = crate::vocal_separation::extract_vocals_cancellable(
+                &source_path,
+                &output_dir,
+                Arc::clone(&cancel),
+            );
+            if cancel.load(Ordering::Relaxed) {
+                let _ = tx.send(VocalSeparationMessage::Cancelled);
+                return;
+            }
+            let _ = tx.send(VocalSeparationMessage::Finished { target, result });
+        });
+    }
+
+    fn stop_vocal_separation(&mut self) {
+        if let Some(cancel) = self.vocal_separation_cancel.as_ref() {
+            cancel.store(true, Ordering::Relaxed);
+            self.status = Some(self.t("editor.vocal_stopping"));
+        }
+        self.vocal_separation_running = false;
+        self.vocal_separation_cancel = None;
+        self.vocal_separation_target = None;
+    }
+
     fn start_vocal_separation_if_needed(&mut self) {
         let Some(draft) = self.recording_draft.as_ref() else {
             return;
@@ -2363,45 +2419,150 @@ impl SoundFxApp {
             .root_dir()
             .join("temp_vocals")
             .join(draft.sound.id.to_string());
-        let tx = self.vocal_separation_tx.clone();
-        self.vocal_separation_running = true;
-        self.clear_status();
-        thread::spawn(move || {
-            let result = crate::vocal_separation::extract_vocals(&source_path, &output_dir);
-            let _ = tx.send(VocalSeparationMessage::Finished {
-                source_path,
-                result,
-            });
-        });
+        self.start_vocal_separation_job(
+            VocalSeparationTarget::RecordingReview {
+                source_path: source_path.clone(),
+            },
+            source_path,
+            output_dir,
+        );
+    }
+
+    fn start_library_vocal_separation(&mut self, sound_id: Uuid) {
+        if self.vocal_separation_running {
+            return;
+        }
+
+        let Some(index) = self.sounds.iter().position(|sound| sound.id == sound_id) else {
+            return;
+        };
+
+        let source_path = self.sounds[index].asset_path(self.storage.root_dir());
+        if !source_path.exists() {
+            self.set_error_status(self.t("editor.vocal_source_missing"));
+            return;
+        }
+
+        let output_dir = self
+            .storage
+            .root_dir()
+            .join("temp_vocals")
+            .join(sound_id.to_string());
+        self.start_vocal_separation_job(
+            VocalSeparationTarget::LibrarySound {
+                sound_id,
+                source_path: source_path.clone(),
+            },
+            source_path,
+            output_dir,
+        );
     }
 
     fn poll_vocal_separation_jobs(&mut self, ctx: &Context) {
         while let Ok(message) = self.vocal_separation_rx.try_recv() {
             self.vocal_separation_running = false;
+            self.vocal_separation_cancel = None;
+            self.vocal_separation_target = None;
             match message {
-                VocalSeparationMessage::Finished {
-                    source_path,
-                    result: Ok(path),
-                } => {
-                    if let Some(draft) = self.recording_draft.as_mut()
-                        && draft.source_path == source_path
-                    {
-                        draft.vocal_separated_path = Some(path);
-                    }
+                VocalSeparationMessage::Cancelled => {
                     self.clear_status();
                 }
-                VocalSeparationMessage::Finished {
-                    source_path,
-                    result: Err(error),
-                } => {
-                    if let Some(draft) = self.recording_draft.as_mut()
-                        && draft.source_path == source_path
-                    {
-                        draft.keep_vocal = false;
-                        draft.vocal_separated_path = None;
-                    }
-                    self.set_error_status(error);
-                }
+                VocalSeparationMessage::Finished { target, result } => match target {
+                    VocalSeparationTarget::RecordingReview { source_path } => match result {
+                        Ok(path) => {
+                            if let Some(draft) = self.recording_draft.as_mut()
+                                && draft.source_path == source_path
+                            {
+                                draft.vocal_separated_path = Some(path);
+                            }
+                            self.clear_status();
+                        }
+                        Err(error) => {
+                            if let Some(draft) = self.recording_draft.as_mut()
+                                && draft.source_path == source_path
+                            {
+                                draft.keep_vocal = false;
+                                draft.vocal_separated_path = None;
+                            }
+                            self.set_error_status(error);
+                        }
+                    },
+                    VocalSeparationTarget::LibrarySound {
+                        sound_id,
+                        source_path: _source_path,
+                    } => match result {
+                        Ok(temp_path) => {
+                            let mut preload_path = None;
+                            let mut refresh_cursor_secs = None;
+                            let mut copy_error: Option<String> = None;
+                            if let Some(index) =
+                                self.sounds.iter().position(|sound| sound.id == sound_id)
+                            {
+                                let root_dir = self.storage.root_dir().to_path_buf();
+                                let is_playing = self
+                                    .audio
+                                    .as_ref()
+                                    .is_some_and(|audio| audio.is_playing(sound_id));
+                                if is_playing {
+                                    refresh_cursor_secs =
+                                        Some(self.preview_cursor_secs_for(&self.sounds[index]));
+                                }
+                                let sound = &mut self.sounds[index];
+                                let vocal_file = Storage::vocal_asset_file_name(sound_id);
+                                let stable_path = root_dir.join("sound-vocals").join(&vocal_file);
+                                if let Some(parent) = stable_path.parent() {
+                                    let _ = fs::create_dir_all(parent);
+                                }
+                                if temp_path != stable_path {
+                                    if stable_path.exists() {
+                                        let _ = fs::remove_file(&stable_path);
+                                    }
+                                    if let Err(error) = fs::copy(&temp_path, &stable_path) {
+                                        copy_error = Some(error.to_string());
+                                    } else {
+                                        let _ = fs::remove_file(&temp_path);
+                                    }
+                                }
+                                if copy_error.is_none() {
+                                    let requested_vocal_only = sound.vocal_only;
+                                    sound.vocal_asset_file = Some(vocal_file);
+                                    preload_path = self.storage.vocal_asset_path_for(&*sound);
+                                    if !requested_vocal_only {
+                                        refresh_cursor_secs = None;
+                                    }
+                                }
+                            } else {
+                                let _ = fs::remove_file(&temp_path);
+                            }
+                            if let Some(error) = copy_error {
+                                self.set_error_status(error);
+                                let _ = fs::remove_file(&temp_path);
+                                return;
+                            }
+                            let saved_ok = if preload_path.is_some() {
+                                self.mark_dirty(ctx);
+                                self.save_now()
+                            } else {
+                                true
+                            };
+                            if let Some(path) = preload_path {
+                                self.schedule_audio_preload(path);
+                            }
+                            if let Some(cursor_secs) = refresh_cursor_secs {
+                                self.preview_sound_from_position(sound_id, Some(cursor_secs));
+                            }
+                            if self.selected == Some(sound_id) {
+                                ctx.request_repaint();
+                            }
+                            if saved_ok {
+                                self.clear_status();
+                            }
+                        }
+                        Err(error) => {
+                            self.set_error_status(error);
+                        }
+                    },
+                },
             }
             ctx.request_repaint();
         }
@@ -9247,7 +9408,26 @@ impl SoundFxApp {
             return;
         };
 
-        let sound_id = self.sounds[index].id;
+        let (sound_id, vocal_job_running, vocal_ready) = {
+            let sound = &self.sounds[index];
+            let vocal_asset_path = sound.vocal_asset_path(self.storage.root_dir());
+            let vocal_ready = vocal_asset_path
+                .as_ref()
+                .is_some_and(|path| path.exists());
+            let vocal_job_running = self.vocal_separation_running
+                && matches!(
+                    self.vocal_separation_target.as_ref(),
+                    Some(VocalSeparationTarget::LibrarySound {
+                        sound_id: target_sound_id,
+                        ..
+                    }) if *target_sound_id == sound.id
+                );
+            (
+                sound.id,
+                vocal_job_running,
+                vocal_ready,
+            )
+        };
         let preview_asset_path = self.preview_asset_path_for_sound(&self.sounds[index]);
         self.schedule_audio_preload(preview_asset_path);
         self.sync_editor_tags_input();
@@ -9281,12 +9461,21 @@ impl SoundFxApp {
         let mut seek_request = false;
         let mut playback_reapply_request = false;
         let mut normalize_request = false;
+        let mut start_vocal_job = false;
+        let mut stop_vocal_job = false;
         let mut changed = false;
         let mut processed_export_dirty = false;
         let mut tags_changed = false;
+        let mut vocal_reapply_request = false;
         let mut trim_timeline_zoom = self.trim_timeline_zoom;
         let editor_timeline_interactive = !self.has_modal_panel();
         let normalize_loading = self.normalize_inflight.contains(&sound_id);
+        let vocal_only_label = self.t("editor.vocal_only");
+        let vocal_separate_label = self.t("editor.vocal_separate");
+        let vocal_stop_label = self.t("editor.vocal_stop");
+        let vocal_ready_label = self.t("editor.vocal_ready");
+        let vocal_loading_label = self.t("editor.vocal_loading");
+        let vocal_hint_label = self.t("editor.vocal_hint");
         let tags_label = self.t("editor.tags");
         let tags_hint = self.t("editor.tags_hint");
         let tags_available_label = self.t("editor.tags_available");
@@ -9558,6 +9747,94 @@ impl SoundFxApp {
 
                 ui.add_space(16.0);
 
+                Frame::new()
+                    .fill(Self::panel_fill())
+                    .stroke(Stroke::new(1.0, Self::subtle_border_color()))
+                    .corner_radius(22.0)
+                    .inner_margin(Margin::same(16))
+                    .show(ui, |ui| {
+                        ui.vertical(|ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new(&vocal_only_label)
+                                        .size(12.5)
+                                        .color(Self::strong_text_color())
+                                        .strong(),
+                                );
+                                let vocal_toggle = ui.add(Checkbox::new(&mut sound.vocal_only, ""));
+                                if vocal_toggle.changed() {
+                                    changed = true;
+                                    vocal_reapply_request = true;
+                                    if sound.vocal_only {
+                                        if vocal_ready {
+                                            vocal_reapply_request = true;
+                                        } else if !vocal_job_running {
+                                            start_vocal_job = true;
+                                        }
+                                    } else if vocal_job_running {
+                                        stop_vocal_job = true;
+                                    }
+                                }
+
+                                ui.add_space(8.0);
+
+                                if vocal_job_running {
+                                    ui.spinner();
+                                    ui.label(
+                                        RichText::new(&vocal_loading_label)
+                                            .size(11.5)
+                                            .color(Self::muted_text_color()),
+                                    );
+                                    let stop = ui.add(
+                                        Button::new(
+                                            RichText::new(&vocal_stop_label)
+                                                .size(11.0)
+                                                .color(Color32::from_rgb(214, 51, 132)),
+                                        )
+                                        .fill(Self::surface_fill())
+                                        .stroke(Stroke::new(1.0, Self::border_color()))
+                                        .corner_radius(12.0),
+                                    );
+                                    if stop.clicked() {
+                                        stop_vocal_job = true;
+                                    }
+                                } else if vocal_ready {
+                                    ui.label(
+                                        RichText::new(&vocal_ready_label)
+                                            .size(11.5)
+                                            .color(Color32::from_rgb(100, 200, 100)),
+                                    );
+                                } else {
+                                    let separate = ui.add(
+                                        Button::new(
+                                            RichText::new(&vocal_separate_label)
+                                                .size(11.0)
+                                                .color(Color32::from_rgb(214, 51, 132)),
+                                        )
+                                        .fill(Self::surface_fill())
+                                        .stroke(Stroke::new(1.0, Self::border_color()))
+                                        .corner_radius(12.0),
+                                    );
+                                    if separate.clicked() {
+                                        if !vocal_job_running {
+                                            sound.vocal_only = true;
+                                            changed = true;
+                                            start_vocal_job = true;
+                                        }
+                                    }
+                                }
+                            });
+                            ui.add_space(8.0);
+                            ui.label(
+                                RichText::new(&vocal_hint_label)
+                                    .size(11.5)
+                                    .color(Self::muted_text_color()),
+                            );
+                        });
+                    });
+
+                ui.add_space(16.0);
+
                 let drop_response = Frame::new()
                     .fill(Self::panel_fill())
                     .stroke(Stroke::NONE)
@@ -9610,7 +9887,18 @@ impl SoundFxApp {
         }
         self.set_preview_cursor_secs(sound_id, preview_cursor_secs, sound_duration);
 
-        if (seek_request || playback_reapply_request) && is_playing {
+        if start_vocal_job {
+            self.start_library_vocal_separation(sound_id);
+        }
+        if stop_vocal_job {
+            self.stop_vocal_separation();
+        }
+        if vocal_reapply_request {
+            let vocal_preview_path = self.preview_asset_path_for_sound(&self.sounds[index]);
+            self.schedule_audio_preload(vocal_preview_path);
+        }
+
+        if (seek_request || playback_reapply_request || vocal_reapply_request) && is_playing {
             self.preview_sound_from_position(sound_id, Some(preview_cursor_secs));
         }
 
