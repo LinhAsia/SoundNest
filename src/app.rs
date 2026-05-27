@@ -5380,6 +5380,7 @@ impl SoundFxApp {
                                 &mut trim_timeline_zoom,
                                 !is_playing,
                                 true,
+                                false,
                             );
                         changed |= timeline_changed;
                         seek_request |= timeline_seek_request;
@@ -9270,10 +9271,6 @@ impl SoundFxApp {
                     }
 
                     ui.add_space(row_gap);
-                    if editor_audio_loading {
-                        ui.add(egui::Spinner::new().size(18.0));
-                        ui.add_space(6.0);
-                    }
                     ui.allocate_ui_with_layout(
                         vec2(controls_width, 34.0),
                         egui::Layout::right_to_left(Align::Center),
@@ -9384,6 +9381,7 @@ impl SoundFxApp {
                                 &mut trim_timeline_zoom,
                                 !is_playing,
                                 editor_timeline_interactive,
+                                editor_audio_loading,
                             );
                         changed |= timeline_changed;
                         seek_request |= timeline_seek_request;
@@ -9650,6 +9648,7 @@ impl SoundFxApp {
         zoom: &mut f32,
         clamp_cursor_to_trim: bool,
         interactive: bool,
+        show_loading_indicator: bool,
     ) -> (bool, bool, bool) {
         sound.clamp_trim();
         let duration = sound.safe_duration();
@@ -10128,6 +10127,10 @@ impl SoundFxApp {
 
         ui.add_space(10.0);
         ui.horizontal(|ui| {
+            if show_loading_indicator {
+                ui.add(egui::Spinner::new().size(16.0));
+                ui.add_space(8.0);
+            }
             ui.label(
                 RichText::new(format_time(sound.trim_start_secs))
                     .size(13.0)
