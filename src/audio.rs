@@ -358,6 +358,31 @@ impl AudioEngine {
         self.sink.is_some()
     }
 
+    pub fn has_cached_audio(&self, asset_path: &Path) -> bool {
+        self.cached_audio.contains_key(asset_path)
+    }
+
+    pub fn insert_cached_audio(
+        &mut self,
+        asset_path: PathBuf,
+        channels: u16,
+        sample_rate: u32,
+        samples: Vec<f32>,
+    ) {
+        self.cached_audio.insert(
+            asset_path,
+            CachedAudio {
+                channels,
+                sample_rate,
+                samples: Arc::<[f32]>::from(samples),
+            },
+        );
+    }
+
+    pub fn decode_audio_for_cache(asset_path: &Path) -> Result<(u16, u32, Vec<f32>)> {
+        decode_audio_file(asset_path)
+    }
+
     fn ensure_cached_audio(&mut self, asset_path: &Path) -> Result<()> {
         if !self.cached_audio.contains_key(asset_path) {
             let (channels, sample_rate, samples) = decode_audio_file(asset_path)?;

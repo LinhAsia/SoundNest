@@ -116,6 +116,13 @@ enum ProcessedExportMessage {
     },
 }
 
+enum AudioPreloadMessage {
+    Finished {
+        asset_path: PathBuf,
+        result: Result<(u16, u32, Vec<f32>), String>,
+    },
+}
+
 enum MyinstantsWaveformMessage {
     Ready {
         audio_url: String,
@@ -355,6 +362,9 @@ pub struct SoundFxApp {
     processed_export_inflight: HashSet<PathBuf>,
     processed_export_tx: Sender<ProcessedExportMessage>,
     processed_export_rx: Receiver<ProcessedExportMessage>,
+    audio_preload_inflight: HashSet<PathBuf>,
+    audio_preload_tx: Sender<AudioPreloadMessage>,
+    audio_preload_rx: Receiver<AudioPreloadMessage>,
     demucs_installing: bool,
     demucs_install_error: Option<String>,
     demucs_install_tx: Sender<Result<(), String>>,
@@ -428,6 +438,7 @@ impl SoundFxApp {
         let (stream_driver_tx, stream_driver_rx) = mpsc::channel();
         let (vocal_separation_tx, vocal_separation_rx) = mpsc::channel();
         let (processed_export_tx, processed_export_rx) = mpsc::channel();
+        let (audio_preload_tx, audio_preload_rx) = mpsc::channel();
         let video_assets = storage.load_video_library().unwrap_or_else(|error| {
             status = Some(error.to_string());
             Vec::new()
@@ -632,6 +643,9 @@ impl SoundFxApp {
             processed_export_inflight: HashSet::new(),
             processed_export_tx,
             processed_export_rx,
+            audio_preload_inflight: HashSet::new(),
+            audio_preload_tx,
+            audio_preload_rx,
             demucs_installing: false,
             demucs_install_error: None,
             demucs_install_tx,
@@ -3499,6 +3513,9 @@ impl SoundFxApp {
         match self.storage.save_library(&self.sounds) {
             Ok(()) => {
                 self.pending_save = false;
+                if let Some(sound_id) = self.pending_processed_export_sound.take() {
+                    self.spawn_processed_export_job(sound_id);
+                }
                 self.clear_status();
                 true
             }
@@ -3511,22 +3528,6 @@ impl SoundFxApp {
 
     fn schedule_processed_export(&mut self, sound_id: Uuid) {
         self.pending_processed_export_sound = Some(sound_id);
-    }
-
-    fn maybe_start_pending_processed_export(&mut self) {
-        let Some(sound_id) = self.pending_processed_export_sound else {
-            return;
-        };
-        if self.selected == Some(sound_id) {
-            return;
-        }
-
-        if self.pending_save && !self.save_now() {
-            return;
-        }
-
-        self.pending_processed_export_sound = None;
-        self.spawn_processed_export_job(sound_id);
     }
 
     fn spawn_processed_export_job(&mut self, sound_id: Uuid) {
@@ -3571,6 +3572,49 @@ impl SoundFxApp {
         }
 
         if !finished_exports.is_empty() {
+            ctx.request_repaint();
+        }
+    }
+
+    fn schedule_audio_preload(&mut self, asset_path: PathBuf) {
+        if self
+            .audio
+            .as_ref()
+            .is_some_and(|audio| audio.has_cached_audio(&asset_path))
+            || self.audio_preload_inflight.contains(&asset_path)
+        {
+            return;
+        }
+
+        self.audio_preload_inflight.insert(asset_path.clone());
+        let tx = self.audio_preload_tx.clone();
+        thread::spawn(move || {
+            let result = crate::audio::AudioEngine::decode_audio_for_cache(&asset_path)
+                .map_err(|error| error.to_string());
+            let _ = tx.send(AudioPreloadMessage::Finished {
+                asset_path,
+                result,
+            });
+        });
+    }
+
+    fn poll_audio_preload_jobs(&mut self, ctx: &Context) {
+        let mut changed = false;
+        while let Ok(message) = self.audio_preload_rx.try_recv() {
+            match message {
+                AudioPreloadMessage::Finished { asset_path, result } => {
+                    self.audio_preload_inflight.remove(&asset_path);
+                    if let Ok((channels, sample_rate, samples)) = result
+                        && let Some(audio) = self.audio.as_mut()
+                    {
+                        audio.insert_cached_audio(asset_path, channels, sample_rate, samples);
+                        changed = true;
+                    }
+                }
+            }
+        }
+
+        if changed {
             ctx.request_repaint();
         }
     }
@@ -9066,6 +9110,7 @@ impl SoundFxApp {
         };
 
         let sound_id = self.sounds[index].id;
+        self.schedule_audio_preload(self.sounds[index].asset_path(self.storage.root_dir()));
         self.sync_editor_tags_input();
         let is_playing = self
             .audio
@@ -13455,6 +13500,7 @@ impl eframe::App for SoundFxApp {
         self.poll_transition_analysis_jobs(ctx);
         self.poll_myinstants_waveform_jobs();
         self.poll_processed_export_jobs(ctx);
+        self.poll_audio_preload_jobs(ctx);
         self.poll_demucs_install_result(ctx);
         self.poll_demucs_model_result(ctx);
         self.poll_stream_driver_result(ctx);
@@ -13690,7 +13736,6 @@ impl eframe::App for SoundFxApp {
         self.render_trim_commit_panel(ctx);
         self.render_pitch_overlay_viewport(ctx);
         self.render_custom_window_resize_handles(ctx);
-        self.maybe_start_pending_processed_export();
 
         let external_file_hover = self.app_view == AppView::Editor
             && !self.has_modal_panel()
