@@ -34,7 +34,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use uuid::Uuid;
 const AUDIO_FILTERS: &[&str] = &["wav", "mp3", "ogg", "flac", "m4a", "aac"];
 const APP_FRAME_RADIUS: f32 = 30.0;
@@ -373,6 +373,7 @@ pub struct SoundFxApp {
     vocal_separation_running: bool,
     vocal_separation_cancel: Option<Arc<AtomicBool>>,
     vocal_separation_target: Option<VocalSeparationTarget>,
+    vocal_separation_started_at: Option<Instant>,
     vocal_separation_tx: Sender<VocalSeparationMessage>,
     vocal_separation_rx: Receiver<VocalSeparationMessage>,
     reveal_record_review_on_open: bool,
@@ -661,6 +662,7 @@ impl SoundFxApp {
             vocal_separation_running: false,
             vocal_separation_cancel: None,
             vocal_separation_target: None,
+            vocal_separation_started_at: None,
             vocal_separation_tx,
             vocal_separation_rx,
             reveal_record_review_on_open: false,
@@ -2377,6 +2379,7 @@ impl SoundFxApp {
         self.vocal_separation_running = true;
         self.vocal_separation_cancel = Some(Arc::clone(&cancel));
         self.vocal_separation_target = Some(target.clone());
+        self.vocal_separation_started_at = Some(Instant::now());
         self.clear_status();
         thread::spawn(move || {
             let result = crate::vocal_separation::extract_vocals_cancellable(
@@ -2400,6 +2403,7 @@ impl SoundFxApp {
         self.vocal_separation_running = false;
         self.vocal_separation_cancel = None;
         self.vocal_separation_target = None;
+        self.vocal_separation_started_at = None;
     }
 
     fn start_vocal_separation_if_needed(&mut self) {
@@ -2463,6 +2467,7 @@ impl SoundFxApp {
             self.vocal_separation_running = false;
             self.vocal_separation_cancel = None;
             self.vocal_separation_target = None;
+            self.vocal_separation_started_at = None;
             match message {
                 VocalSeparationMessage::Cancelled => {
                     self.clear_status();
@@ -4477,6 +4482,11 @@ impl SoundFxApp {
         self.localization.text(key)
     }
 
+    fn vocal_separation_elapsed_secs(&self) -> Option<f32> {
+        self.vocal_separation_started_at
+            .map(|started_at| started_at.elapsed().as_secs_f32())
+    }
+
     fn gemini_api_key_field(
         ui: &mut Ui,
         label: &str,
@@ -5543,6 +5553,23 @@ impl SoundFxApp {
         let mut discard_request = false;
         let mut start_vocal_job = false;
         let mut trim_timeline_zoom = self.trim_timeline_zoom;
+        let record_vocal_job_running = self.vocal_separation_running
+            && matches!(
+                self.vocal_separation_target.as_ref(),
+                Some(VocalSeparationTarget::RecordingReview { source_path })
+                    if self
+                        .recording_draft
+                        .as_ref()
+                        .is_some_and(|draft| draft.source_path == *source_path)
+            );
+        let vocal_elapsed_label = self.t("editor.vocal_elapsed");
+        let vocal_elapsed_text = if record_vocal_job_running {
+            self.vocal_separation_elapsed_secs().map(|elapsed_secs| {
+                format!("{} {}", vocal_elapsed_label, format_time(elapsed_secs))
+            })
+        } else {
+            None
+        };
         let export_progress = self
             .active_record_video_export
             .as_ref()
@@ -5724,7 +5751,7 @@ impl SoundFxApp {
                                             draft.vocal_separated_path = None;
                                         }
                                     }
-                                    if self.vocal_separation_running && draft.keep_vocal {
+                                    if record_vocal_job_running && draft.keep_vocal {
                                         ui.spinner();
                                         ui.label(
                                             RichText::new(if self.demucs_model_ready {
@@ -5735,6 +5762,13 @@ impl SoundFxApp {
                                             .size(11.5)
                                             .color(Self::muted_text_color()),
                                         );
+                                        if let Some(vocal_elapsed_text) = &vocal_elapsed_text {
+                                            ui.label(
+                                                RichText::new(vocal_elapsed_text)
+                                                    .size(11.0)
+                                                    .color(Self::muted_text_color()),
+                                            );
+                                        }
                                     } else if self.demucs_model_loading {
                                         ui.spinner();
                                         ui.label(
@@ -9475,7 +9509,15 @@ impl SoundFxApp {
         let vocal_stop_label = self.t("editor.vocal_stop");
         let vocal_ready_label = self.t("editor.vocal_ready");
         let vocal_loading_label = self.t("editor.vocal_loading");
+        let vocal_elapsed_label = self.t("editor.vocal_elapsed");
         let vocal_hint_label = self.t("editor.vocal_hint");
+        let vocal_elapsed_text = if vocal_job_running {
+            self.vocal_separation_elapsed_secs().map(|elapsed_secs| {
+                format!("{} {}", vocal_elapsed_label, format_time(elapsed_secs))
+            })
+        } else {
+            None
+        };
         let tags_label = self.t("editor.tags");
         let tags_hint = self.t("editor.tags_hint");
         let tags_available_label = self.t("editor.tags_available");
@@ -9786,6 +9828,13 @@ impl SoundFxApp {
                                             .size(11.0)
                                             .color(Self::muted_text_color()),
                                     );
+                                    if let Some(vocal_elapsed_text) = &vocal_elapsed_text {
+                                        ui.label(
+                                            RichText::new(vocal_elapsed_text)
+                                                .size(11.0)
+                                                .color(Self::muted_text_color()),
+                                        );
+                                    }
                                     let stop = ui.add(
                                         Button::new(
                                             RichText::new(&vocal_stop_label)
