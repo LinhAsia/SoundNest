@@ -374,6 +374,7 @@ pub struct SoundFxApp {
     vocal_separation_cancel: Option<Arc<AtomicBool>>,
     vocal_separation_target: Option<VocalSeparationTarget>,
     vocal_separation_started_at: Option<Instant>,
+    vocal_separation_last_result: Option<(VocalSeparationTarget, f32)>,
     vocal_separation_tx: Sender<VocalSeparationMessage>,
     vocal_separation_rx: Receiver<VocalSeparationMessage>,
     reveal_record_review_on_open: bool,
@@ -663,6 +664,7 @@ impl SoundFxApp {
             vocal_separation_cancel: None,
             vocal_separation_target: None,
             vocal_separation_started_at: None,
+            vocal_separation_last_result: None,
             vocal_separation_tx,
             vocal_separation_rx,
             reveal_record_review_on_open: false,
@@ -2380,6 +2382,7 @@ impl SoundFxApp {
         self.vocal_separation_cancel = Some(Arc::clone(&cancel));
         self.vocal_separation_target = Some(target.clone());
         self.vocal_separation_started_at = Some(Instant::now());
+        self.vocal_separation_last_result = None;
         self.clear_status();
         thread::spawn(move || {
             let result = crate::vocal_separation::extract_vocals_cancellable(
@@ -2404,6 +2407,7 @@ impl SoundFxApp {
         self.vocal_separation_cancel = None;
         self.vocal_separation_target = None;
         self.vocal_separation_started_at = None;
+        self.vocal_separation_last_result = None;
     }
 
     fn start_vocal_separation_if_needed(&mut self) {
@@ -2464,12 +2468,14 @@ impl SoundFxApp {
 
     fn poll_vocal_separation_jobs(&mut self, ctx: &Context) {
         while let Ok(message) = self.vocal_separation_rx.try_recv() {
+            let elapsed_secs = self.vocal_separation_elapsed_secs();
             self.vocal_separation_running = false;
             self.vocal_separation_cancel = None;
             self.vocal_separation_target = None;
             self.vocal_separation_started_at = None;
             match message {
                 VocalSeparationMessage::Cancelled => {
+                    self.vocal_separation_last_result = None;
                     self.clear_status();
                 }
                 VocalSeparationMessage::Finished { target, result } => match target {
@@ -2480,6 +2486,14 @@ impl SoundFxApp {
                             {
                                 draft.vocal_separated_path = Some(path);
                             }
+                            if let Some(elapsed_secs) = elapsed_secs {
+                                self.vocal_separation_last_result = Some((
+                                    VocalSeparationTarget::RecordingReview {
+                                        source_path: source_path.clone(),
+                                    },
+                                    elapsed_secs,
+                                ));
+                            }
                             self.clear_status();
                         }
                         Err(error) => {
@@ -2489,12 +2503,13 @@ impl SoundFxApp {
                                 draft.keep_vocal = false;
                                 draft.vocal_separated_path = None;
                             }
+                            self.vocal_separation_last_result = None;
                             self.set_error_status(error);
                         }
                     },
                     VocalSeparationTarget::LibrarySound {
                         sound_id,
-                        source_path: _source_path,
+                        source_path,
                     } => match result {
                         Ok(temp_path) => {
                             let mut preload_path = None;
@@ -2560,10 +2575,20 @@ impl SoundFxApp {
                                 ctx.request_repaint();
                             }
                             if saved_ok {
+                                if let Some(elapsed_secs) = elapsed_secs {
+                                    self.vocal_separation_last_result = Some((
+                                        VocalSeparationTarget::LibrarySound {
+                                            sound_id,
+                                            source_path: source_path.clone(),
+                                        },
+                                        elapsed_secs,
+                                    ));
+                                }
                                 self.clear_status();
                             }
                         }
                         Err(error) => {
+                            self.vocal_separation_last_result = None;
                             self.set_error_status(error);
                         }
                     },
@@ -4487,6 +4512,29 @@ impl SoundFxApp {
             .map(|started_at| started_at.elapsed().as_secs_f32())
     }
 
+    fn vocal_separation_last_elapsed_for_sound(&self, sound_id: Uuid) -> Option<f32> {
+        self.vocal_separation_last_result
+            .as_ref()
+            .and_then(|(target, elapsed_secs)| match target {
+                VocalSeparationTarget::LibrarySound {
+                    sound_id: target_sound_id,
+                    ..
+                } if *target_sound_id == sound_id => Some(*elapsed_secs),
+                _ => None,
+            })
+    }
+
+    fn vocal_separation_last_elapsed_for_recording(&self, source_path: &Path) -> Option<f32> {
+        self.vocal_separation_last_result
+            .as_ref()
+            .and_then(|(target, elapsed_secs)| match target {
+                VocalSeparationTarget::RecordingReview {
+                    source_path: target_source_path,
+                } if target_source_path == source_path => Some(*elapsed_secs),
+                _ => None,
+            })
+    }
+
     fn gemini_api_key_field(
         ui: &mut Ui,
         label: &str,
@@ -5570,6 +5618,11 @@ impl SoundFxApp {
         } else {
             None
         };
+        let vocal_last_elapsed_text = self
+            .recording_draft
+            .as_ref()
+            .and_then(|draft| self.vocal_separation_last_elapsed_for_recording(&draft.source_path))
+            .map(|elapsed_secs| format!("{} {}", vocal_elapsed_label, format_time(elapsed_secs)));
         let export_progress = self
             .active_record_video_export
             .as_ref()
@@ -5783,6 +5836,16 @@ impl SoundFxApp {
                                                 .size(11.5)
                                                 .color(Color32::from_rgb(100, 200, 100)),
                                         );
+                                        if draft.keep_vocal
+                                            && let Some(vocal_last_elapsed_text) =
+                                                &vocal_last_elapsed_text
+                                        {
+                                            ui.label(
+                                                RichText::new(vocal_last_elapsed_text)
+                                                    .size(11.0)
+                                                    .color(Self::muted_text_color()),
+                                            );
+                                        }
                                     } else if draft.keep_vocal {
                                         ui.label(
                                             RichText::new("(first run can be slower)")
@@ -9518,6 +9581,9 @@ impl SoundFxApp {
         } else {
             None
         };
+        let vocal_last_elapsed_text = self
+            .vocal_separation_last_elapsed_for_sound(sound_id)
+            .map(|elapsed_secs| format!("{} {}", vocal_elapsed_label, format_time(elapsed_secs)));
         let tags_label = self.t("editor.tags");
         let tags_hint = self.t("editor.tags_hint");
         let tags_available_label = self.t("editor.tags_available");
@@ -9854,6 +9920,14 @@ impl SoundFxApp {
                                             .size(11.0)
                                             .color(Color32::from_rgb(100, 200, 100)),
                                     );
+                                    if let Some(vocal_last_elapsed_text) = &vocal_last_elapsed_text
+                                    {
+                                        ui.label(
+                                            RichText::new(vocal_last_elapsed_text)
+                                                .size(11.0)
+                                                .color(Self::muted_text_color()),
+                                        );
+                                    }
                                 } else {
                                     let separate = ui.add(
                                         Button::new(
