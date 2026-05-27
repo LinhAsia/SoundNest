@@ -89,8 +89,18 @@
       "editor.vocal_loading": "Separating vocals...",
       "editor.vocal_elapsed": "Elapsed",
       "editor.vocal_hint": "Keeps the vocal stem on disk so you can switch back later.",
+      "editor.vocal_preview_original": "Separating vocals... previewing original sound",
       "editor.vocal_source_missing": "Sound source file is missing",
       "editor.vocal_stopping": "Stopping vocal separation",
+      "editor.vocal_processing": "Vocal separation is still processing",
+      "editor.music_only": "Music only",
+      "editor.music_separate": "Separate music",
+      "editor.music_ready": "Music ready",
+      "editor.music_loading": "Separating music...",
+      "editor.music_hint": "Keeps the instrumental stem on disk so you can switch back later.",
+      "editor.music_preview_original": "Separating music... previewing original sound",
+      "editor.music_stopping": "Stopping music separation",
+      "editor.music_processing": "Music separation is still processing",
       "library.columns": "col"
     },
     "vi": {
@@ -182,8 +192,18 @@
       "editor.vocal_loading": "?ang t?ch vocal...",
       "editor.vocal_elapsed": "?ã chạy",
       "editor.vocal_hint": "Gi? file vocal ri?ng tr?n m?y ?? sau n?y b?t l?i kh?ng c?n t?ch l?i.",
+      "editor.vocal_preview_original": "?ang t?ch vocal... dang nghe ban goc",
       "editor.vocal_source_missing": "Thi?u file ngu?n c?a sound",
-      "editor.vocal_stopping": "?ang d?ng t?ch vocal"
+      "editor.vocal_stopping": "?ang d?ng t?ch vocal",
+      "editor.vocal_processing": "T?ch vocal v?n dang xu ly",
+      "editor.music_only": "Ch? nh?c",
+      "editor.music_separate": "T?ch nh?c",
+      "editor.music_ready": "?? c? nh?c",
+      "editor.music_loading": "?ang t?ch nh?c...",
+      "editor.music_hint": "Gi? file nh?c kh?ng vocal tr?n m?y ?? sau n?y b?t l?i kh?ng c?n t?ch l?i.",
+      "editor.music_preview_original": "?ang t?ch nh?c... dang nghe ban g?c",
+      "editor.music_stopping": "?ang d?ng t?ch nh?c",
+      "editor.music_processing": "T?ch nh?c v?n dang xu ly"
     }
   }
 }

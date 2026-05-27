@@ -44,6 +44,10 @@ pub struct SoundEffect {
     #[serde(default)]
     pub vocal_asset_file: Option<String>,
     #[serde(default)]
+    pub music_only: bool,
+    #[serde(default)]
+    pub music_asset_file: Option<String>,
+    #[serde(default)]
     pub waveform: Vec<f32>,
 }
 
@@ -88,7 +92,19 @@ impl SoundEffect {
             .map(|asset_file| storage_dir.join("sound-vocals").join(asset_file))
     }
 
+    pub fn music_asset_path(&self, storage_dir: &Path) -> Option<PathBuf> {
+        self.music_asset_file
+            .as_ref()
+            .map(|asset_file| storage_dir.join("sound-music").join(asset_file))
+    }
+
     pub fn playback_asset_path(&self, storage_dir: &Path) -> PathBuf {
+        if self.music_only
+            && let Some(path) = self.music_asset_path(storage_dir)
+            && path.exists()
+        {
+            return path;
+        }
         if self.vocal_only
             && let Some(path) = self.vocal_asset_path(storage_dir)
             && path.exists()
@@ -129,7 +145,7 @@ impl SoundEffect {
 
 impl Storage {
     pub fn vocal_asset_file_name(sound_id: Uuid) -> String {
-        format!("{sound_id}.wav")
+        format!("{sound_id}-vocals.wav")
     }
 
     pub fn vocal_asset_path_for(&self, sound: &SoundEffect) -> Option<PathBuf> {
@@ -137,6 +153,17 @@ impl Storage {
             .vocal_asset_file
             .as_ref()
             .map(|asset_file| self.vocal_sounds_dir.join(asset_file))
+    }
+
+    pub fn music_asset_file_name(sound_id: Uuid) -> String {
+        format!("{sound_id}-music.wav")
+    }
+
+    pub fn music_asset_path_for(&self, sound: &SoundEffect) -> Option<PathBuf> {
+        sound
+            .music_asset_file
+            .as_ref()
+            .map(|asset_file| self.music_sounds_dir.join(asset_file))
     }
 }
 
@@ -180,6 +207,7 @@ pub struct Storage {
     root_dir: PathBuf,
     sounds_dir: PathBuf,
     vocal_sounds_dir: PathBuf,
+    music_sounds_dir: PathBuf,
     videos_dir: PathBuf,
     settings_sounds_dir: PathBuf,
     bundled_sounds_dir: PathBuf,
@@ -195,6 +223,7 @@ impl Storage {
         migrate_storage_root_if_needed(&root_dir)?;
         let sounds_dir = root_dir.join("sounds");
         let vocal_sounds_dir = root_dir.join("sound-vocals");
+        let music_sounds_dir = root_dir.join("sound-music");
         let videos_dir = root_dir.join("videos");
         let settings_sounds_dir = root_dir.join("settings-sounds");
         let bundled_sounds_dir = root_dir.join("bundled-sounds");
@@ -202,6 +231,8 @@ impl Storage {
         fs::create_dir_all(&sounds_dir).context("unable to create sounds directory")?;
         fs::create_dir_all(&vocal_sounds_dir)
             .context("unable to create vocal sounds directory")?;
+        fs::create_dir_all(&music_sounds_dir)
+            .context("unable to create music sounds directory")?;
         fs::create_dir_all(&videos_dir).context("unable to create videos directory")?;
         fs::create_dir_all(&settings_sounds_dir)
             .context("unable to create settings sounds directory")?;
@@ -216,6 +247,7 @@ impl Storage {
             root_dir,
             sounds_dir,
             vocal_sounds_dir,
+            music_sounds_dir,
             videos_dir,
             settings_sounds_dir,
             bundled_sounds_dir,
@@ -245,6 +277,9 @@ impl Storage {
                 sound.asset_path(&self.root_dir).exists()
                     || sound
                         .vocal_asset_path(&self.root_dir)
+                        .is_some_and(|path| path.exists())
+                    || sound
+                        .music_asset_path(&self.root_dir)
                         .is_some_and(|path| path.exists())
             });
 
@@ -681,6 +716,8 @@ impl Storage {
             trim_end_secs: analysis.duration_secs,
             vocal_only: false,
             vocal_asset_file: None,
+            music_only: false,
+            music_asset_file: None,
             waveform: analysis.waveform,
         })
     }
@@ -712,6 +749,11 @@ impl Storage {
             && vocal_path.exists()
         {
             fs::remove_file(vocal_path).context("unable to delete vocal asset")?;
+        }
+        if let Some(music_path) = sound.music_asset_path(&self.root_dir)
+            && music_path.exists()
+        {
+            fs::remove_file(music_path).context("unable to delete music asset")?;
         }
         Ok(())
     }
@@ -832,10 +874,16 @@ impl Storage {
         let speed = (sound.speed.clamp(0.25, 2.0) * 1000.0).round() as u32;
         let trim_start = (sound.trim_start_secs.max(0.0) * 1000.0).round() as u32;
         let trim_end = (sound.trim_end_secs.max(0.0) * 1000.0).round() as u32;
-        let vocal = if sound.vocal_only { "-voc" } else { "" };
+        let stem = if sound.music_only {
+            "-music"
+        } else if sound.vocal_only {
+            "-voc"
+        } else {
+            ""
+        };
         format!(
             "-proc-v{:04}-s{:04}-a{:06}-b{:06}{}",
-            volume, speed, trim_start, trim_end, vocal
+            volume, speed, trim_start, trim_end, stem
         )
     }
 
@@ -860,6 +908,8 @@ impl Storage {
             trim_end_secs: analysis.duration_secs,
             vocal_only: false,
             vocal_asset_file: None,
+            music_only: false,
+            music_asset_file: None,
             waveform: analysis.waveform,
         })
     }
@@ -940,7 +990,10 @@ impl Storage {
 
         let preserve_source = sound
             .vocal_asset_path(&self.root_dir)
-            .is_some_and(|path| path == source_path);
+            .is_some_and(|path| path == source_path)
+            || sound
+                .music_asset_path(&self.root_dir)
+                .is_some_and(|path| path == source_path);
         if source_path != target_path && source_path.exists() && !preserve_source {
             fs::remove_file(&source_path).context("unable to remove previous sound source")?;
         }
