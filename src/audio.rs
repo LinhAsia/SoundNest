@@ -1,4 +1,4 @@
-use crate::storage::SoundEffect;
+use crate::storage::{SoundEffect, apply_sound_effects};
 use anyhow::{Context, Result, bail};
 use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source, buffer::SamplesBuffer};
 use std::collections::HashMap;
@@ -169,15 +169,11 @@ impl AudioEngine {
         let start_offset_secs = start_frame as f32 / sample_rate as f32;
         let start_sample = trim_start_sample + start_frame * channels as usize;
 
-        let preview = SharedSamplesSource {
-            samples: Arc::clone(&cached.samples),
-            index: start_sample,
-            end: trim_end_sample,
-            channels,
-            sample_rate,
-        }
-        .speed(speed)
-        .amplify(sound.volume.max(0.0));
+        let mut preview_samples = cached.samples[start_sample..trim_end_sample].to_vec();
+        apply_sound_effects(&mut preview_samples, channels, sample_rate, sound);
+        let preview = SamplesBuffer::new(channels, sample_rate, preview_samples)
+            .speed(speed)
+            .amplify(sound.volume.max(0.0));
 
         let sink = Sink::try_new(&self.handle).context("unable to create audio sink")?;
         sink.append(preview);

@@ -48,6 +48,10 @@ pub struct SoundEffect {
     #[serde(default)]
     pub music_asset_file: Option<String>,
     #[serde(default)]
+    pub reverb_enabled: bool,
+    #[serde(default)]
+    pub telephone_enabled: bool,
+    #[serde(default)]
     pub waveform: Vec<f32>,
 }
 
@@ -140,6 +144,8 @@ impl SoundEffect {
             || (self.speed - 1.0).abs() > EPSILON
             || self.trim_start_secs.abs() > EPSILON
             || (self.trim_end_secs - self.safe_duration()).abs() > 0.02
+            || self.reverb_enabled
+            || self.telephone_enabled
     }
 }
 
@@ -718,6 +724,8 @@ impl Storage {
             vocal_asset_file: None,
             music_only: false,
             music_asset_file: None,
+            reverb_enabled: false,
+            telephone_enabled: false,
             waveform: analysis.waveform,
         })
     }
@@ -881,9 +889,11 @@ impl Storage {
         } else {
             ""
         };
+        let reverb = if sound.reverb_enabled { "-rvb" } else { "" };
+        let telephone = if sound.telephone_enabled { "-tel" } else { "" };
         format!(
-            "-proc-v{:04}-s{:04}-a{:06}-b{:06}{}",
-            volume, speed, trim_start, trim_end, stem
+            "-proc-v{:04}-s{:04}-a{:06}-b{:06}{}{}{}",
+            volume, speed, trim_start, trim_end, stem, reverb, telephone
         )
     }
 
@@ -910,6 +920,8 @@ impl Storage {
             vocal_asset_file: None,
             music_only: false,
             music_asset_file: None,
+            reverb_enabled: false,
+            telephone_enabled: false,
             waveform: analysis.waveform,
         })
     }
@@ -1006,6 +1018,8 @@ impl Storage {
         sound.speed = 1.0;
         sound.trim_start_secs = 0.0;
         sound.trim_end_secs = sound.duration_secs;
+        sound.reverb_enabled = false;
+        sound.telephone_enabled = false;
         sound.clamp_trim();
         Ok(())
     }
@@ -1279,8 +1293,10 @@ fn write_processed_wav(source_path: &Path, target_path: &Path, sound: &SoundEffe
     let volume = sound.volume.clamp(0.0, 5.0);
     let start_sample = start_frame * channels as usize;
     let end_sample = end_frame * channels as usize;
+    let mut processed = decoded.samples[start_sample..end_sample].to_vec();
+    apply_sound_effects(&mut processed, channels, sample_rate, sound);
 
-    for sample in &decoded.samples[start_sample..end_sample] {
+    for sample in &processed {
         let scaled = (*sample * volume).clamp(-1.0, 1.0);
         let pcm = (scaled * i16::MAX as f32).round() as i16;
         writer
@@ -1292,6 +1308,73 @@ fn write_processed_wav(source_path: &Path, target_path: &Path, sound: &SoundEffe
         .finalize()
         .context("unable to finalize exported wav file")?;
     Ok(())
+}
+
+pub fn apply_sound_effects(
+    samples: &mut [f32],
+    channels: u16,
+    sample_rate: u32,
+    sound: &SoundEffect,
+) {
+    let channels = channels.max(1) as usize;
+    if sound.telephone_enabled {
+        apply_telephone_effect(samples, channels, sample_rate.max(1));
+    }
+    if sound.reverb_enabled {
+        apply_reverb_effect(samples, channels, sample_rate.max(1));
+    }
+}
+
+fn apply_telephone_effect(samples: &mut [f32], channels: usize, sample_rate: u32) {
+    let dt = 1.0 / sample_rate.max(1) as f32;
+    let high_pass_cutoff = 420.0;
+    let low_pass_cutoff = 2_350.0;
+    let high_pass_rc = 1.0 / (std::f32::consts::TAU * high_pass_cutoff);
+    let low_pass_rc = 1.0 / (std::f32::consts::TAU * low_pass_cutoff);
+    let high_pass_alpha = high_pass_rc / (high_pass_rc + dt);
+    let low_pass_alpha = dt / (low_pass_rc + dt);
+
+    let mut hp_prev_y = vec![0.0f32; channels];
+    let mut hp_prev_x = vec![0.0f32; channels];
+    let mut lp_prev_y = vec![0.0f32; channels];
+
+    for frame in samples.chunks_exact_mut(channels) {
+        for (channel, sample) in frame.iter_mut().enumerate() {
+            let x = *sample;
+            let hp = high_pass_alpha * (hp_prev_y[channel] + x - hp_prev_x[channel]);
+            hp_prev_y[channel] = hp;
+            hp_prev_x[channel] = x;
+
+            let lp = lp_prev_y[channel] + low_pass_alpha * (hp - lp_prev_y[channel]);
+            lp_prev_y[channel] = lp;
+
+            *sample = (lp * 1.35).clamp(-1.0, 1.0);
+        }
+    }
+}
+
+fn apply_reverb_effect(samples: &mut [f32], channels: usize, sample_rate: u32) {
+    let delay_a = ((sample_rate as f32 * 0.085).round() as usize).max(1) * channels;
+    let delay_b = ((sample_rate as f32 * 0.16).round() as usize).max(1) * channels;
+    let dry = 0.82f32;
+    let wet_a = 0.24f32;
+    let wet_b = 0.16f32;
+    let feedback = 0.22f32;
+    let original = samples.to_vec();
+
+    for index in 0..samples.len() {
+        let mut value = original[index] * dry;
+        if index >= delay_a {
+            value += original[index - delay_a] * wet_a;
+        }
+        if index >= delay_b {
+            value += original[index - delay_b] * wet_b;
+        }
+        if index >= delay_b + delay_a {
+            value += samples[index - delay_a] * feedback * 0.5;
+        }
+        samples[index] = value.clamp(-1.0, 1.0);
+    }
 }
 
 fn open_decoder(path: &Path) -> Result<Decoder<BufReader<File>>> {

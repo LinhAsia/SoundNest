@@ -5819,6 +5819,11 @@ impl SoundFxApp {
         let music_only_label = self.t("editor.music_only");
         let music_loading_label = self.t("editor.music_loading");
         let music_ready_label = self.t("editor.music_ready");
+        let effects_label = self.t("editor.effects");
+        let effect_reverb_label = self.t("editor.effect_reverb");
+        let effect_telephone_label = self.t("editor.effect_telephone");
+        let effect_reverb_hint = self.t("editor.effect_reverb_hint");
+        let effect_telephone_hint = self.t("editor.effect_telephone_hint");
         let vocal_elapsed_label = self.t("editor.vocal_elapsed");
         let vocal_elapsed_text = if record_vocal_job_running {
             self.vocal_separation_elapsed_secs().map(|elapsed_secs| {
@@ -5981,6 +5986,45 @@ impl SoundFxApp {
                                     || volume_slider_changed
                                     || speed_slider_changed
                                 {
+                                    changed = true;
+                                }
+                            });
+                            ui.add_space(12.0);
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new(&effects_label)
+                                        .size(12.0)
+                                        .color(Self::muted_text_color()),
+                                );
+                                let reverb = ui
+                                    .add_sized(
+                                        [88.0, 30.0],
+                                        Self::action_button(
+                                            RichText::new(&effect_reverb_label).size(11.5),
+                                            draft.sound.reverb_enabled,
+                                            false,
+                                        ),
+                                    )
+                                    .on_hover_text(&effect_reverb_hint);
+                                Self::decorate_button_response(ui, &reverb);
+                                if reverb.clicked() {
+                                    draft.sound.reverb_enabled = !draft.sound.reverb_enabled;
+                                    changed = true;
+                                }
+
+                                let telephone = ui
+                                    .add_sized(
+                                        [98.0, 30.0],
+                                        Self::action_button(
+                                            RichText::new(&effect_telephone_label).size(11.5),
+                                            draft.sound.telephone_enabled,
+                                            false,
+                                        ),
+                                    )
+                                    .on_hover_text(&effect_telephone_hint);
+                                Self::decorate_button_response(ui, &telephone);
+                                if telephone.clicked() {
+                                    draft.sound.telephone_enabled = !draft.sound.telephone_enabled;
                                     changed = true;
                                 }
                             });
@@ -9907,6 +9951,11 @@ impl SoundFxApp {
         let music_hint_label = self.t("editor.music_hint");
         let vocal_elapsed_label = self.t("editor.vocal_elapsed");
         let vocal_hint_label = self.t("editor.vocal_hint");
+        let effects_label = self.t("editor.effects");
+        let effect_reverb_label = self.t("editor.effect_reverb");
+        let effect_telephone_label = self.t("editor.effect_telephone");
+        let effect_reverb_hint = self.t("editor.effect_reverb_hint");
+        let effect_telephone_hint = self.t("editor.effect_telephone_hint");
         let vocal_elapsed_text = if vocal_job_running {
             self.vocal_separation_elapsed_secs().map(|elapsed_secs| {
                 format!("{} {}", vocal_elapsed_label, format_time(elapsed_secs))
@@ -10189,6 +10238,49 @@ impl SoundFxApp {
                                     || volume_input_commit
                                     || speed_input_commit
                                 {
+                                    playback_reapply_request = true;
+                                }
+                            });
+                            ui.add_space(12.0);
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new(&effects_label)
+                                        .size(12.0)
+                                        .color(Self::muted_text_color()),
+                                );
+                                let reverb = ui
+                                    .add_sized(
+                                        [88.0, 30.0],
+                                        Self::action_button(
+                                            RichText::new(&effect_reverb_label).size(11.5),
+                                            sound.reverb_enabled,
+                                            false,
+                                        ),
+                                    )
+                                    .on_hover_text(&effect_reverb_hint);
+                                Self::decorate_button_response(ui, &reverb);
+                                if reverb.clicked() {
+                                    sound.reverb_enabled = !sound.reverb_enabled;
+                                    changed = true;
+                                    processed_export_dirty = true;
+                                    playback_reapply_request = true;
+                                }
+
+                                let telephone = ui
+                                    .add_sized(
+                                        [98.0, 30.0],
+                                        Self::action_button(
+                                            RichText::new(&effect_telephone_label).size(11.5),
+                                            sound.telephone_enabled,
+                                            false,
+                                        ),
+                                    )
+                                    .on_hover_text(&effect_telephone_hint);
+                                Self::decorate_button_response(ui, &telephone);
+                                if telephone.clicked() {
+                                    sound.telephone_enabled = !sound.telephone_enabled;
+                                    changed = true;
+                                    processed_export_dirty = true;
                                     playback_reapply_request = true;
                                 }
                             });
