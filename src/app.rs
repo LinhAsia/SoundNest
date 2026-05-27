@@ -680,6 +680,7 @@ impl SoundFxApp {
 
     fn with_initial_selection(mut self) -> Self {
         self.selected = self.sounds.first().map(|sound| sound.id);
+        self.preload_selected_sound_audio();
         let _ = self.record_hotkey_manager.set_hotkeys(&self.record_hotkeys);
         let _ = self
             .record_hotkey_manager
@@ -3609,6 +3610,14 @@ impl SoundFxApp {
                 result,
             });
         });
+    }
+
+    fn preload_selected_sound_audio(&mut self) {
+        let Some(index) = self.selected_sound_index() else {
+            return;
+        };
+        let asset_path = self.sounds[index].asset_path(self.storage.root_dir());
+        self.schedule_audio_preload(asset_path);
     }
 
     fn poll_audio_preload_jobs(&mut self, ctx: &Context) {
@@ -13541,6 +13550,7 @@ impl eframe::App for SoundFxApp {
         }
 
         self.enforce_square_window_if_needed(ctx);
+        self.preload_selected_sound_audio();
         self.handle_space_preview(ctx);
         self.handle_trim_start_preview(ctx);
         self.handle_record_hotkey(ctx);
