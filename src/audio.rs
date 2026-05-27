@@ -1,6 +1,7 @@
 use crate::storage::SoundEffect;
 use anyhow::{Context, Result, bail};
 use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source, buffer::SamplesBuffer};
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -51,7 +52,6 @@ pub fn calculate_normalization_gain(asset_path: &Path) -> Result<f32> {
 const POP_FADE_MS: f32 = 18.0;
 
 struct CachedAudio {
-    path: PathBuf,
     channels: u16,
     sample_rate: u32,
     samples: Arc<[f32]>,
@@ -108,7 +108,7 @@ pub struct AudioEngine {
     _stream: OutputStream,
     handle: OutputStreamHandle,
     sink: Option<Sink>,
-    cached_audio: Option<CachedAudio>,
+    cached_audio: HashMap<PathBuf, CachedAudio>,
     current_id: Option<Uuid>,
     current_file_path: Option<PathBuf>,
     current_total_duration_secs: f32,
@@ -126,7 +126,7 @@ impl AudioEngine {
             _stream: stream,
             handle,
             sink: None,
-            cached_audio: None,
+            cached_audio: HashMap::new(),
             current_id: None,
             current_file_path: None,
             current_total_duration_secs: 0.0,
@@ -151,7 +151,7 @@ impl AudioEngine {
         self.ensure_cached_audio(asset_path)?;
         let cached = self
             .cached_audio
-            .as_ref()
+            .get(asset_path)
             .expect("cached audio should exist after ensure_cached_audio");
         let channels = cached.channels;
         let sample_rate = cached.sample_rate;
@@ -204,7 +204,7 @@ impl AudioEngine {
         self.ensure_cached_audio(asset_path)?;
         let cached = self
             .cached_audio
-            .as_ref()
+            .get(asset_path)
             .expect("cached audio should exist after ensure_cached_audio");
         let channels = cached.channels;
         let sample_rate = cached.sample_rate;
@@ -254,7 +254,7 @@ impl AudioEngine {
         self.ensure_cached_audio(asset_path)?;
         let cached = self
             .cached_audio
-            .as_ref()
+            .get(asset_path)
             .expect("cached audio should exist after ensure_cached_audio");
         let channels = cached.channels;
         let sample_rate = cached.sample_rate;
@@ -359,18 +359,16 @@ impl AudioEngine {
     }
 
     fn ensure_cached_audio(&mut self, asset_path: &Path) -> Result<()> {
-        let needs_reload = self
-            .cached_audio
-            .as_ref()
-            .is_none_or(|cached| cached.path.as_path() != asset_path);
-        if needs_reload {
+        if !self.cached_audio.contains_key(asset_path) {
             let (channels, sample_rate, samples) = decode_audio_file(asset_path)?;
-            self.cached_audio = Some(CachedAudio {
-                path: asset_path.to_path_buf(),
-                channels,
-                sample_rate,
-                samples: Arc::<[f32]>::from(samples),
-            });
+            self.cached_audio.insert(
+                asset_path.to_path_buf(),
+                CachedAudio {
+                    channels,
+                    sample_rate,
+                    samples: Arc::<[f32]>::from(samples),
+                },
+            );
         }
         Ok(())
     }
