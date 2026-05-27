@@ -22,6 +22,7 @@ use eframe::egui::{
     Sense, Stroke, StrokeKind, TextEdit, TextureHandle, Ui, Vec2, ViewportCommand, vec2,
 };
 use eframe::epaint::Shadow;
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 #[cfg(windows)]
@@ -279,6 +280,8 @@ pub struct SoundFxApp {
     myinstants_waveform_jobs: HashSet<String>,
     myinstants_waveform_tx: Sender<MyinstantsWaveformMessage>,
     myinstants_waveform_rx: Receiver<MyinstantsWaveformMessage>,
+    vocal_waveform_cache: RefCell<HashMap<Uuid, Vec<f32>>>,
+    music_waveform_cache: RefCell<HashMap<Uuid, Vec<f32>>>,
     myinstants_preview_audio_url: Option<String>,
     show_download_panel: bool,
     download_was_running: bool,
@@ -554,6 +557,8 @@ impl SoundFxApp {
             myinstants_waveform_jobs: HashSet::new(),
             myinstants_waveform_tx,
             myinstants_waveform_rx,
+            vocal_waveform_cache: RefCell::new(HashMap::new()),
+            music_waveform_cache: RefCell::new(HashMap::new()),
             myinstants_preview_audio_url: None,
             show_download_panel: false,
             download_was_running: false,
@@ -2442,6 +2447,24 @@ impl SoundFxApp {
         self.vocal_separation_cancel = Some(Arc::clone(&cancel));
         self.vocal_separation_target = Some(target.clone());
         self.vocal_separation_kind = Some(kind);
+        match &target {
+            VocalSeparationTarget::RecordingReview { source_path } => {
+                if let Some(draft) = self.recording_draft.as_ref()
+                    && draft.source_path == *source_path
+                {
+                    self.vocal_waveform_cache
+                        .borrow_mut()
+                        .remove(&draft.sound.id);
+                    self.music_waveform_cache
+                        .borrow_mut()
+                        .remove(&draft.sound.id);
+                }
+            }
+            VocalSeparationTarget::LibrarySound { sound_id, .. } => {
+                self.vocal_waveform_cache.borrow_mut().remove(sound_id);
+                self.music_waveform_cache.borrow_mut().remove(sound_id);
+            }
+        }
         self.vocal_separation_started_at = Some(Instant::now());
         self.vocal_separation_last_result = None;
         self.clear_status();
@@ -2625,15 +2648,36 @@ impl SoundFxApp {
                 } => match target {
                     VocalSeparationTarget::RecordingReview { source_path } => match result {
                         Ok(path) => {
+                            let record_sound_id = self.recording_draft.as_ref().and_then(|draft| {
+                                (draft.source_path == source_path).then_some(draft.sound.id)
+                            });
                             if let Some(draft) = self.recording_draft.as_mut()
                                 && draft.source_path == source_path
                             {
                                 match kind {
                                     SeparationStemKind::Vocal => {
-                                        draft.vocal_separated_path = Some(path);
+                                        draft.vocal_separated_path = Some(path.clone());
                                     }
                                     SeparationStemKind::Music => {
-                                        draft.music_separated_path = Some(path);
+                                        draft.music_separated_path = Some(path.clone());
+                                    }
+                                }
+                            }
+                            if let Some(sound_id) = record_sound_id {
+                                match kind {
+                                    SeparationStemKind::Vocal => {
+                                        let _ = self.cached_stem_waveform(
+                                            &self.vocal_waveform_cache,
+                                            sound_id,
+                                            &path,
+                                        );
+                                    }
+                                    SeparationStemKind::Music => {
+                                        let _ = self.cached_stem_waveform(
+                                            &self.music_waveform_cache,
+                                            sound_id,
+                                            &path,
+                                        );
                                     }
                                 }
                             }
@@ -2675,6 +2719,7 @@ impl SoundFxApp {
                             let mut preload_path = None;
                             let mut refresh_cursor_secs = None;
                             let mut copy_error: Option<String> = None;
+                            let mut cache_path: Option<PathBuf> = None;
                             if let Some(index) =
                                 self.sounds.iter().position(|sound| sound.id == sound_id)
                             {
@@ -2716,6 +2761,7 @@ impl SoundFxApp {
                                             sound.vocal_asset_file =
                                                 Some(Storage::vocal_asset_file_name(sound_id));
                                             preload_path = self.storage.vocal_asset_path_for(&*sound);
+                                            cache_path = Some(stable_path.clone());
                                             if !requested_vocal_only {
                                                 refresh_cursor_secs = None;
                                             }
@@ -2725,6 +2771,7 @@ impl SoundFxApp {
                                             let music_file = Storage::music_asset_file_name(sound_id);
                                             sound.music_asset_file = Some(music_file);
                                             preload_path = self.storage.music_asset_path_for(&*sound);
+                                            cache_path = Some(stable_path.clone());
                                             if !requested_music_only {
                                                 refresh_cursor_secs = None;
                                             }
@@ -2750,6 +2797,26 @@ impl SoundFxApp {
                             }
                             if let Some(cursor_secs) = refresh_cursor_secs {
                                 self.preview_sound_from_position(sound_id, Some(cursor_secs));
+                            }
+                            if copy_error.is_none()
+                                && let Some(cache_path) = cache_path.as_ref()
+                            {
+                                match kind {
+                                    SeparationStemKind::Vocal => {
+                                        let _ = self.cached_stem_waveform(
+                                            &self.vocal_waveform_cache,
+                                            sound_id,
+                                            cache_path,
+                                        );
+                                    }
+                                    SeparationStemKind::Music => {
+                                        let _ = self.cached_stem_waveform(
+                                            &self.music_waveform_cache,
+                                            sound_id,
+                                            cache_path,
+                                        );
+                                    }
+                                }
                             }
                             if self.selected == Some(sound_id) {
                                 ctx.request_repaint();
@@ -3334,8 +3401,9 @@ impl SoundFxApp {
         self.ignored_drop_path =
             Some(fs::canonicalize(&drag_path).unwrap_or_else(|_| drag_path.clone()));
         self.pending_sound_drag = None;
+        let drag_waveform = self.sound_waveform_samples(sound);
         let drag_ghost = platform::DragGhostSpec {
-            waveform: Self::trimmed_waveform_preview(sound),
+            waveform: Self::trimmed_waveform_preview_from_samples(sound, &drag_waveform),
             dark_theme: self.dark_theme,
         };
         let result = platform::drag_file_out(&drag_path, Some(&drag_ghost));
@@ -5859,6 +5927,11 @@ impl SoundFxApp {
                 )
             })
             .map(|elapsed_secs| format!("{} {}", vocal_elapsed_label, format_time(elapsed_secs)));
+        let waveform_samples = self
+            .recording_draft
+            .as_ref()
+            .map(|draft| self.recording_waveform_samples(draft))
+            .unwrap_or_default();
         let export_progress = self
             .active_record_video_export
             .as_ref()
@@ -5924,6 +5997,7 @@ impl SoundFxApp {
                             Self::draw_trim_timeline(
                                 ui,
                                 &mut draft.sound,
+                                &waveform_samples,
                                 &mut preview_cursor_secs,
                                 &mut trim_timeline_zoom,
                                 !is_playing,
@@ -9028,8 +9102,10 @@ impl SoundFxApp {
                                         }
                                         let bucket_count =
                                             (card_size * 0.34).round().clamp(20.0, 52.0) as usize;
-                                        let waveform_preview = Self::library_sound_waveform_preview(
+                                        let waveform_samples = self.sound_waveform_samples(&sound);
+                                        let waveform_preview = Self::library_sound_waveform_preview_from_samples(
                                             &sound,
+                                            &waveform_samples,
                                             bucket_count,
                                         );
                                         Self::draw_wave_strip(
@@ -9743,7 +9819,12 @@ impl SoundFxApp {
                                         .strong(),
                                 );
                                 ui.add_space(8.0);
-                                let waveform_preview = Self::trimmed_waveform_preview(sound);
+                                let waveform_samples = self.sound_waveform_samples(sound);
+                                let waveform_preview =
+                                    Self::trimmed_waveform_preview_from_samples(
+                                        sound,
+                                        &waveform_samples,
+                                    );
                                 Self::draw_wave_strip(
                                     ui,
                                     &waveform_preview,
@@ -9898,6 +9979,7 @@ impl SoundFxApp {
         let preview_asset_path = self.preview_asset_path_for_sound(&self.sounds[index]);
         self.schedule_audio_preload(preview_asset_path);
         self.sync_editor_tags_input();
+        let waveform_samples = self.sound_waveform_samples(&self.sounds[index]);
         let is_playing = self
             .audio
             .as_ref()
@@ -10065,65 +10147,69 @@ impl SoundFxApp {
 
                 ui.add_space(2.0);
 
-                Frame::new()
-                    .fill(Self::panel_fill())
-                    .stroke(Stroke::new(1.0, Self::subtle_border_color()))
-                    .corner_radius(26.0)
-                    .inner_margin(Margin::same(12))
-                    .show(ui, |ui| {
-                        ui.vertical(|ui| {
-                            ui.horizontal(|ui| {
-                                ui.label(
-                                    RichText::new(&tags_label)
-                                        .size(11.5)
-                                        .color(Self::muted_text_color())
-                                        .strong(),
-                                );
-                                ui.add_space(8.0);
-                                let hint_color = Color32::from_rgba_premultiplied(
-                                    Self::muted_text_color().r(),
-                                    Self::muted_text_color().g(),
-                                    Self::muted_text_color().b(),
-                                    128,
-                                );
-                                let response = Frame::new()
-                                    .fill(Self::input_fill())
-                                    .stroke(Stroke::new(1.0, Self::subtle_border_color()))
-                                    .corner_radius(14.0)
-                                    .inner_margin(Margin::symmetric(10, 4))
-                                    .show(ui, |ui| {
-                                        ui.add_sized(
-                                            [ui.available_width(), 24.0],
-                                            TextEdit::singleline(&mut self.editor_tags_input)
-                                                .frame(false)
-                                                .hint_text(
-                                                    RichText::new(tags_hint.as_str()).color(hint_color),
-                                                )
-                                                .desired_width(f32::INFINITY),
-                                        )
-                                    })
-                                    .inner;
-                                if response.changed() {
-                                    tags_changed = true;
+                egui::CollapsingHeader::new(
+                    RichText::new(&tags_label)
+                        .size(11.5)
+                        .color(Self::muted_text_color())
+                        .strong(),
+                )
+                .default_open(false)
+                .show(ui, |ui| {
+                    Frame::new()
+                        .fill(Self::panel_fill())
+                        .stroke(Stroke::new(1.0, Self::subtle_border_color()))
+                        .corner_radius(26.0)
+                        .inner_margin(Margin::same(12))
+                        .show(ui, |ui| {
+                            ui.vertical(|ui| {
+                                ui.horizontal(|ui| {
+                                    ui.add_space(16.0);
+                                    let hint_color = Color32::from_rgba_premultiplied(
+                                        Self::muted_text_color().r(),
+                                        Self::muted_text_color().g(),
+                                        Self::muted_text_color().b(),
+                                        128,
+                                    );
+                                    let response = Frame::new()
+                                        .fill(Self::input_fill())
+                                        .stroke(Stroke::new(1.0, Self::subtle_border_color()))
+                                        .corner_radius(14.0)
+                                        .inner_margin(Margin::symmetric(10, 4))
+                                        .show(ui, |ui| {
+                                            ui.add_sized(
+                                                [ui.available_width(), 24.0],
+                                                TextEdit::singleline(&mut self.editor_tags_input)
+                                                    .frame(false)
+                                                    .hint_text(
+                                                        RichText::new(tags_hint.as_str())
+                                                            .color(hint_color),
+                                                    )
+                                                    .desired_width(f32::INFINITY),
+                                            )
+                                        })
+                                        .inner;
+                                    if response.changed() {
+                                        tags_changed = true;
+                                    }
+                                });
+                                if !available_tags.is_empty() {
+                                    ui.add_space(6.0);
+                                    ui.label(
+                                        RichText::new(&tags_available_label)
+                                            .size(11.0)
+                                            .color(Self::muted_text_color()),
+                                    );
+                                    if Self::draw_sound_tag_picker(
+                                        ui,
+                                        &available_tags,
+                                        &mut self.editor_tags_input,
+                                    ) {
+                                        tags_changed = true;
+                                    }
                                 }
                             });
-                            if !available_tags.is_empty() {
-                                ui.add_space(6.0);
-                                ui.label(
-                                    RichText::new(&tags_available_label)
-                                        .size(11.0)
-                                        .color(Self::muted_text_color()),
-                                );
-                                if Self::draw_sound_tag_picker(
-                                    ui,
-                                    &available_tags,
-                                    &mut self.editor_tags_input,
-                                ) {
-                                    tags_changed = true;
-                                }
-                            }
                         });
-                    });
+                });
 
                 ui.add_space(16.0);
 
@@ -10137,6 +10223,7 @@ impl SoundFxApp {
                             Self::draw_trim_timeline(
                                 ui,
                                 sound,
+                                &waveform_samples,
                                 &mut preview_cursor_secs,
                                 &mut trim_timeline_zoom,
                                 !is_playing,
@@ -10645,6 +10732,7 @@ impl SoundFxApp {
     fn draw_trim_timeline(
         ui: &mut Ui,
         sound: &mut SoundEffect,
+        waveform_samples: &[f32],
         preview_cursor_secs: &mut f32,
         zoom: &mut f32,
         clamp_cursor_to_trim: bool,
@@ -10763,7 +10851,7 @@ impl SoundFxApp {
                     Self::paint_waveform_bars(
                         &painter,
                         rect.shrink2(vec2(12.0, 14.0)),
-                        &sound.waveform,
+                        waveform_samples,
                         start_x,
                         end_x,
                         None,
@@ -11162,8 +11250,78 @@ impl SoundFxApp {
         (changed, seek_requested, preview_commit_requested)
     }
 
-    fn trimmed_waveform_preview(sound: &SoundEffect) -> Vec<f32> {
-        if sound.waveform.is_empty() {
+    fn cached_stem_waveform(
+        &self,
+        cache: &RefCell<HashMap<Uuid, Vec<f32>>>,
+        sound_id: Uuid,
+        path: &Path,
+    ) -> Vec<f32> {
+        if let Some(existing) = cache.borrow().get(&sound_id).cloned() {
+            return existing;
+        }
+
+        let Ok(waveform) = self.storage.analyze_waveform_preview(path, 96) else {
+            return Vec::new();
+        };
+
+        cache.borrow_mut().insert(sound_id, waveform.clone());
+        waveform
+    }
+
+    fn sound_waveform_samples(&self, sound: &SoundEffect) -> Vec<f32> {
+        if sound.music_only
+            && let Some(path) = sound.music_asset_path(self.storage.root_dir())
+            && path.exists()
+        {
+            return self.cached_stem_waveform(
+                &self.music_waveform_cache,
+                sound.id,
+                &path,
+            );
+        }
+
+        if sound.vocal_only
+            && let Some(path) = sound.vocal_asset_path(self.storage.root_dir())
+            && path.exists()
+        {
+            return self.cached_stem_waveform(
+                &self.vocal_waveform_cache,
+                sound.id,
+                &path,
+            );
+        }
+
+        sound.waveform.clone()
+    }
+
+    fn recording_waveform_samples(&self, draft: &RecordingDraft) -> Vec<f32> {
+        if draft.keep_music
+            && let Some(path) = draft.music_separated_path.as_ref()
+            && path.exists()
+        {
+            return self.cached_stem_waveform(
+                &self.music_waveform_cache,
+                draft.sound.id,
+                path,
+            );
+        }
+
+        if draft.keep_vocal
+            && let Some(path) = draft.vocal_separated_path.as_ref()
+            && path.exists()
+        {
+            return self.cached_stem_waveform(
+                &self.vocal_waveform_cache,
+                draft.sound.id,
+                path,
+            );
+        }
+
+        draft.sound.waveform.clone()
+    }
+
+    fn trimmed_waveform_preview_from_samples(sound: &SoundEffect, samples: &[f32]) -> Vec<f32> {
+        if samples.is_empty() {
             return Vec::new();
         }
 
@@ -11172,15 +11330,15 @@ impl SoundFxApp {
         let trim_end = sound
             .trim_end_secs
             .clamp(trim_start + 0.001, total_duration);
-        let source_len = sound.waveform.len();
+        let source_len = samples.len();
         if source_len <= 1 || (trim_start <= 0.001 && trim_end >= total_duration - 0.001) {
-            return sound.waveform.clone();
+            return samples.to_vec();
         }
 
         let start_index = ((trim_start / total_duration) * source_len as f32).floor() as usize;
         let mut end_index = ((trim_end / total_duration) * source_len as f32).ceil() as usize;
         end_index = end_index.clamp(start_index.saturating_add(1), source_len);
-        let segment = &sound.waveform[start_index.min(source_len - 1)..end_index];
+        let segment = &samples[start_index.min(source_len - 1)..end_index];
         if segment.len() >= source_len {
             return segment.to_vec();
         }
@@ -11204,8 +11362,12 @@ impl SoundFxApp {
         preview
     }
 
-    fn library_sound_waveform_preview(sound: &SoundEffect, buckets: usize) -> Vec<f32> {
-        if sound.waveform.is_empty() {
+    fn library_sound_waveform_preview_from_samples(
+        sound: &SoundEffect,
+        samples: &[f32],
+        buckets: usize,
+    ) -> Vec<f32> {
+        if samples.is_empty() {
             return Vec::new();
         }
 
@@ -11214,11 +11376,11 @@ impl SoundFxApp {
         let trim_end = sound
             .trim_end_secs
             .clamp(trim_start + 0.001, total_duration);
-        let source_len = sound.waveform.len();
+        let source_len = samples.len();
         let start_index = ((trim_start / total_duration) * source_len as f32).floor() as usize;
         let mut end_index = ((trim_end / total_duration) * source_len as f32).ceil() as usize;
         end_index = end_index.clamp(start_index.saturating_add(1), source_len);
-        let segment = &sound.waveform[start_index.min(source_len.saturating_sub(1))..end_index];
+        let segment = &samples[start_index.min(source_len.saturating_sub(1))..end_index];
         Self::compact_library_waveform(segment, buckets)
     }
 
