@@ -46,7 +46,9 @@ pub(super) fn filtered_library_sounds(&self) -> Vec<SoundEffect> {
             .sounds
             .iter()
             .filter(|sound| {
-                if self.library_tab == LibraryTab::Folders && self.library_current_folder.is_some() {
+                if let Some(folder_id) = self.folder_import_select_mode {
+                    sound.folder_id != Some(folder_id)
+                } else if self.library_tab == LibraryTab::Folders && self.library_current_folder.is_some() {
                     sound.folder_id == self.library_current_folder
                 } else {
                     true

@@ -588,7 +588,11 @@ pub(super) fn poll_record_video_export(&mut self, ctx: &Context) {
     }
 
 pub(super) fn handle_dropped_files(&mut self, ctx: &Context) {
-        if self.app_view != AppView::Editor || self.has_modal_panel() {
+        let is_folder_open = self.app_view == AppView::Library
+            && self.library_tab == LibraryTab::Folders
+            && self.library_current_folder.is_some();
+
+        if (self.app_view != AppView::Editor && !is_folder_open) || self.has_modal_panel() {
             self.editor_drop_armed = false;
             self.editor_drop_rect = None;
             return;
@@ -599,7 +603,7 @@ pub(super) fn handle_dropped_files(&mut self, ctx: &Context) {
             return;
         }
         let pointer_pos = self.external_drop_pointer_pos(ctx);
-        let dropped_in_rect = self
+        let dropped_in_rect = is_folder_open || self
             .editor_drop_rect
             .is_some_and(|rect| pointer_pos.is_some_and(|pos| rect.contains(pos)));
         if !self.editor_drop_armed && !dropped_in_rect {
