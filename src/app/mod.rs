@@ -2778,7 +2778,7 @@ impl SoundFxApp {
                 if Self::icon_titlebar(
                     ui,
                     [42.0, 30.0],
-                    0xe02d,
+                    0xe03b,
                     self.app_view == AppView::Library,
                     false,
                 )
@@ -5150,6 +5150,45 @@ impl SoundFxApp {
             Self::decorate_button_response(ui, &videos_tab);
             if videos_tab.clicked() {
                 self.library_tab = LibraryTab::Videos;
+            }
+
+            if self.library_tab == LibraryTab::Folders && self.library_current_folder.is_none() {
+                ui.add_space(12.0);
+                let hint = self.t("library.folder_placeholder");
+                let text_edit_response = Frame::new()
+                    .fill(Self::input_fill())
+                    .stroke(Stroke::new(1.0, Self::border_color()))
+                    .corner_radius(12.0)
+                    .inner_margin(Margin::symmetric(12, 6))
+                    .show(ui, |ui| {
+                        ui.add_sized(
+                            [180.0, 20.0],
+                            egui::TextEdit::singleline(&mut self.new_folder_name)
+                                .frame(false)
+                                .hint_text(hint)
+                        )
+                    });
+                
+                ui.add_space(8.0);
+                let create_btn = ui.add(
+                    Button::new(Self::icon(0xe145, 14.0, Color32::WHITE))
+                        .fill(Color32::from_rgb(227, 82, 149))
+                        .corner_radius(10.0)
+                );
+                Self::decorate_button_response(ui, &create_btn);
+
+                if create_btn.clicked() || (text_edit_response.inner.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
+                    let name = self.new_folder_name.trim().to_owned();
+                    if !name.is_empty() {
+                        let new_folder = crate::storage::Folder {
+                            id: Uuid::new_v4(),
+                            name,
+                        };
+                        self.folders.push(new_folder);
+                        self.new_folder_name.clear();
+                        let _ = self.storage.save_folders(&self.folders);
+                    }
+                }
             }
 
             if self.library_tab == LibraryTab::Sounds || (self.library_tab == LibraryTab::Folders && self.library_current_folder.is_some()) {

@@ -45,6 +45,13 @@ pub(super) fn filtered_library_sounds(&self) -> Vec<SoundEffect> {
         let filtered = self
             .sounds
             .iter()
+            .filter(|sound| {
+                if self.library_tab == LibraryTab::Folders && self.library_current_folder.is_some() {
+                    sound.folder_id == self.library_current_folder
+                } else {
+                    true
+                }
+            })
             .filter(|sound| Self::library_sound_query_matches(sound, &self.library_audio_query))
             .filter(|sound| Self::sound_tag_matches_filter(&sound.tags, active_tag_filter))
             .filter(|sound| !self.library_favorites_only_audio || sound.favorite)
@@ -772,56 +779,7 @@ pub(super) fn render_import_panel(&mut self, ctx: &Context) {
         let muted_color = Self::muted_text_color();
         let border_color = Self::border_color();
 
-        // 1. Header with inline folder creation
-        ui.horizontal(|ui| {
-            ui.label(
-                egui::RichText::new(self.t("library.create_folder"))
-                    .font(FontId::new(13.0, FontFamily::Proportional))
-                    .color(text_color)
-                    .strong(),
-            );
-            ui.add_space(8.0);
-            
-            let response = Frame::new()
-                .fill(Self::input_fill())
-                .stroke(Stroke::new(1.0, border_color))
-                .corner_radius(12.0)
-                .inner_margin(Margin::symmetric(12, 6))
-                .show(ui, |ui| {
-                    ui.add_sized(
-                        [180.0, 20.0],
-                        egui::TextEdit::singleline(&mut self.new_folder_name)
-                            .frame(false)
-                            .hint_text("Ten thu muc...")
-                    )
-                })
-                .inner;
-
-            ui.add_space(8.0);
-            let create_btn = ui.add(
-                Button::new(Self::icon(0xe145, 14.0, Color32::WHITE))
-                    .fill(Color32::from_rgb(227, 82, 149))
-                    .corner_radius(10.0)
-            );
-            Self::decorate_button_response(ui, &create_btn);
-
-            if create_btn.clicked() || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
-                let name = self.new_folder_name.trim().to_owned();
-                if !name.is_empty() {
-                    let new_folder = crate::storage::Folder {
-                        id: Uuid::new_v4(),
-                        name,
-                    };
-                    self.folders.push(new_folder);
-                    self.new_folder_name.clear();
-                    let _ = self.storage.save_folders(&self.folders);
-                }
-            }
-        });
-
-        ui.add_space(16.0);
-
-        // 2. Folders Grid/List
+        // 1. Folders Grid/List
         if self.folders.is_empty() {
             // Large empty state button to create folder
             ui.vertical_centered(|ui| {
@@ -846,7 +804,7 @@ pub(super) fn render_import_panel(&mut self, ctx: &Context) {
                 Self::decorate_button_response(ui, &big_create_btn);
 
                 if big_create_btn.clicked() {
-                    let default_name = "Thu muc moi".to_owned();
+                    let default_name = self.t("library.new_folder_default");
                     let new_folder = crate::storage::Folder {
                         id: Uuid::new_v4(),
                         name: default_name,
@@ -881,87 +839,120 @@ pub(super) fn render_import_panel(&mut self, ctx: &Context) {
 
                         let is_editing = self.editing_folder_id == Some(folder.id);
 
-                        Frame::new()
-                            .fill(Self::surface_fill())
-                            .stroke(Stroke::new(1.0, border_color))
-                            .corner_radius(18.0)
-                            .inner_margin(Margin::same(12))
-                            .show(ui, |ui| {
-                                ui.set_width(card_width);
-                                ui.set_height(card_height);
+                        // Allocate the card's response so the whole card area is clickable/interactive.
+                        let (rect, response) = ui.allocate_exact_size(
+                            vec2(card_width, card_height),
+                            if is_editing { Sense::hover() } else { Sense::click() },
+                        );
 
-                                ui.vertical(|ui| {
-                                    ui.horizontal(|ui| {
-                                        // Folder Icon (clickable to open)
-                                        let icon_btn = ui.add(
-                                            Button::new(Self::icon(0xe2c7, 22.0, Color32::from_rgb(227, 82, 149)))
-                                                .fill(Color32::TRANSPARENT)
-                                                .frame(false)
-                                        );
-                                        if icon_btn.clicked() {
-                                            navigate_to = Some(folder.id);
-                                        }
-                                        
-                                        ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                                            // Delete Button
-                                            let del_btn = ui.add(
-                                                Button::new(Self::icon(0xe872, 12.0, muted_color))
-                                                    .fill(Color32::TRANSPARENT)
-                                                    .frame(false)
-                                            );
-                                            Self::decorate_button_response(ui, &del_btn);
-                                            if del_btn.clicked() {
-                                                delete_folder_id = Some(folder.id);
-                                            }
+                        let hovered = response.hovered() && !is_editing;
+                        if hovered {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                        }
 
-                                            ui.add_space(4.0);
+                        let mut del_clicked = false;
+                        let mut rename_clicked = false;
 
-                                            // Rename Button
-                                            if !is_editing {
-                                                let edit_btn = ui.add(
-                                                    Button::new(Self::icon(0xe254, 12.0, muted_color))
+                        // Render the card visual inside a scoped UI builder using the allocated rect.
+                        ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+                            Frame::new()
+                                .fill(if hovered {
+                                    if Self::dark_theme_enabled() {
+                                        Color32::from_rgb(33, 28, 39)
+                                    } else {
+                                        Color32::from_rgb(255, 236, 246)
+                                    }
+                                } else {
+                                    Self::surface_fill()
+                                })
+                                .stroke(Stroke::new(
+                                    1.2,
+                                    if hovered {
+                                        Color32::from_rgb(227, 82, 149)
+                                    } else {
+                                        border_color
+                                    },
+                                ))
+                                .corner_radius(18.0)
+                                .inner_margin(Margin::same(12))
+                                .show(ui, |ui| {
+                                    ui.set_width(card_width);
+                                    ui.set_height(card_height);
+
+                                    ui.vertical(|ui| {
+                                        ui.horizontal(|ui| {
+                                            // Folder Icon (passive label, clicking it hits the card response)
+                                            ui.label(Self::icon(0xe2c7, 22.0, Color32::from_rgb(227, 82, 149)));
+                                            
+                                            ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                                                // Delete Button
+                                                let del_btn = ui.add(
+                                                    Button::new(Self::icon(0xe872, 12.0, muted_color))
                                                         .fill(Color32::TRANSPARENT)
                                                         .frame(false)
                                                 );
-                                                Self::decorate_button_response(ui, &edit_btn);
-                                                if edit_btn.clicked() {
-                                                    rename_folder_id = Some(folder.id);
+                                                Self::decorate_button_response(ui, &del_btn);
+                                                if del_btn.clicked() {
+                                                    del_clicked = true;
                                                 }
-                                            }
+
+                                                ui.add_space(4.0);
+
+                                                // Rename Button
+                                                if !is_editing {
+                                                    let edit_btn = ui.add(
+                                                        Button::new(Self::icon(0xe254, 12.0, muted_color))
+                                                            .fill(Color32::TRANSPARENT)
+                                                            .frame(false)
+                                                    );
+                                                    Self::decorate_button_response(ui, &edit_btn);
+                                                    if edit_btn.clicked() {
+                                                        rename_clicked = true;
+                                                    }
+                                                }
+                                            });
                                         });
-                                    });
 
-                                    ui.add_space(8.0);
+                                        ui.add_space(8.0);
 
-                                    if is_editing {
-                                        let rename_edit = ui.add_sized(
-                                            [ui.available_width() - 8.0, 20.0],
-                                            egui::TextEdit::singleline(&mut self.folder_rename_name)
-                                        );
-                                        if rename_edit.lost_focus() || (rename_edit.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
-                                            let new_name = self.folder_rename_name.trim().to_owned();
-                                            if !new_name.is_empty() {
-                                                rename_commit = Some((folder.id, new_name));
+                                        if is_editing {
+                                            let rename_edit = ui.add_sized(
+                                                [ui.available_width() - 8.0, 20.0],
+                                                egui::TextEdit::singleline(&mut self.folder_rename_name)
+                                            );
+                                            if rename_edit.lost_focus() || (rename_edit.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
+                                                let new_name = self.folder_rename_name.trim().to_owned();
+                                                if !new_name.is_empty() {
+                                                    rename_commit = Some((folder.id, new_name));
+                                                }
+                                                finish_editing = true;
                                             }
-                                            finish_editing = true;
+                                        } else {
+                                            // Folder Name (passive label, clicking it hits the card response)
+                                            ui.add(
+                                                egui::Label::new(
+                                                    egui::RichText::new(&folder.name)
+                                                        .color(text_color)
+                                                        .strong()
+                                                )
+                                                .truncate()
+                                            );
                                         }
-                                    } else {
-                                        // Folder Name button
-                                        let name_btn = ui.add(
-                                            Button::new(
-                                                egui::RichText::new(&folder.name)
-                                                    .color(text_color)
-                                                    .strong()
-                                            )
-                                            .fill(Color32::TRANSPARENT)
-                                            .frame(false)
-                                        );
-                                        if name_btn.clicked() {
-                                            navigate_to = Some(folder.id);
-                                        }
-                                    }
+                                    });
                                 });
-                            });
+                        });
+
+                        // Check click events on the allocated card rect
+                        if response.clicked() && !is_editing && !del_clicked && !rename_clicked {
+                            navigate_to = Some(folder.id);
+                        }
+
+                        if del_clicked {
+                            delete_folder_id = Some(folder.id);
+                        }
+                        if rename_clicked {
+                            rename_folder_id = Some(folder.id);
+                        }
                     }
                 });
                 ui.add_space(spacing);

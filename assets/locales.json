@@ -123,6 +123,8 @@
       "library.delete_folder": "Delete",
       "library.back": "Back",
       "library.no_folders": "No folders created yet",
+      "library.folder_placeholder": "Folder name...",
+      "library.new_folder_default": "New folder",
       "editor.folder": "Folder",
       "editor.no_folder": "None"
     },
@@ -249,6 +251,8 @@
       "library.delete_folder": "Xoa",
       "library.back": "Quay lai",
       "library.no_folders": "Chua co thu muc nao duoc tao",
+      "library.folder_placeholder": "Ten thu muc...",
+      "library.new_folder_default": "Thu muc moi",
       "editor.folder": "Thu muc",
       "editor.no_folder": "Khong"
     }
