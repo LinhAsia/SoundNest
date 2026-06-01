@@ -1320,7 +1320,7 @@ pub(super) fn render_record_review_panel(&mut self, ctx: &Context) {
                                             .max_decimals(1)
                                             .suffix(" st"),
                                     );
-                                    if semitone_input.changed() {
+                                    if Self::deferred_drag_value_commit(ctx, &semitone_input) {
                                         changed = true;
                                     }
                                 }

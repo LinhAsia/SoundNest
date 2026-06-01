@@ -6800,7 +6800,7 @@ impl SoundFxApp {
                                             .max_decimals(1)
                                             .suffix(" st"),
                                     );
-                                    if semitone_input.changed() {
+                                    if Self::deferred_drag_value_commit(ctx, &semitone_input) {
                                         changed = true;
                                         processed_export_dirty = true;
                                         playback_reapply_request = true;
