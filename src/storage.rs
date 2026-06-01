@@ -52,6 +52,18 @@ pub struct SoundEffect {
     #[serde(default)]
     pub telephone_enabled: bool,
     #[serde(default)]
+    pub distortion_enabled: bool,
+    #[serde(default)]
+    pub echo_enabled: bool,
+    #[serde(default)]
+    pub underwater_enabled: bool,
+    #[serde(default)]
+    pub robot_enabled: bool,
+    #[serde(default)]
+    pub pitch_shift_enabled: bool,
+    #[serde(default = "default_pitch_semitones")]
+    pub pitch_shift_semitones: f32,
+    #[serde(default)]
     pub waveform: Vec<f32>,
 }
 
@@ -146,6 +158,11 @@ impl SoundEffect {
             || (self.trim_end_secs - self.safe_duration()).abs() > 0.02
             || self.reverb_enabled
             || self.telephone_enabled
+            || self.distortion_enabled
+            || self.echo_enabled
+            || self.underwater_enabled
+            || self.robot_enabled
+            || self.pitch_shift_enabled
     }
 }
 
@@ -734,6 +751,12 @@ impl Storage {
             music_asset_file: None,
             reverb_enabled: false,
             telephone_enabled: false,
+            distortion_enabled: false,
+            echo_enabled: false,
+            underwater_enabled: false,
+            robot_enabled: false,
+            pitch_shift_enabled: false,
+            pitch_shift_semitones: 0.0,
             waveform: analysis.waveform,
         })
     }
@@ -915,9 +938,18 @@ impl Storage {
         };
         let reverb = if sound.reverb_enabled { "-rvb" } else { "" };
         let telephone = if sound.telephone_enabled { "-tel" } else { "" };
+        let distortion = if sound.distortion_enabled { "-dst" } else { "" };
+        let echo = if sound.echo_enabled { "-ech" } else { "" };
+        let underwater = if sound.underwater_enabled { "-und" } else { "" };
+        let robot = if sound.robot_enabled { "-rob" } else { "" };
+        let pitch_shift = if sound.pitch_shift_enabled {
+            format!("-ps{:03}", (sound.pitch_shift_semitones * 10.0).round() as i32)
+        } else {
+            "".to_string()
+        };
         format!(
-            "-proc-v{:04}-s{:04}-a{:06}-b{:06}{}{}{}",
-            volume, speed, trim_start, trim_end, stem, reverb, telephone
+            "-proc-v{:04}-s{:04}-a{:06}-b{:06}{}{}{}{}{}{}{}{}",
+            volume, speed, trim_start, trim_end, stem, reverb, telephone, distortion, echo, underwater, robot, pitch_shift
         )
     }
 
@@ -946,6 +978,12 @@ impl Storage {
             music_asset_file: None,
             reverb_enabled: false,
             telephone_enabled: false,
+            distortion_enabled: false,
+            echo_enabled: false,
+            underwater_enabled: false,
+            robot_enabled: false,
+            pitch_shift_enabled: false,
+            pitch_shift_semitones: 0.0,
             waveform: analysis.waveform,
         })
     }
@@ -1055,6 +1093,12 @@ impl Storage {
         updated.trim_end_secs = updated.duration_secs;
         updated.reverb_enabled = false;
         updated.telephone_enabled = false;
+        updated.distortion_enabled = false;
+        updated.echo_enabled = false;
+        updated.underwater_enabled = false;
+        updated.robot_enabled = false;
+        updated.pitch_shift_enabled = false;
+        updated.pitch_shift_semitones = 0.0;
         updated.clamp_trim();
         Ok(updated)
     }
@@ -1355,8 +1399,147 @@ pub fn apply_sound_effects(
     if sound.telephone_enabled {
         apply_telephone_effect(samples, channels, sample_rate.max(1));
     }
+    if sound.underwater_enabled {
+        apply_underwater_effect(samples, channels, sample_rate.max(1));
+    }
     if sound.reverb_enabled {
         apply_reverb_effect(samples, channels, sample_rate.max(1));
+    }
+    if sound.echo_enabled {
+        apply_echo_effect(samples, channels, sample_rate.max(1));
+    }
+    if sound.distortion_enabled {
+        apply_distortion_effect(samples, channels);
+    }
+    if sound.robot_enabled {
+        apply_robot_effect(samples, channels, sample_rate.max(1));
+    }
+    if sound.pitch_shift_enabled {
+        apply_pitch_shift_effect(samples, channels, sample_rate.max(1), sound.pitch_shift_semitones);
+    }
+}
+
+fn apply_distortion_effect(samples: &mut [f32], _channels: usize) {
+    let gain = 3.5;
+    for sample in samples.iter_mut() {
+        let x = *sample * gain;
+        *sample = x.tanh();
+    }
+}
+
+fn apply_echo_effect(samples: &mut [f32], channels: usize, sample_rate: u32) {
+    let delay_secs = 0.25;
+    let feedback = 0.45;
+    let wet = 0.5;
+    let delay_samples = ((sample_rate as f32 * delay_secs).round() as usize).max(1) * channels;
+    let mut delay_buffer = vec![0.0f32; delay_samples];
+    let mut write_pos = 0;
+    
+    for sample_index in 0..samples.len() {
+        let dry = samples[sample_index];
+        let delayed = delay_buffer[write_pos];
+        
+        samples[sample_index] = dry + delayed * wet;
+        delay_buffer[write_pos] = dry + delayed * feedback;
+        
+        write_pos += 1;
+        if write_pos >= delay_samples {
+            write_pos = 0;
+        }
+    }
+}
+
+fn apply_underwater_effect(samples: &mut [f32], channels: usize, sample_rate: u32) {
+    let dt = 1.0 / sample_rate.max(1) as f32;
+    let low_pass_cutoff = 350.0;
+    let low_pass_rc = 1.0 / (std::f32::consts::TAU * low_pass_cutoff);
+    let low_pass_alpha = dt / (low_pass_rc + dt);
+    
+    let mut lp_prev_y = vec![0.0f32; channels];
+    
+    for frame in samples.chunks_exact_mut(channels) {
+        for (channel, sample) in frame.iter_mut().enumerate() {
+            let x = *sample;
+            let lp = lp_prev_y[channel] + low_pass_alpha * (x - lp_prev_y[channel]);
+            lp_prev_y[channel] = lp;
+            *sample = lp;
+        }
+    }
+}
+
+fn apply_robot_effect(samples: &mut [f32], channels: usize, sample_rate: u32) {
+    let freq = 50.0;
+    let t_step = 1.0 / sample_rate as f32;
+    let comb_delay_secs = 0.005;
+    let comb_delay_samples = ((sample_rate as f32 * comb_delay_secs).round() as usize).max(1) * channels;
+    let feedback = 0.6;
+    let mut comb_buffer = vec![0.0f32; comb_delay_samples];
+    let mut write_pos = 0;
+    
+    for sample_index in 0..samples.len() {
+        let time = (sample_index / channels) as f32 * t_step;
+        let modulator = (std::f32::consts::TAU * freq * time).sin();
+        let ring_mod = samples[sample_index] * (0.4 + 0.6 * modulator);
+        
+        let delayed = comb_buffer[write_pos];
+        let comb_out = ring_mod + delayed * feedback;
+        comb_buffer[write_pos] = comb_out;
+        
+        samples[sample_index] = comb_out.clamp(-1.0, 1.0);
+        
+        write_pos += 1;
+        if write_pos >= comb_delay_samples {
+            write_pos = 0;
+        }
+    }
+}
+
+fn apply_pitch_shift_effect(samples: &mut [f32], channels: usize, sample_rate: u32, semitones: f32) {
+    if semitones.abs() < 0.05 {
+        return;
+    }
+    let ratio = 2.0f32.powf(semitones / 12.0);
+    let size = ((sample_rate as f32 * 0.08).round() as usize).max(256); // 80ms delay buffer
+    let mut delay_buf = vec![vec![0.0f32; size]; channels];
+    let mut write_pos = 0;
+    
+    let mut read_ptr_offset = 0.0f32;
+    let original = samples.to_vec();
+    
+    for frame_idx in 0..(samples.len() / channels) {
+        let delay_a = read_ptr_offset;
+        let delay_b = (read_ptr_offset + (size as f32 / 2.0)) % size as f32;
+        
+        let w_a = if delay_a < (size as f32 / 2.0) {
+            delay_a / (size as f32 / 2.0)
+        } else {
+            (size as f32 - delay_a) / (size as f32 / 2.0)
+        };
+        let w_b = 1.0 - w_a;
+        
+        for ch in 0..channels {
+            let sample_val = original[frame_idx * channels + ch];
+            delay_buf[ch][write_pos] = sample_val;
+            
+            let idx_a = (write_pos + size - delay_a.floor() as usize) % size;
+            let idx_a_next = (idx_a + size - 1) % size;
+            let frac_a = delay_a.fract();
+            let val_a = delay_buf[ch][idx_a] * (1.0 - frac_a) + delay_buf[ch][idx_a_next] * frac_a;
+            
+            let idx_b = (write_pos + size - delay_b.floor() as usize) % size;
+            let idx_b_next = (idx_b + size - 1) % size;
+            let frac_b = delay_b.fract();
+            let val_b = delay_buf[ch][idx_b] * (1.0 - frac_b) + delay_buf[ch][idx_b_next] * frac_b;
+            
+            samples[frame_idx * channels + ch] = val_a * w_a + val_b * w_b;
+        }
+        
+        write_pos = (write_pos + 1) % size;
+        read_ptr_offset += 1.0 - ratio;
+        if read_ptr_offset < 0.0 {
+            read_ptr_offset += size as f32;
+        }
+        read_ptr_offset %= size as f32;
     }
 }
 
@@ -1448,6 +1631,10 @@ fn default_speed() -> f32 {
 
 fn default_video_fps() -> u32 {
     20
+}
+
+fn default_pitch_semitones() -> f32 {
+    0.0
 }
 
 fn normalize_video_fps(fps: u32) -> u32 {
