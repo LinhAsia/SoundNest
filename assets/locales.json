@@ -115,8 +115,16 @@
       "editor.music_hint": "Keeps the instrumental stem on disk so you can switch back later.",
       "editor.music_preview_original": "Separating music... previewing original sound",
       "editor.music_stopping": "Stopping music separation",
-      "editor.music_processing": "Music separation is still processing",
-      "library.columns": "col"
+      "library.columns": "col",
+      "library.folders": "Folders",
+      "library.root_folder": "Root (None)",
+      "library.create_folder": "Create Folder",
+      "library.rename_folder": "Rename",
+      "library.delete_folder": "Delete",
+      "library.back": "Back",
+      "library.no_folders": "No folders created yet",
+      "editor.folder": "Folder",
+      "editor.no_folder": "None"
     },
     "vi": {
       "name": "Tiếng Việt",
@@ -233,7 +241,16 @@
       "editor.music_hint": "Gi? file nh?c kh?ng vocal tr?n m?y ?? sau n?y b?t l?i kh?ng c?n t?ch l?i.",
       "editor.music_preview_original": "?ang t?ch nh?c... dang nghe ban g?c",
       "editor.music_stopping": "?ang d?ng t?ch nh?c",
-      "editor.music_processing": "T?ch nh?c v?n dang xu ly"
+      "editor.music_processing": "T?ch nh?c v?n dang xu ly",
+      "library.folders": "Thu muc",
+      "library.root_folder": "Thu muc goc (Khong)",
+      "library.create_folder": "Tao thu muc",
+      "library.rename_folder": "Doi ten",
+      "library.delete_folder": "Xoa",
+      "library.back": "Quay lai",
+      "library.no_folders": "Chua co thu muc nao duoc tao",
+      "editor.folder": "Thu muc",
+      "editor.no_folder": "Khong"
     }
   }
 }

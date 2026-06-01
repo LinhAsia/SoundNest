@@ -65,6 +65,14 @@ pub struct SoundEffect {
     pub pitch_shift_semitones: f32,
     #[serde(default)]
     pub waveform: Vec<f32>,
+    #[serde(default)]
+    pub folder_id: Option<Uuid>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Folder {
+    pub id: Uuid,
+    pub name: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -193,6 +201,8 @@ impl Storage {
 #[derive(Debug, Serialize, Deserialize, Default)]
 struct LibraryFile {
     sounds: Vec<SoundEffect>,
+    #[serde(default)]
+    folders: Vec<Folder>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default)]
@@ -314,12 +324,32 @@ impl Storage {
     }
 
     pub fn save_library(&self, sounds: &[SoundEffect]) -> Result<()> {
+        let folders = self.load_folders().unwrap_or_default();
+        self.save_library_with_folders(sounds, &folders)
+    }
+
+    pub fn save_library_with_folders(&self, sounds: &[SoundEffect], folders: &[Folder]) -> Result<()> {
         let payload = LibraryFile {
             sounds: sounds.to_vec(),
+            folders: folders.to_vec(),
         };
         let json = serde_json::to_string_pretty(&payload).context("unable to serialize library")?;
         fs::write(&self.library_path, json).context("unable to write library file")?;
         Ok(())
+    }
+
+    pub fn load_folders(&self) -> Result<Vec<Folder>> {
+        if !self.library_path.exists() {
+            return Ok(Vec::new());
+        }
+        let raw = fs::read_to_string(&self.library_path).context("unable to read library file")?;
+        let library: LibraryFile = serde_json::from_str(&raw).context("invalid library file format")?;
+        Ok(library.folders)
+    }
+
+    pub fn save_folders(&self, folders: &[Folder]) -> Result<()> {
+        let sounds = self.load_library().unwrap_or_default();
+        self.save_library_with_folders(&sounds, folders)
     }
 
     pub fn load_video_library(&self) -> Result<Vec<VideoAsset>> {
@@ -758,6 +788,7 @@ impl Storage {
             pitch_shift_enabled: false,
             pitch_shift_semitones: 0.0,
             waveform: analysis.waveform,
+            folder_id: None,
         })
     }
 
@@ -985,6 +1016,7 @@ impl Storage {
             pitch_shift_enabled: false,
             pitch_shift_semitones: 0.0,
             waveform: analysis.waveform,
+            folder_id: None,
         })
     }
 

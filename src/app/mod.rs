@@ -69,6 +69,7 @@ pub(crate) enum AppView {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LibraryTab {
     Sounds,
+    Folders,
     Videos,
 }
 
@@ -303,6 +304,11 @@ pub struct SoundFxApp {
     pub(super) import_audio_entries: Vec<PathBuf>,
     pub(super) app_view: AppView,
     pub(super) library_tab: LibraryTab,
+    pub(super) folders: Vec<crate::storage::Folder>,
+    pub(super) library_current_folder: Option<Uuid>,
+    pub(super) editing_folder_id: Option<Uuid>,
+    pub(super) folder_rename_name: String,
+    pub(super) new_folder_name: String,
     pub(super) recorder: Recorder,
     pub(super) record_name: String,
     pub(super) record_input_source: PitchInputSource,
@@ -464,6 +470,10 @@ impl SoundFxApp {
             status = Some(error.to_string());
             Vec::new()
         });
+        let folders = storage.load_folders().unwrap_or_else(|error| {
+            status = Some(error.to_string());
+            Vec::new()
+        });
 
         let audio = AudioEngine::new().ok();
         if audio.is_none() && status.is_none() {
@@ -582,6 +592,11 @@ impl SoundFxApp {
             import_audio_entries: Vec::new(),
             app_view: AppView::Editor,
             library_tab: LibraryTab::Sounds,
+            folders,
+            library_current_folder: None,
+            editing_folder_id: None,
+            folder_rename_name: String::new(),
+            new_folder_name: String::new(),
             recorder: Recorder::new(),
             record_name: "recording".to_owned(),
             record_input_source: PitchInputSource::System,
@@ -2763,17 +2778,19 @@ impl SoundFxApp {
                 if Self::icon_titlebar(
                     ui,
                     [42.0, 30.0],
-                    0xe9b0,
+                    0xe02d,
                     self.app_view == AppView::Library,
                     false,
                 )
                 .clicked()
                 {
-                    self.app_view = if self.app_view == AppView::Library {
-                        AppView::Editor
+                    if self.app_view == AppView::Library {
+                        self.app_view = AppView::Editor;
                     } else {
-                        AppView::Library
-                    };
+                        self.app_view = AppView::Library;
+                    }
+                    self.library_tab = LibraryTab::Sounds;
+                    self.library_current_folder = None;
                 }
 
                 let spn_response =
@@ -5107,6 +5124,21 @@ impl SoundFxApp {
             }
 
             ui.add_space(8.0);
+            let folders_tab = ui.add_sized(
+                [84.0, 30.0],
+                Self::action_button(
+                    RichText::new(self.t("library.folders")).size(12.5),
+                    self.library_tab == LibraryTab::Folders,
+                    false,
+                ),
+            );
+            Self::decorate_button_response(ui, &folders_tab);
+            if folders_tab.clicked() {
+                self.library_tab = LibraryTab::Folders;
+                self.library_current_folder = None;
+            }
+
+            ui.add_space(8.0);
             let videos_tab = ui.add_sized(
                 [84.0, 30.0],
                 Self::action_button(
@@ -5120,122 +5152,126 @@ impl SoundFxApp {
                 self.library_tab = LibraryTab::Videos;
             }
 
-            if self.library_tab == LibraryTab::Sounds {
+            if self.library_tab == LibraryTab::Sounds || (self.library_tab == LibraryTab::Folders && self.library_current_folder.is_some()) {
                 ui.add_space(12.0);
                 self.draw_library_tag_filter_row(ui);
             }
 
-            ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                let favorites_active = if self.library_tab == LibraryTab::Videos {
-                    self.library_favorites_only_video
-                } else {
-                    self.library_favorites_only_audio
-                };
-                let favorite_filter = ui.add_sized(
-                    [40.0, 30.0],
-                    Button::new(Self::icon(
-                        if favorites_active { 0xe838 } else { 0xe83a },
-                        18.0,
-                        if favorites_active {
-                            Color32::from_rgb(82, 58, 0)
-                        } else {
-                            Self::strong_text_color()
-                        },
-                    ))
-                    .fill(if favorites_active {
-                        Color32::from_rgb(247, 191, 64)
-                    } else if self.dark_theme {
-                        Color32::from_rgba_premultiplied(41, 34, 47, 224)
+            if !(self.library_tab == LibraryTab::Folders && self.library_current_folder.is_none()) {
+                ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                    let favorites_active = if self.library_tab == LibraryTab::Videos {
+                        self.library_favorites_only_video
                     } else {
-                        Color32::from_rgba_premultiplied(237, 231, 238, 198)
-                    })
-                    .stroke(Stroke::new(
-                        1.0,
-                        if favorites_active {
+                        self.library_favorites_only_audio
+                    };
+                    let favorite_filter = ui.add_sized(
+                        [40.0, 30.0],
+                        Button::new(Self::icon(
+                            if favorites_active { 0xe838 } else { 0xe83a },
+                            18.0,
+                            if favorites_active {
+                                Color32::from_rgb(82, 58, 0)
+                            } else {
+                                Self::strong_text_color()
+                            },
+                        ))
+                        .fill(if favorites_active {
                             Color32::from_rgb(247, 191, 64)
                         } else if self.dark_theme {
-                            Color32::from_rgb(84, 69, 92)
+                            Color32::from_rgba_premultiplied(41, 34, 47, 224)
                         } else {
-                            Color32::from_rgb(221, 212, 222)
-                        },
-                    ))
-                    .corner_radius(9.0),
-                );
-                Self::decorate_button_response(ui, &favorite_filter);
-                if favorite_filter.clicked() {
-                    if self.library_tab == LibraryTab::Videos {
-                        self.library_favorites_only_video = !self.library_favorites_only_video;
-                    } else {
-                        self.library_favorites_only_audio = !self.library_favorites_only_audio;
-                    }
-                }
-                ui.add_space(8.0);
-                Self::with_slider_visuals(ui, |ui| {
-                    let mut slider_value = (LIBRARY_GRID_MIN_COLUMNS + LIBRARY_GRID_MAX_COLUMNS)
-                        as f32
-                        - self.library_grid_columns as f32;
-                    let (slider_response, slider_changed) = Self::click_slider(
-                        ui,
-                        &mut slider_value,
-                        LIBRARY_GRID_MIN_COLUMNS as f32..=LIBRARY_GRID_MAX_COLUMNS as f32,
-                        1.0,
-                        vec2(132.0, 28.0),
+                            Color32::from_rgba_premultiplied(237, 231, 238, 198)
+                        })
+                        .stroke(Stroke::new(
+                            1.0,
+                            if favorites_active {
+                                Color32::from_rgb(247, 191, 64)
+                            } else if self.dark_theme {
+                                Color32::from_rgb(84, 69, 92)
+                            } else {
+                                Color32::from_rgb(221, 212, 222)
+                            },
+                        ))
+                        .corner_radius(9.0),
                     );
-                    library_slider_active = slider_response.hovered()
-                        || slider_response.dragged()
-                        || slider_response.is_pointer_button_down_on();
-                    if slider_response.changed() || slider_changed {
-                        let reversed = slider_value.round().clamp(
-                            LIBRARY_GRID_MIN_COLUMNS as f32,
-                            LIBRARY_GRID_MAX_COLUMNS as f32,
-                        ) as usize;
-                        self.library_grid_columns =
-                            (LIBRARY_GRID_MIN_COLUMNS + LIBRARY_GRID_MAX_COLUMNS) - reversed;
-                        self.library_grid_columns = self
-                            .library_grid_columns
-                            .clamp(LIBRARY_GRID_MIN_COLUMNS, LIBRARY_GRID_MAX_COLUMNS);
-                        columns_changed = true;
+                    Self::decorate_button_response(ui, &favorite_filter);
+                    if favorite_filter.clicked() {
+                        if self.library_tab == LibraryTab::Videos {
+                            self.library_favorites_only_video = !self.library_favorites_only_video;
+                        } else {
+                            self.library_favorites_only_audio = !self.library_favorites_only_audio;
+                        }
                     }
                     ui.add_space(8.0);
-                    ui.label(
-                        RichText::new(format!(
-                            "{} {}",
-                            self.library_grid_columns,
-                            self.t("library.columns")
-                        ))
-                        .size(11.5)
-                        .color(Self::muted_text_color()),
-                    );
+                    Self::with_slider_visuals(ui, |ui| {
+                        let mut slider_value = (LIBRARY_GRID_MIN_COLUMNS + LIBRARY_GRID_MAX_COLUMNS)
+                            as f32
+                            - self.library_grid_columns as f32;
+                        let (slider_response, slider_changed) = Self::click_slider(
+                            ui,
+                            &mut slider_value,
+                            LIBRARY_GRID_MIN_COLUMNS as f32..=LIBRARY_GRID_MAX_COLUMNS as f32,
+                            1.0,
+                            vec2(132.0, 28.0),
+                        );
+                        library_slider_active = slider_response.hovered()
+                            || slider_response.dragged()
+                            || slider_response.is_pointer_button_down_on();
+                        if slider_response.changed() || slider_changed {
+                            let reversed = slider_value.round().clamp(
+                                LIBRARY_GRID_MIN_COLUMNS as f32,
+                                LIBRARY_GRID_MAX_COLUMNS as f32,
+                            ) as usize;
+                            self.library_grid_columns =
+                                (LIBRARY_GRID_MIN_COLUMNS + LIBRARY_GRID_MAX_COLUMNS) - reversed;
+                            self.library_grid_columns = self
+                                .library_grid_columns
+                                .clamp(LIBRARY_GRID_MIN_COLUMNS, LIBRARY_GRID_MAX_COLUMNS);
+                            columns_changed = true;
+                        }
+                        ui.add_space(8.0);
+                        ui.label(
+                            RichText::new(format!(
+                                "{} {}",
+                                self.library_grid_columns,
+                                self.t("library.columns")
+                            ))
+                            .size(11.5)
+                            .color(Self::muted_text_color()),
+                        );
+                    });
+                    if library_slider_active {
+                        self.pending_sound_drag = None;
+                    }
                 });
-                if library_slider_active {
-                    self.pending_sound_drag = None;
-                }
-            });
+            }
         });
         ui.add_space(10.0);
-        Frame::new()
-            .fill(Self::surface_fill())
-            .stroke(Stroke::new(1.0, Self::border_color()))
-            .corner_radius(18.0)
-            .inner_margin(Margin::symmetric(12, 8))
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(Self::icon(0xe8b6, 16.0, Self::muted_text_color()));
-                    let search_hint = self.t("library.search");
-                    let query = if self.library_tab == LibraryTab::Videos {
-                        &mut self.library_video_query
-                    } else {
-                        &mut self.library_audio_query
-                    };
-                    ui.add_sized(
-                        [ui.available_width(), 24.0],
-                        TextEdit::singleline(query)
-                            .frame(false)
-                            .hint_text(search_hint)
-                            .desired_width(f32::INFINITY),
-                    );
+        if !(self.library_tab == LibraryTab::Folders && self.library_current_folder.is_none()) {
+            Frame::new()
+                .fill(Self::surface_fill())
+                .stroke(Stroke::new(1.0, Self::border_color()))
+                .corner_radius(18.0)
+                .inner_margin(Margin::symmetric(12, 8))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(Self::icon(0xe8b6, 16.0, Self::muted_text_color()));
+                        let search_hint = self.t("library.search");
+                        let query = if self.library_tab == LibraryTab::Videos {
+                            &mut self.library_video_query
+                        } else {
+                            &mut self.library_audio_query
+                        };
+                        ui.add_sized(
+                            [ui.available_width(), 24.0],
+                            TextEdit::singleline(query)
+                                .frame(false)
+                                .hint_text(search_hint)
+                                .desired_width(f32::INFINITY),
+                        );
+                    });
                 });
-            });
+        }
         if columns_changed {
             let _ = self
                 .storage
@@ -5249,6 +5285,40 @@ impl SoundFxApp {
             .show(ui, |ui| {
                 let viewport_width = ui.clip_rect().width().min(ui.available_width());
                 ui.set_width(viewport_width);
+                ui.set_max_width(viewport_width);
+
+                if self.library_tab == LibraryTab::Folders && self.library_current_folder.is_none() {
+                    self.draw_folders_list_view(ui);
+                    return;
+                }
+
+                if self.library_tab == LibraryTab::Folders && self.library_current_folder.is_some() {
+                    let folder_id = self.library_current_folder.unwrap();
+                    let folder_name = self.folders.iter()
+                        .find(|f| f.id == folder_id)
+                        .map(|f| f.name.clone())
+                        .unwrap_or_else(|| "Folder".to_owned());
+                    
+                    ui.horizontal(|ui| {
+                        let back_btn = ui.add(
+                            Button::new(Self::icon(0xe5c4, 16.0, Self::strong_text_color()))
+                                .fill(Self::surface_fill())
+                                .stroke(Stroke::new(1.0, Self::border_color()))
+                                .corner_radius(12.0)
+                        );
+                        if back_btn.clicked() {
+                            self.library_current_folder = None;
+                        }
+                        ui.add_space(8.0);
+                        ui.label(
+                            RichText::new(folder_name)
+                                .font(FontId::new(16.0, FontFamily::Proportional))
+                                .color(Self::strong_text_color())
+                                .strong()
+                        );
+                    });
+                    ui.add_space(12.0);
+                }
                 ui.set_max_width(viewport_width);
 
                 if self.library_tab == LibraryTab::Videos {
@@ -6392,6 +6462,9 @@ impl SoundFxApp {
         let tags_hint = self.t("editor.tags_hint");
         let tags_available_label = self.t("editor.tags_available");
         let available_tags = self.distinct_sound_tags();
+        let folder_label = self.t("editor.folder");
+        let no_folder_label = self.t("editor.no_folder");
+        let app_folders = self.folders.clone();
 
         Frame::new()
             .fill(Self::surface_fill())
@@ -6539,6 +6612,46 @@ impl SoundFxApp {
                                 }
                             });
                         });
+                });
+
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(&folder_label)
+                            .size(11.5)
+                            .color(Self::muted_text_color())
+                            .strong(),
+                    );
+                    ui.add_space(8.0);
+                    let mut current_folder_name = no_folder_label.clone();
+                    let mut selected_id = sound.folder_id;
+                    if let Some(folder_id) = selected_id {
+                        if let Some(folder) = app_folders.iter().find(|f| f.id == folder_id) {
+                            current_folder_name = folder.name.clone();
+                        }
+                    }
+
+                    let combo_response = egui::ComboBox::from_id_salt(sound.id)
+                        .selected_text(current_folder_name)
+                        .show_ui(ui, |ui| {
+                            let mut choice_changed = false;
+                            if ui.selectable_value(&mut selected_id, None, &no_folder_label).clicked() {
+                                choice_changed = true;
+                            }
+                            for folder in &app_folders {
+                                if ui.selectable_value(&mut selected_id, Some(folder.id), &folder.name).clicked() {
+                                    choice_changed = true;
+                                }
+                            }
+                            choice_changed
+                        });
+
+                    if let Some(choice_changed) = combo_response.inner {
+                        if choice_changed {
+                            sound.folder_id = selected_id;
+                            changed = true;
+                        }
+                    }
                 });
 
                 ui.add_space(16.0);
