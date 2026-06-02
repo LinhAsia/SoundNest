@@ -852,6 +852,7 @@ pub(super) fn stop_preview(&mut self) {
             audio.stop();
         }
         self.myinstants_preview_audio_url = None;
+        self.pending_preview_after_preload = None;
     }
 
 pub(super) fn maybe_start_pending_processed_export(&mut self) {

@@ -540,9 +540,7 @@ pub(super) fn poll_audio_preload_jobs(&mut self, ctx: &Context) {
                             })
                     {
                         self.pending_preview_after_preload = None;
-                        if self.selected == Some(pending_sound_id) {
-                            pending_preview_to_play = Some((pending_sound_id, start_position_secs));
-                        }
+                        pending_preview_to_play = Some((pending_sound_id, start_position_secs));
                     }
                 }
             }

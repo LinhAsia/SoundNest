@@ -448,6 +448,7 @@ pub struct SoundFxApp {
     pub(super) folder_name_warning: bool,
     pub(super) folder_import_select_mode: Option<Uuid>,
     pub(super) folder_import_animating: HashMap<Uuid, Instant>,
+    pub(super) editing_from_folder: Option<Uuid>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -756,6 +757,7 @@ impl SoundFxApp {
             folder_name_warning: false,
             folder_import_select_mode: None,
             folder_import_animating: HashMap::new(),
+            editing_from_folder: None,
         };
         app.begin_async_library_hydration();
         app.begin_async_transition_analysis(resolved_startup_sound);
@@ -1144,6 +1146,11 @@ impl SoundFxApp {
 
     fn open_sound_from_library(&mut self, sound_id: Uuid) {
         self.selected = Some(sound_id);
+        if self.library_tab == LibraryTab::Folders && self.library_current_folder.is_some() {
+            self.editing_from_folder = self.library_current_folder;
+        } else {
+            self.editing_from_folder = None;
+        }
         self.app_view = AppView::Editor;
     }
 
@@ -5134,7 +5141,18 @@ impl SoundFxApp {
                 );
                 Self::decorate_button_response(ui, &back_btn);
                 if back_btn.clicked() {
-                    self.folder_import_select_mode = None;
+                    if let Some(folder_id) = self.folder_import_select_mode {
+                        for sound_id in self.folder_import_animating.keys() {
+                            if let Some(s) = self.sounds.iter_mut().find(|s| s.id == *sound_id) {
+                                s.folder_id = Some(folder_id);
+                            }
+                        }
+                        self.folder_import_animating.clear();
+                        self.folder_import_select_mode = None;
+                        self.library_audio_query.clear();
+                        self.library_audio_tag_filter = None;
+                        self.mark_dirty(ui.ctx());
+                    }
                 }
 
                 ui.add_space(12.0);
@@ -5669,15 +5687,20 @@ impl SoundFxApp {
                                                 if center_gap > 0.0 {
                                                     ui.add_space(center_gap);
                                                 }
+                                                let is_loading = self.pending_preview_after_preload.is_some_and(|(id, _)| id == sound.id);
                                                 let play_btn = Self::icon_action(
                                                     ui,
                                                     action_button_size,
-                                                    0xe037, // Play icon
-                                                    false,
+                                                    if is_loading { 0xe5d5 } else { 0xe037 },
+                                                    is_loading,
                                                     false,
                                                 );
                                                 if play_btn.clicked() {
-                                                    preview_sound = Some(sound.id);
+                                                    if is_loading {
+                                                        self.stop_preview();
+                                                    } else {
+                                                        preview_sound = Some(sound.id);
+                                                    }
                                                 }
                                                 play_btn_response = Some(play_btn);
                                             });
@@ -5701,16 +5724,21 @@ impl SoundFxApp {
                                                 {
                                                     favorite_sound = Some(sound.id);
                                                 }
+                                                let is_loading = self.pending_preview_after_preload.is_some_and(|(id, _)| id == sound.id);
                                                 if Self::icon_action(
                                                     ui,
                                                     action_button_size,
-                                                    0xe037,
-                                                    false,
+                                                    if is_loading { 0xe5d5 } else { 0xe037 },
+                                                    is_loading,
                                                     false,
                                                 )
                                                 .clicked()
                                                 {
-                                                    preview_sound = Some(sound.id);
+                                                    if is_loading {
+                                                        self.stop_preview();
+                                                    } else {
+                                                        preview_sound = Some(sound.id);
+                                                    }
                                                 }
                                                 if Self::icon_action(
                                                     ui,
@@ -6569,6 +6597,10 @@ impl SoundFxApp {
             )
         };
         let preview_asset_path = self.preview_asset_path_for_sound(&self.sounds[index]);
+        let editor_audio_loading = self.audio_preload_inflight.contains(&preview_asset_path)
+            || self
+                .pending_preview_after_preload
+                .is_some_and(|(pending_sound_id, _)| pending_sound_id == sound_id);
         self.schedule_audio_preload(preview_asset_path);
         self.sync_editor_tags_input();
         let waveform_samples = self.sound_waveform_samples(&self.sounds[index]);
@@ -6680,24 +6712,22 @@ impl SoundFxApp {
             .corner_radius(36.0)
             .inner_margin(Margin::same(14))
             .show(ui, |ui| {
-                let storage_root = self.storage.root_dir().to_path_buf();
                 let sound = &mut self.sounds[index];
-                let editor_asset_path = if sound.needs_processed_export()
-                    && Storage::processed_export_exists(&storage_root, sound)
-                {
-                    Storage::processed_export_path(&storage_root, sound)
-                } else {
-                    sound.asset_path(&storage_root)
-                };
-                let editor_audio_loading = self.audio_preload_inflight.contains(&editor_asset_path)
-                    || self
-                        .pending_preview_after_preload
-                        .is_some_and(|(pending_sound_id, _)| pending_sound_id == sound.id);
                 let controls_width = 52.0 + 52.0 + 52.0 + 64.0 + 64.0 + 36.0;
                 let row_gap = 8.0;
-                let name_width = (ui.available_width() - controls_width - row_gap).max(120.0);
+                let back_button_width = if self.editing_from_folder.is_some() { 42.0 + 8.0 } else { 0.0 };
+                let name_width = (ui.available_width() - controls_width - row_gap - back_button_width).max(120.0);
 
                 ui.horizontal(|ui| {
+                    if let Some(folder_id) = self.editing_from_folder {
+                        if Self::icon_action(ui, [42.0, 34.0], 0xe5c4, false, false).clicked() {
+                            self.app_view = AppView::Library;
+                            self.library_tab = LibraryTab::Folders;
+                            self.library_current_folder = Some(folder_id);
+                            self.editing_from_folder = None;
+                        }
+                        ui.add_space(8.0);
+                    }
                     let response = Frame::new()
                         .fill(Self::input_fill())
                         .stroke(Stroke::new(1.0, Self::border_color()))
@@ -6735,11 +6765,12 @@ impl SoundFxApp {
                             if Self::icon_action(ui, [52.0, 34.0], 0xe2c8, false, false).clicked() {
                                 open_location_request = true;
                             }
+                            let is_loading = editor_audio_loading;
                             if Self::icon_action(
                                 ui,
                                 [64.0, 34.0],
-                                if is_playing { 0xe047 } else { 0xe037 },
-                                is_playing,
+                                if is_loading { 0xe5d5 } else if is_playing { 0xe047 } else { 0xe037 },
+                                is_loading || is_playing,
                                 false,
                             )
                             .clicked()
@@ -7424,7 +7455,7 @@ impl SoundFxApp {
         }
 
         if preview_toggle {
-            if is_playing {
+            if is_playing || editor_audio_loading {
                 self.stop_preview();
             } else {
                 let sound = self.sounds[index].clone();
@@ -11220,6 +11251,12 @@ impl eframe::App for SoundFxApp {
                         let content_height = ui.available_height();
                         if self.app_view == AppView::Library {
                             self.draw_library_grid(ui);
+                        } else if self.editing_from_folder.is_some() {
+                            ui.allocate_ui_with_layout(
+                                vec2(ui.available_width(), content_height),
+                                egui::Layout::top_down(Align::Min),
+                                |ui| self.draw_editor(ui, ctx),
+                            );
                         } else {
                             ui.horizontal_top(|ui| {
                                 let library_width =
