@@ -40,7 +40,7 @@ use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 impl SoundFxApp {
-pub(super) fn sync_editor_tags_input(&mut self) {
+    pub(super) fn sync_editor_tags_input(&mut self) {
         let Some(index) = self.selected_sound_index() else {
             self.editor_tags_input.clear();
             self.editor_tags_input_sound_id = None;
@@ -53,7 +53,7 @@ pub(super) fn sync_editor_tags_input(&mut self) {
         }
     }
 
-pub(super) fn delete_selected(&mut self) {
+    pub(super) fn delete_selected(&mut self) {
         let Some(index) = self.selected_sound_index() else {
             return;
         };
@@ -78,7 +78,7 @@ pub(super) fn delete_selected(&mut self) {
         self.save_now();
     }
 
-pub(super) fn copy_selected_processed_sound(&mut self) {
+    pub(super) fn copy_selected_processed_sound(&mut self) {
         let Some(index) = self.selected_sound_index() else {
             return;
         };
@@ -89,15 +89,15 @@ pub(super) fn copy_selected_processed_sound(&mut self) {
         }
     }
 
-pub(super) fn commit_selected_trimmed_sound(&mut self, ctx: &Context) {
+    pub(super) fn commit_selected_trimmed_sound(&mut self, ctx: &Context) {
         self.start_trim_commit_job(ctx, false);
     }
 
-pub(super) fn duplicate_selected_trimmed_sound(&mut self, ctx: &Context) {
+    pub(super) fn duplicate_selected_trimmed_sound(&mut self, ctx: &Context) {
         self.start_trim_commit_job(ctx, true);
     }
 
-pub(super) fn start_trim_commit_job(&mut self, ctx: &Context, keep_old: bool) {
+    pub(super) fn start_trim_commit_job(&mut self, ctx: &Context, keep_old: bool) {
         let Some(index) = self.selected_sound_index() else {
             return;
         };
@@ -132,12 +132,12 @@ pub(super) fn start_trim_commit_job(&mut self, ctx: &Context, keep_old: bool) {
         ctx.request_repaint();
     }
 
-pub(super) fn copy_sound_file_to_clipboard(&self, sound: &SoundEffect) -> Result<()> {
+    pub(super) fn copy_sound_file_to_clipboard(&self, sound: &SoundEffect) -> Result<()> {
         let export_path = self.storage.export_processed_sound(sound)?;
         self.copy_file_path_to_clipboard(&export_path)
     }
 
-pub(super) fn drag_sound_file_out(&mut self, ctx: &Context, sound: &SoundEffect) -> Result<()> {
+    pub(super) fn drag_sound_file_out(&mut self, ctx: &Context, sound: &SoundEffect) -> Result<()> {
         let drag_path = self.storage.drag_sound_source_path(sound)?;
         self.ignored_drop_path =
             Some(fs::canonicalize(&drag_path).unwrap_or_else(|_| drag_path.clone()));
@@ -152,12 +152,12 @@ pub(super) fn drag_sound_file_out(&mut self, ctx: &Context, sound: &SoundEffect)
         result
     }
 
-pub(super) fn copy_video_file_to_clipboard(&self, video: &VideoAsset) -> Result<()> {
+    pub(super) fn copy_video_file_to_clipboard(&self, video: &VideoAsset) -> Result<()> {
         let video_path = video.asset_path(self.storage.root_dir());
         self.copy_file_path_to_clipboard(&video_path)
     }
 
-pub(super) fn play_video_viewer_from_current_playhead(&mut self) -> Result<()> {
+    pub(super) fn play_video_viewer_from_current_playhead(&mut self) -> Result<()> {
         let Some((audio_path, progress, duration_secs)) =
             self.video_viewer.as_ref().map(|viewer| {
                 (
@@ -183,7 +183,7 @@ pub(super) fn play_video_viewer_from_current_playhead(&mut self) -> Result<()> {
         Ok(())
     }
 
-pub(super) fn toggle_video_viewer_playback(&mut self) {
+    pub(super) fn toggle_video_viewer_playback(&mut self) {
         let Some((audio_path, stored_progress)) = self
             .video_viewer
             .as_ref()
@@ -217,7 +217,7 @@ pub(super) fn toggle_video_viewer_playback(&mut self) {
         }
     }
 
-pub(super) fn copy_file_path_to_clipboard(&self, file_path: &Path) -> Result<()> {
+    pub(super) fn copy_file_path_to_clipboard(&self, file_path: &Path) -> Result<()> {
         #[cfg(windows)]
         {
             let _clipboard =
@@ -236,7 +236,7 @@ pub(super) fn copy_file_path_to_clipboard(&self, file_path: &Path) -> Result<()>
         }
     }
 
-pub(super) fn prepare_video_viewer(&mut self, ctx: &Context, video: &VideoAsset) -> Result<()> {
+    pub(super) fn prepare_video_viewer(&mut self, ctx: &Context, video: &VideoAsset) -> Result<()> {
         let ffmpeg_path = self.downloader.ensure_ffmpeg_available()?;
         let source_path = video.asset_path(self.storage.root_dir());
         let preview_root = self
@@ -309,7 +309,7 @@ pub(super) fn prepare_video_viewer(&mut self, ctx: &Context, video: &VideoAsset)
         Ok(())
     }
 
-pub(super) fn run_ffmpeg_command<I, S>(ffmpeg_path: &Path, args: I) -> Result<()>
+    pub(super) fn run_ffmpeg_command<I, S>(ffmpeg_path: &Path, args: I) -> Result<()>
     where
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
@@ -329,7 +329,11 @@ pub(super) fn run_ffmpeg_command<I, S>(ffmpeg_path: &Path, args: I) -> Result<()
         Ok(())
     }
 
-pub(super) fn load_video_frame_texture(&mut self, ctx: &Context, frame_index: usize) -> Result<()> {
+    pub(super) fn load_video_frame_texture(
+        &mut self,
+        ctx: &Context,
+        frame_index: usize,
+    ) -> Result<()> {
         let Some(viewer) = self.video_viewer.as_mut() else {
             return Ok(());
         };
@@ -355,54 +359,56 @@ pub(super) fn load_video_frame_texture(&mut self, ctx: &Context, frame_index: us
         Ok(())
     }
 
-pub(super) fn preview_file_path(&mut self, path: &Path) -> Result<()> {
+    pub(super) fn preview_file_path(&mut self, path: &Path) -> Result<()> {
         if let Some(audio) = self.audio.as_mut() {
             audio.play_file(path)?;
         }
         Ok(())
     }
 
-pub(super) fn vocal_separation_elapsed_secs(&self) -> Option<f32> {
+    pub(super) fn vocal_separation_elapsed_secs(&self) -> Option<f32> {
         self.vocal_separation_started_at
             .map(|started_at| started_at.elapsed().as_secs_f32())
     }
 
-pub(super) fn vocal_separation_last_elapsed_for_sound(
+    pub(super) fn vocal_separation_last_elapsed_for_sound(
         &self,
         sound_id: Uuid,
         kind: SeparationStemKind,
     ) -> Option<f32> {
-        self.vocal_separation_last_result
-            .as_ref()
-            .and_then(|(target, result_kind, elapsed_secs)| match target {
+        self.vocal_separation_last_result.as_ref().and_then(
+            |(target, result_kind, elapsed_secs)| match target {
                 VocalSeparationTarget::LibrarySound {
                     sound_id: target_sound_id,
                     ..
                 } if *target_sound_id == sound_id && *result_kind == kind => Some(*elapsed_secs),
                 _ => None,
-            })
+            },
+        )
     }
 
-pub(super) fn vocal_separation_last_elapsed_for_recording(
+    pub(super) fn vocal_separation_last_elapsed_for_recording(
         &self,
         source_path: &Path,
         kind: SeparationStemKind,
     ) -> Option<f32> {
-        self.vocal_separation_last_result
-            .as_ref()
-            .and_then(|(target, result_kind, elapsed_secs)| match target {
+        self.vocal_separation_last_result.as_ref().and_then(
+            |(target, result_kind, elapsed_secs)| match target {
                 VocalSeparationTarget::RecordingReview {
                     source_path: target_source_path,
-                } if target_source_path == source_path && *result_kind == kind => Some(*elapsed_secs),
+                } if target_source_path == source_path && *result_kind == kind => {
+                    Some(*elapsed_secs)
+                }
                 _ => None,
-            })
+            },
+        )
     }
 
-pub(super) fn clear_status(&mut self) {
+    pub(super) fn clear_status(&mut self) {
         self.status = None;
     }
 
-pub(super) fn external_drop_pointer_pos(&self, ctx: &Context) -> Option<Pos2> {
+    pub(super) fn external_drop_pointer_pos(&self, ctx: &Context) -> Option<Pos2> {
         ctx.input(|input| input.pointer.hover_pos().or(input.pointer.latest_pos()))
             .or_else(|| {
                 #[cfg(windows)]
@@ -418,7 +424,7 @@ pub(super) fn external_drop_pointer_pos(&self, ctx: &Context) -> Option<Pos2> {
             })
     }
 
-pub(super) fn playback_needs_live_repaint(&self) -> bool {
+    pub(super) fn playback_needs_live_repaint(&self) -> bool {
         let Some(audio) = self.audio.as_ref() else {
             return false;
         };
@@ -444,7 +450,7 @@ pub(super) fn playback_needs_live_repaint(&self) -> bool {
         false
     }
 
-pub(super) fn handle_trim_start_preview(&mut self, ctx: &Context) {
+    pub(super) fn handle_trim_start_preview(&mut self, ctx: &Context) {
         if self.is_transition_active() {
             return;
         }
@@ -481,7 +487,7 @@ pub(super) fn handle_trim_start_preview(&mut self, ctx: &Context) {
         self.preview_sound_from_position(sound.id, Some(sound.trim_start_secs));
     }
 
-pub(super) fn open_recording_review(&mut self, path: &Path) {
+    pub(super) fn open_recording_review(&mut self, path: &Path) {
         self.close_recording_review(true);
         let name = if self.record_name.trim().is_empty() {
             "recording".to_owned()
@@ -520,7 +526,7 @@ pub(super) fn open_recording_review(&mut self, path: &Path) {
         }
     }
 
-pub(super) fn poll_record_video_export(&mut self, ctx: &Context) {
+    pub(super) fn poll_record_video_export(&mut self, ctx: &Context) {
         let mut finished: Option<Result<RecordVideoExportResult, String>> = None;
 
         if let Some(export) = self.active_record_video_export.as_mut() {
@@ -587,7 +593,7 @@ pub(super) fn poll_record_video_export(&mut self, ctx: &Context) {
         }
     }
 
-pub(super) fn handle_dropped_files(&mut self, ctx: &Context) {
+    pub(super) fn handle_dropped_files(&mut self, ctx: &Context) {
         let is_folder_open = self.app_view == AppView::Library
             && self.library_tab == LibraryTab::Folders
             && self.library_current_folder.is_some();
@@ -603,9 +609,10 @@ pub(super) fn handle_dropped_files(&mut self, ctx: &Context) {
             return;
         }
         let pointer_pos = self.external_drop_pointer_pos(ctx);
-        let dropped_in_rect = is_folder_open || self
-            .editor_drop_rect
-            .is_some_and(|rect| pointer_pos.is_some_and(|pos| rect.contains(pos)));
+        let dropped_in_rect = is_folder_open
+            || self
+                .editor_drop_rect
+                .is_some_and(|rect| pointer_pos.is_some_and(|pos| rect.contains(pos)));
         if !self.editor_drop_armed && !dropped_in_rect {
             return;
         }
@@ -625,11 +632,11 @@ pub(super) fn handle_dropped_files(&mut self, ctx: &Context) {
         }
     }
 
-pub(super) fn trim_playhead_drag_id(sound_id: Uuid) -> egui::Id {
+    pub(super) fn trim_playhead_drag_id(sound_id: Uuid) -> egui::Id {
         egui::Id::new((sound_id, "trim-playhead-drag"))
     }
 
-pub(super) fn poll_vocal_separation_jobs(&mut self, ctx: &Context) {
+    pub(super) fn poll_vocal_separation_jobs(&mut self, ctx: &Context) {
         while let Ok(message) = self.vocal_separation_rx.try_recv() {
             let elapsed_secs = self.vocal_separation_elapsed_secs();
             self.vocal_separation_running = false;
@@ -761,7 +768,8 @@ pub(super) fn poll_vocal_separation_jobs(&mut self, ctx: &Context) {
                                             let requested_vocal_only = sound.vocal_only;
                                             sound.vocal_asset_file =
                                                 Some(Storage::vocal_asset_file_name(sound_id));
-                                            preload_path = self.storage.vocal_asset_path_for(&*sound);
+                                            preload_path =
+                                                self.storage.vocal_asset_path_for(&*sound);
                                             cache_path = Some(stable_path.clone());
                                             if !requested_vocal_only {
                                                 refresh_cursor_secs = None;
@@ -769,9 +777,11 @@ pub(super) fn poll_vocal_separation_jobs(&mut self, ctx: &Context) {
                                         }
                                         SeparationStemKind::Music => {
                                             let requested_music_only = sound.music_only;
-                                            let music_file = Storage::music_asset_file_name(sound_id);
+                                            let music_file =
+                                                Storage::music_asset_file_name(sound_id);
                                             sound.music_asset_file = Some(music_file);
-                                            preload_path = self.storage.music_asset_path_for(&*sound);
+                                            preload_path =
+                                                self.storage.music_asset_path_for(&*sound);
                                             cache_path = Some(stable_path.clone());
                                             if !requested_music_only {
                                                 refresh_cursor_secs = None;
@@ -847,7 +857,7 @@ pub(super) fn poll_vocal_separation_jobs(&mut self, ctx: &Context) {
         }
     }
 
-pub(super) fn stop_preview(&mut self) {
+    pub(super) fn stop_preview(&mut self) {
         if let Some(audio) = self.audio.as_mut() {
             audio.stop();
         }
@@ -855,7 +865,7 @@ pub(super) fn stop_preview(&mut self) {
         self.pending_preview_after_preload = None;
     }
 
-pub(super) fn maybe_start_pending_processed_export(&mut self) {
+    pub(super) fn maybe_start_pending_processed_export(&mut self) {
         let Some(sound_id) = self.pending_processed_export_sound else {
             return;
         };
@@ -871,11 +881,14 @@ pub(super) fn maybe_start_pending_processed_export(&mut self) {
         self.spawn_processed_export_job(sound_id);
     }
 
-pub(super) fn poll_processed_export_jobs(&mut self, ctx: &Context) {
+    pub(super) fn poll_processed_export_jobs(&mut self, ctx: &Context) {
         let mut finished_exports = Vec::new();
         while let Ok(message) = self.processed_export_rx.try_recv() {
             match message {
-                ProcessedExportMessage::Finished { export_path, result } => {
+                ProcessedExportMessage::Finished {
+                    export_path,
+                    result,
+                } => {
                     self.processed_export_inflight.remove(&export_path);
                     if let Err(error) = result {
                         if self.selected.is_some() {
@@ -892,7 +905,7 @@ pub(super) fn poll_processed_export_jobs(&mut self, ctx: &Context) {
         }
     }
 
-pub(super) fn poll_trim_commit_jobs(&mut self, ctx: &Context) {
+    pub(super) fn poll_trim_commit_jobs(&mut self, ctx: &Context) {
         let mut changed = false;
         while let Ok(message) = self.trim_commit_rx.try_recv() {
             match message {
@@ -928,7 +941,7 @@ pub(super) fn poll_trim_commit_jobs(&mut self, ctx: &Context) {
         }
     }
 
-pub(super) fn preload_selected_sound_audio(&mut self) {
+    pub(super) fn preload_selected_sound_audio(&mut self) {
         let Some(index) = self.selected_sound_index() else {
             return;
         };
@@ -937,7 +950,7 @@ pub(super) fn preload_selected_sound_audio(&mut self) {
         self.schedule_audio_preload(asset_path);
     }
 
-pub(super) fn render_record_review_panel(&mut self, ctx: &Context) {
+    pub(super) fn render_record_review_panel(&mut self, ctx: &Context) {
         if !self.show_record_review_panel {
             return;
         }
@@ -1248,7 +1261,8 @@ pub(super) fn render_record_review_panel(&mut self, ctx: &Context) {
                                     .on_hover_text(&effect_distortion_hint);
                                 Self::decorate_button_response(ui, &distortion);
                                 if distortion.clicked() {
-                                    draft.sound.distortion_enabled = !draft.sound.distortion_enabled;
+                                    draft.sound.distortion_enabled =
+                                        !draft.sound.distortion_enabled;
                                     changed = true;
                                 }
 
@@ -1282,7 +1296,8 @@ pub(super) fn render_record_review_panel(&mut self, ctx: &Context) {
                                     .on_hover_text(&effect_underwater_hint);
                                 Self::decorate_button_response(ui, &underwater);
                                 if underwater.clicked() {
-                                    draft.sound.underwater_enabled = !draft.sound.underwater_enabled;
+                                    draft.sound.underwater_enabled =
+                                        !draft.sound.underwater_enabled;
                                     changed = true;
                                 }
 
@@ -1314,7 +1329,8 @@ pub(super) fn render_record_review_panel(&mut self, ctx: &Context) {
                                     .on_hover_text(&effect_pitch_shift_hint);
                                 Self::decorate_button_response(ui, &pitch_shift);
                                 if pitch_shift.clicked() {
-                                    draft.sound.pitch_shift_enabled = !draft.sound.pitch_shift_enabled;
+                                    draft.sound.pitch_shift_enabled =
+                                        !draft.sound.pitch_shift_enabled;
                                     changed = true;
                                 }
                                 if draft.sound.pitch_shift_enabled {

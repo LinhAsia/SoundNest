@@ -40,7 +40,7 @@ use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 impl SoundFxApp {
-pub(super) fn start_tts_generation(&mut self) {
+    pub(super) fn start_tts_generation(&mut self) {
         if self.tts_running {
             return;
         }
@@ -91,14 +91,14 @@ pub(super) fn start_tts_generation(&mut self) {
         });
     }
 
-pub(super) fn selected_tts_preset_name(&self) -> Option<&str> {
+    pub(super) fn selected_tts_preset_name(&self) -> Option<&str> {
         self.tts_prompt_presets
             .iter()
             .find(|preset| preset.prompt == self.tts_direction_prompt)
             .map(|preset| preset.name.as_str())
     }
 
-pub(super) fn gemini_voice_label(name: &str) -> &str {
+    pub(super) fn gemini_voice_label(name: &str) -> &str {
         GEMINI_VOICE_OPTIONS
             .iter()
             .find(|voice| voice.name == name)
@@ -106,7 +106,7 @@ pub(super) fn gemini_voice_label(name: &str) -> &str {
             .unwrap_or("Custom voice")
     }
 
-pub(super) fn save_current_tts_preset(&mut self) {
+    pub(super) fn save_current_tts_preset(&mut self) {
         let name = self.tts_preset_name.trim();
         let prompt = self.tts_direction_prompt.trim();
         if name.is_empty() || prompt.is_empty() {
@@ -139,7 +139,7 @@ pub(super) fn save_current_tts_preset(&mut self) {
         self.tts_status = "Preset saved".to_owned();
     }
 
-pub(super) fn apply_tts_preset_by_name(&mut self, name: &str) {
+    pub(super) fn apply_tts_preset_by_name(&mut self, name: &str) {
         if let Some(preset) = self
             .tts_prompt_presets
             .iter()
@@ -152,7 +152,7 @@ pub(super) fn apply_tts_preset_by_name(&mut self, name: &str) {
         }
     }
 
-pub(super) fn delete_selected_tts_preset(&mut self) {
+    pub(super) fn delete_selected_tts_preset(&mut self) {
         let Some(selected_name) = self.selected_tts_preset_name().map(str::to_owned) else {
             return;
         };
@@ -165,7 +165,7 @@ pub(super) fn delete_selected_tts_preset(&mut self) {
         self.tts_status = "Preset removed".to_owned();
     }
 
-pub(super) fn add_tts_result_to_library(&mut self, path: &Path) {
+    pub(super) fn add_tts_result_to_library(&mut self, path: &Path) {
         match self.storage.import_sound(path) {
             Ok(mut sound) => {
                 let preferred_name = self.tts_output_name.trim();
@@ -188,7 +188,7 @@ pub(super) fn add_tts_result_to_library(&mut self, path: &Path) {
         }
     }
 
-pub(super) fn existing_myinstants_path(
+    pub(super) fn existing_myinstants_path(
         files: &mut HashMap<String, PathBuf>,
         audio_url: &str,
     ) -> Option<PathBuf> {
@@ -201,20 +201,20 @@ pub(super) fn existing_myinstants_path(
         }
     }
 
-pub(super) fn existing_myinstants_download_path(&mut self, audio_url: &str) -> Option<PathBuf> {
+    pub(super) fn existing_myinstants_download_path(&mut self, audio_url: &str) -> Option<PathBuf> {
         Self::existing_myinstants_path(&mut self.myinstants_cached_files, audio_url)
     }
 
-pub(super) fn existing_myinstants_preview_path(&mut self, audio_url: &str) -> Option<PathBuf> {
+    pub(super) fn existing_myinstants_preview_path(&mut self, audio_url: &str) -> Option<PathBuf> {
         Self::existing_myinstants_path(&mut self.myinstants_preview_files, audio_url)
     }
 
-pub(super) fn existing_myinstants_playback_path(&mut self, audio_url: &str) -> Option<PathBuf> {
+    pub(super) fn existing_myinstants_playback_path(&mut self, audio_url: &str) -> Option<PathBuf> {
         self.existing_myinstants_download_path(audio_url)
             .or_else(|| self.existing_myinstants_preview_path(audio_url))
     }
 
-pub(super) fn toggle_myinstants_preview(&mut self, result: &MyinstantsResult) -> Result<()> {
+    pub(super) fn toggle_myinstants_preview(&mut self, result: &MyinstantsResult) -> Result<()> {
         if let Some(path) = self.existing_myinstants_playback_path(&result.audio_url)
             && self
                 .audio
@@ -244,7 +244,7 @@ pub(super) fn toggle_myinstants_preview(&mut self, result: &MyinstantsResult) ->
         self.preview_file_path(&path)
     }
 
-pub(super) fn queue_myinstants_waveform_prefetch(&mut self, result: &MyinstantsResult) {
+    pub(super) fn queue_myinstants_waveform_prefetch(&mut self, result: &MyinstantsResult) {
         if self.myinstants_waveforms.contains_key(&result.audio_url)
             || self.myinstants_waveform_jobs.contains(&result.audio_url)
         {
@@ -280,7 +280,7 @@ pub(super) fn queue_myinstants_waveform_prefetch(&mut self, result: &MyinstantsR
         });
     }
 
-pub(super) fn download_site_url(kind: DownloadSiteKind) -> &'static str {
+    pub(super) fn download_site_url(kind: DownloadSiteKind) -> &'static str {
         match kind {
             DownloadSiteKind::Youtube => "https://www.youtube.com/",
             DownloadSiteKind::SoundCloud => "https://soundcloud.com/",
@@ -295,7 +295,7 @@ pub(super) fn download_site_url(kind: DownloadSiteKind) -> &'static str {
         }
     }
 
-pub(super) fn youtube_search_button(ui: &mut Ui, label: &str, enabled: bool) -> egui::Response {
+    pub(super) fn youtube_search_button(ui: &mut Ui, label: &str, enabled: bool) -> egui::Response {
         let desired = vec2(152.0, 36.0);
         let sense = if enabled {
             Sense::click()
@@ -349,7 +349,7 @@ pub(super) fn youtube_search_button(ui: &mut Ui, label: &str, enabled: bool) -> 
         response
     }
 
-pub(super) fn search_sound_button(ui: &mut Ui, enabled: bool) -> egui::Response {
+    pub(super) fn search_sound_button(ui: &mut Ui, enabled: bool) -> egui::Response {
         let desired = vec2(36.0, 36.0);
         let sense = if enabled {
             Sense::click()
@@ -391,7 +391,7 @@ pub(super) fn search_sound_button(ui: &mut Ui, enabled: bool) -> egui::Response 
         response
     }
 
-pub(super) fn format_compact_count(value: u64) -> String {
+    pub(super) fn format_compact_count(value: u64) -> String {
         if value >= 1_000_000_000 {
             format!("{:.1}B views", value as f64 / 1_000_000_000.0)
         } else if value >= 1_000_000 {
@@ -403,7 +403,11 @@ pub(super) fn format_compact_count(value: u64) -> String {
         }
     }
 
-pub(super) fn paint_download_site_icon(painter: &egui::Painter, rect: Rect, badge: DownloadSiteBadge) {
+    pub(super) fn paint_download_site_icon(
+        painter: &egui::Painter,
+        rect: Rect,
+        badge: DownloadSiteBadge,
+    ) {
         let center = rect.center();
         let white = Color32::WHITE;
         let radius = rect.width().min(rect.height()) * 0.5;
@@ -488,19 +492,28 @@ pub(super) fn paint_download_site_icon(painter: &egui::Painter, rect: Rect, badg
                     let mut hook_pts = Vec::new();
                     for i in 0..=8 {
                         let theta = std::f32::consts::PI * (1.0 + (i as f32) / 16.0);
-                        let pt = n_center + vec2(
-                            (4.8 + 4.0 * theta.cos()) * s,
-                            (-4.0 + 4.0 * theta.sin()) * s,
-                        );
+                        let pt = n_center
+                            + vec2(
+                                (4.8 + 4.0 * theta.cos()) * s,
+                                (-4.0 + 4.0 * theta.sin()) * s,
+                            );
                         hook_pts.push(pt);
                     }
                     painter.add(egui::Shape::line(hook_pts, Stroke::new(2.0 * s, color)));
                 };
 
                 // Offset passes for chromatic aberration
-                paint_note(painter, vec2(-0.8 * s, -0.5 * s), Color32::from_rgb(0, 242, 234)); // Cyan
-                paint_note(painter, vec2(0.8 * s, 0.5 * s), Color32::from_rgb(254, 44, 85));  // Red/Magenta
-                paint_note(painter, vec2(0.0, 0.0), white);                                  // White
+                paint_note(
+                    painter,
+                    vec2(-0.8 * s, -0.5 * s),
+                    Color32::from_rgb(0, 242, 234),
+                ); // Cyan
+                paint_note(
+                    painter,
+                    vec2(0.8 * s, 0.5 * s),
+                    Color32::from_rgb(254, 44, 85),
+                ); // Red/Magenta
+                paint_note(painter, vec2(0.0, 0.0), white); // White
             }
             DownloadSiteKind::Facebook => {
                 // Facebook: Blue backing circle, custom vector Facebook "f" logo.
@@ -510,16 +523,16 @@ pub(super) fn paint_download_site_icon(painter: &egui::Painter, rect: Rect, badg
                 ];
                 for i in 1..=6 {
                     let theta = std::f32::consts::PI * (1.0 + (i as f32) / 12.0);
-                    stem_pts.push(center + vec2(
-                        (4.5 + 3.0 * theta.cos()) * s,
-                        (-3.0 + 3.0 * theta.sin()) * s,
-                    ));
+                    stem_pts.push(
+                        center
+                            + vec2(
+                                (4.5 + 3.0 * theta.cos()) * s,
+                                (-3.0 + 3.0 * theta.sin()) * s,
+                            ),
+                    );
                 }
                 // Draw stem and hook
-                painter.add(egui::Shape::line(
-                    stem_pts,
-                    Stroke::new(3.2 * s, white),
-                ));
+                painter.add(egui::Shape::line(stem_pts, Stroke::new(3.2 * s, white)));
                 // Draw crossbar
                 painter.line_segment(
                     [
@@ -532,7 +545,12 @@ pub(super) fn paint_download_site_icon(painter: &egui::Painter, rect: Rect, badg
             DownloadSiteKind::Instagram => {
                 // Instagram: Purple/pink backing circle, camera body outline, inner lens, and flash dot.
                 let body = Rect::from_center_size(center, vec2(13.0 * s, 13.0 * s));
-                painter.rect_stroke(body, 4.0 * s, Stroke::new(1.8 * s, white), StrokeKind::Outside);
+                painter.rect_stroke(
+                    body,
+                    4.0 * s,
+                    Stroke::new(1.8 * s, white),
+                    StrokeKind::Outside,
+                );
                 painter.circle_stroke(center, 3.3 * s, Stroke::new(1.8 * s, white));
                 painter.circle_filled(center + vec2(3.8 * s, -3.8 * s), 1.0 * s, white);
             }
@@ -583,13 +601,13 @@ pub(super) fn paint_download_site_icon(painter: &egui::Painter, rect: Rect, badg
                     center + vec2(6.0 * s, 2.0 * s),
                 );
                 painter.rect_filled(body, 1.0 * s, white);
-                
+
                 let left_ext = Rect::from_min_max(
                     center + vec2(-6.0 * s, 2.0 * s),
                     center + vec2(-2.0 * s, 4.0 * s),
                 );
                 painter.rect_filled(left_ext, 0.0, white);
-                
+
                 painter.add(egui::Shape::convex_polygon(
                     vec![
                         center + vec2(-2.0 * s, 2.0 * s),
@@ -621,18 +639,23 @@ pub(super) fn paint_download_site_icon(painter: &egui::Painter, rect: Rect, badg
             DownloadSiteKind::GoogleDrive => {
                 // Google Drive: White backing circle, interlocking trapezoid bands (green, blue, yellow).
                 painter.circle_filled(center, radius, Color32::from_rgb(252, 252, 252));
-                
+
                 let outer_top = center + vec2(0.0 * s, -6.7 * s);
                 let outer_bottom_left = center + vec2(-6.0 * s, 3.3 * s);
                 let outer_bottom_right = center + vec2(6.0 * s, 3.3 * s);
-                
+
                 let inner_top = center + vec2(-1.0 * s, -4.7 * s);
                 let inner_bottom_left = center + vec2(-1.8 * s, 1.3 * s);
                 let inner_bottom_right = center + vec2(2.8 * s, 1.3 * s);
 
                 // Green band (bottom)
                 painter.add(egui::Shape::convex_polygon(
-                    vec![outer_bottom_left, outer_bottom_right, inner_bottom_right, inner_bottom_left],
+                    vec![
+                        outer_bottom_left,
+                        outer_bottom_right,
+                        inner_bottom_right,
+                        inner_bottom_left,
+                    ],
                     Color32::from_rgb(15, 157, 88),
                     Stroke::NONE,
                 ));
@@ -654,7 +677,7 @@ pub(super) fn paint_download_site_icon(painter: &egui::Painter, rect: Rect, badg
         }
     }
 
-pub(super) fn poll_tts_jobs(&mut self, ctx: &Context) {
+    pub(super) fn poll_tts_jobs(&mut self, ctx: &Context) {
         while let Ok(message) = self.tts_rx.try_recv() {
             self.tts_running = false;
             match message {
@@ -678,7 +701,7 @@ pub(super) fn poll_tts_jobs(&mut self, ctx: &Context) {
         }
     }
 
-pub(super) fn render_download_site_badges(ui: &mut Ui) {
+    pub(super) fn render_download_site_badges(ui: &mut Ui) {
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
             ui.label(
@@ -718,7 +741,7 @@ pub(super) fn render_download_site_badges(ui: &mut Ui) {
         });
     }
 
-pub(super) fn render_youtube_result_row(
+    pub(super) fn render_youtube_result_row(
         ui: &mut Ui,
         result: &YoutubeSearchResult,
         download_label: &str,

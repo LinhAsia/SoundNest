@@ -1,4 +1,3 @@
-use eframe::App;
 use crate::audio::{AudioEngine, calculate_normalization_gain};
 use crate::downloader::{YoutubeAudioDownloader, YoutubeSearchResult};
 use crate::gemini_tts;
@@ -17,6 +16,7 @@ use crate::stream_input::{StreamInputConfig, StreamInputRouter};
 use anyhow::{Context as _, Result};
 #[cfg(windows)]
 use clipboard_win::{Clipboard, Setter, formats::FileList};
+use eframe::App;
 use eframe::egui::{
     self, Align, Align2, Button, CentralPanel, Checkbox, Color32, ComboBox, Context, CornerRadius,
     DragValue, FontFamily, FontId, Frame, Margin, Pos2, ProgressBar, Rect, RichText, ScrollArea,
@@ -86,26 +86,30 @@ pub(crate) struct RecordingDraft {
     pub(crate) keep_vocal: bool,
     pub(crate) vocal_separated_path: Option<PathBuf>,
     pub(crate) keep_music: bool,
-    pub(crate) music_separated_path: Option<PathBuf>,}
+    pub(crate) music_separated_path: Option<PathBuf>,
+}
 
 pub(crate) struct VideoViewerState {
     pub(crate) video: VideoAsset,
     pub(crate) frame_paths: Vec<PathBuf>,
     pub(crate) audio_path: PathBuf,
     pub(crate) progress: f32,
-    pub(crate) current_frame: Option<(usize, TextureHandle, Vec2)>,}
+    pub(crate) current_frame: Option<(usize, TextureHandle, Vec2)>,
+}
 
 pub(crate) struct RecordVideoExportState {
     pub(crate) progress: f32,
     pub(crate) stage: String,
-    pub(crate) receiver: Receiver<RecordVideoExportMessage>,}
+    pub(crate) receiver: Receiver<RecordVideoExportMessage>,
+}
 
 pub(crate) struct RecordVideoExportResult {
     pub(crate) processed_audio_path: PathBuf,
     pub(crate) video_path: PathBuf,
     pub(crate) duration_secs: f32,
     pub(crate) video_fps: u32,
-    pub(crate) video_name: String,}
+    pub(crate) video_name: String,
+}
 
 pub(crate) enum RecordVideoExportMessage {
     Progress { progress: f32, stage: String },
@@ -181,7 +185,8 @@ pub(crate) enum VocalSeparationTarget {
 
 pub(crate) struct GeminiTtsResult {
     pub(crate) path: PathBuf,
-    pub(crate) display_name: String,}
+    pub(crate) display_name: String,
+}
 
 pub(crate) enum GeminiTtsMessage {
     Finished(Result<GeminiTtsResult, String>),
@@ -399,7 +404,8 @@ pub struct SoundFxApp {
     pub(super) vocal_separation_target: Option<VocalSeparationTarget>,
     pub(super) vocal_separation_kind: Option<SeparationStemKind>,
     pub(super) vocal_separation_started_at: Option<Instant>,
-    pub(super) vocal_separation_last_result: Option<(VocalSeparationTarget, SeparationStemKind, f32)>,
+    pub(super) vocal_separation_last_result:
+        Option<(VocalSeparationTarget, SeparationStemKind, f32)>,
     pub(super) vocal_separation_tx: Sender<VocalSeparationMessage>,
     pub(super) vocal_separation_rx: Receiver<VocalSeparationMessage>,
     pub(super) reveal_record_review_on_open: bool,
@@ -465,7 +471,8 @@ pub(crate) struct StartupSplashState {
     pub(crate) duration_sec: f32,
     pub(crate) close_sent: bool,
     pub(crate) sound_waveform: Vec<f32>,
-    pub(crate) sound_duration_sec: f32,}
+    pub(crate) sound_duration_sec: f32,
+}
 
 impl SoundFxApp {
     pub fn new() -> Self {
@@ -1124,10 +1131,10 @@ impl SoundFxApp {
             return;
         }
 
-        let current_folder_id = if self.library_tab == LibraryTab::Folders {
-            self.library_current_folder
-        } else {
+        let current_folder_id = if self.library_tab == LibraryTab::Videos {
             None
+        } else {
+            self.library_current_folder
         };
 
         imported.reverse();
@@ -1146,11 +1153,7 @@ impl SoundFxApp {
 
     fn open_sound_from_library(&mut self, sound_id: Uuid) {
         self.selected = Some(sound_id);
-        if self.library_tab == LibraryTab::Folders && self.library_current_folder.is_some() {
-            self.editing_from_folder = self.library_current_folder;
-        } else {
-            self.editing_from_folder = None;
-        }
+        self.editing_from_folder = self.library_current_folder;
         self.app_view = AppView::Editor;
     }
 
@@ -1204,10 +1207,6 @@ impl SoundFxApp {
         self.clear_status();
     }
 
-    
-
-    
-
     fn truncate_middle_ascii(text: &str, max_chars: usize) -> String {
         let chars = text.chars().collect::<Vec<_>>();
         if chars.len() <= max_chars.max(6) {
@@ -1255,12 +1254,6 @@ impl SoundFxApp {
         centered
     }
 
-    
-
-    
-
-    
-
     fn recording_output_path(&self) -> PathBuf {
         let stamp = format!(
             "{}",
@@ -1287,8 +1280,6 @@ impl SoundFxApp {
         };
         self.storage.root_dir().join("recordings").join(file_name)
     }
-
-
 
     fn normalize_record_export_video_fps(fps: u32) -> u32 {
         match fps {
@@ -1362,10 +1353,6 @@ impl SoundFxApp {
             self.start_recording(ctx, false);
         }
     }
-
-    
-
-    
 
     fn preview_recording_draft_from_position(&mut self, start_position_secs: Option<f32>) {
         let Some(draft) = self.recording_draft.as_ref() else {
@@ -1741,31 +1728,9 @@ impl SoundFxApp {
             .clamp(sound.trim_start_secs, sound.trim_end_secs)
     }
 
-    
-
-    
-
-    
-
     fn set_preview_cursor_secs(&mut self, sound_id: Uuid, secs: f32, duration_secs: f32) {
         self.preview_cursor = Some((sound_id, secs.clamp(0.0, duration_secs)));
     }
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
 
     fn start_vocal_separation_job(
         &mut self,
@@ -1965,44 +1930,6 @@ impl SoundFxApp {
         );
     }
 
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
     fn pointer_primary_pressed_within(ctx: &Context, rect: Rect) -> bool {
         ctx.input(|input| {
             input.pointer.button_pressed(egui::PointerButton::Primary)
@@ -2058,9 +1985,9 @@ impl SoundFxApp {
         ctx.send_viewport_cmd(ViewportCommand::Visible(true));
         ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
         ctx.send_viewport_cmd(ViewportCommand::InnerSize(size));
-        ctx.send_viewport_cmd(ViewportCommand::OuterPosition(Self::centered_outer_position(
-            ctx, size,
-        )));
+        ctx.send_viewport_cmd(ViewportCommand::OuterPosition(
+            Self::centered_outer_position(ctx, size),
+        ));
         ctx.send_viewport_cmd(ViewportCommand::Focus);
         ctx.request_repaint();
     }
@@ -2070,70 +1997,12 @@ impl SoundFxApp {
         ctx.send_viewport_cmd(ViewportCommand::Visible(true));
         ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
         ctx.send_viewport_cmd(ViewportCommand::InnerSize(size));
-        ctx.send_viewport_cmd(ViewportCommand::OuterPosition(Self::centered_outer_position(
-            ctx, size,
-        )));
+        ctx.send_viewport_cmd(ViewportCommand::OuterPosition(
+            Self::centered_outer_position(ctx, size),
+        ));
         ctx.send_viewport_cmd(ViewportCommand::Focus);
         ctx.request_repaint();
     }
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
 
     fn mark_dirty(&mut self, ctx: &Context) {
         self.pending_save = true;
@@ -2172,7 +2041,12 @@ impl SoundFxApp {
     }
 
     fn spawn_processed_export_job(&mut self, sound_id: Uuid) {
-        let Some(sound) = self.sounds.iter().find(|sound| sound.id == sound_id).cloned() else {
+        let Some(sound) = self
+            .sounds
+            .iter()
+            .find(|sound| sound.id == sound_id)
+            .cloned()
+        else {
             return;
         };
         if !sound.needs_processed_export() {
@@ -2188,7 +2062,8 @@ impl SoundFxApp {
         let tx = self.processed_export_tx.clone();
 
         thread::spawn(move || {
-            let result = Storage::export_processed_sound_at(&root_dir, &sound).map_err(|error| error.to_string());
+            let result = Storage::export_processed_sound_at(&root_dir, &sound)
+                .map_err(|error| error.to_string());
             let _ = tx.send(ProcessedExportMessage::Finished {
                 export_path,
                 result,
@@ -2201,7 +2076,12 @@ impl SoundFxApp {
             return;
         }
 
-        let Some(sound) = self.sounds.iter().find(|sound| sound.id == sound_id).cloned() else {
+        let Some(sound) = self
+            .sounds
+            .iter()
+            .find(|sound| sound.id == sound_id)
+            .cloned()
+        else {
             return;
         };
 
@@ -2210,7 +2090,8 @@ impl SoundFxApp {
         let tx = self.normalize_tx.clone();
 
         thread::spawn(move || {
-            let result = calculate_normalization_gain(&asset_path).map_err(|error| error.to_string());
+            let result =
+                calculate_normalization_gain(&asset_path).map_err(|error| error.to_string());
             let _ = tx.send(NormalizeMessage::Finished { sound_id, result });
         });
     }
@@ -2230,10 +2111,7 @@ impl SoundFxApp {
         thread::spawn(move || {
             let result = crate::audio::AudioEngine::decode_audio_for_cache(&asset_path)
                 .map_err(|error| error.to_string());
-            let _ = tx.send(AudioPreloadMessage::Finished {
-                asset_path,
-                result,
-            });
+            let _ = tx.send(AudioPreloadMessage::Finished { asset_path, result });
         });
     }
 
@@ -2468,7 +2346,6 @@ impl SoundFxApp {
         Ok(())
     }
 
-
     fn with_dark_combo_visuals<R>(ui: &mut Ui, add_contents: impl FnOnce(&mut Ui) -> R) -> R {
         ui.scope(|ui| {
             if Self::dark_theme_enabled() {
@@ -2629,14 +2506,6 @@ impl SoundFxApp {
         Self::decorate_button_response(ui, &response);
         response
     }
-
-    
-
-    
-
-    
-
-    
 
     fn paint_theme_titlebar_icon(painter: &egui::Painter, rect: Rect, active: bool) {
         let center = rect.center();
@@ -3046,10 +2915,6 @@ impl SoundFxApp {
         }
     }
 
-    
-
-    
-
     fn render_record_panel(&mut self, ctx: &Context) {
         if !self.show_record_panel {
             return;
@@ -3146,10 +3011,13 @@ impl SoundFxApp {
                                     .inner_margin(Margin::symmetric(10, 5))
                                     .show(ui, |ui| {
                                         ui.label(
-                                            RichText::new(format!("Pressing: {}", preview_key.to_string()))
-                                                .size(11.5)
-                                                .color(Color32::from_rgb(255, 232, 96))
-                                                .strong(),
+                                            RichText::new(format!(
+                                                "Pressing: {}",
+                                                preview_key.to_string()
+                                            ))
+                                            .size(11.5)
+                                            .color(Color32::from_rgb(255, 232, 96))
+                                            .strong(),
                                         );
                                     });
                             } else {
@@ -3170,12 +3038,12 @@ impl SoundFxApp {
                                 RichText::new(key_text)
                                     .size(11.5)
                                     .color(Self::strong_text_color())
-                                    .strong()
+                                    .strong(),
                             )
                             .fill(Self::surface_fill())
                             .stroke(Stroke::new(1.0, Self::subtle_border_color()))
                             .corner_radius(12.0);
-                            
+
                             let response = ui.add(chip_btn);
                             Self::decorate_button_response(ui, &response);
                             if response.clicked() {
@@ -3185,12 +3053,15 @@ impl SoundFxApp {
                                 response.on_hover_text("Click to remove this hotkey");
                             }
                         }
-                        
+
                         if let Some(key) = key_to_remove {
                             self.record_hotkeys.retain(|&k| k != key);
-                            let names: Vec<String> = self.record_hotkeys.iter().map(|&k| k.to_string()).collect();
+                            let names: Vec<String> =
+                                self.record_hotkeys.iter().map(|&k| k.to_string()).collect();
                             let _ = self.storage.save_record_hotkeys(&names);
-                            if let Err(error) = self.record_hotkey_manager.set_hotkeys(&self.record_hotkeys) {
+                            if let Err(error) =
+                                self.record_hotkey_manager.set_hotkeys(&self.record_hotkeys)
+                            {
                                 self.set_error_status(error);
                             }
                         }
@@ -4299,10 +4170,13 @@ impl SoundFxApp {
                                     .inner_margin(Margin::symmetric(10, 5))
                                     .show(ui, |ui| {
                                         ui.label(
-                                            RichText::new(format!("Pressing: {}", preview_key.to_string()))
-                                                .size(11.5)
-                                                .color(Color32::from_rgb(255, 232, 96))
-                                                .strong(),
+                                            RichText::new(format!(
+                                                "Pressing: {}",
+                                                preview_key.to_string()
+                                            ))
+                                            .size(11.5)
+                                            .color(Color32::from_rgb(255, 232, 96))
+                                            .strong(),
                                         );
                                     });
                             } else {
@@ -4323,12 +4197,12 @@ impl SoundFxApp {
                                 RichText::new(key_text)
                                     .size(11.5)
                                     .color(Self::strong_text_color())
-                                    .strong()
+                                    .strong(),
                             )
                             .fill(Self::surface_fill())
                             .stroke(Stroke::new(1.0, Self::subtle_border_color()))
                             .corner_radius(12.0);
-                            
+
                             let response = ui.add(chip_btn);
                             Self::decorate_button_response(ui, &response);
                             if response.clicked() {
@@ -4338,12 +4212,16 @@ impl SoundFxApp {
                                 response.on_hover_text("Click to remove this hotkey");
                             }
                         }
-                        
+
                         if let Some(key) = key_to_remove {
                             self.pitch_hotkeys.retain(|&k| k != key);
-                            let names: Vec<String> = self.pitch_hotkeys.iter().map(|&k| k.to_string()).collect();
+                            let names: Vec<String> =
+                                self.pitch_hotkeys.iter().map(|&k| k.to_string()).collect();
                             let _ = self.storage.save_pitch_hotkeys(&names);
-                            if let Err(error) = self.record_hotkey_manager.set_secondary_hotkeys(&self.pitch_hotkeys) {
+                            if let Err(error) = self
+                                .record_hotkey_manager
+                                .set_secondary_hotkeys(&self.pitch_hotkeys)
+                            {
                                 self.set_error_status(error);
                             }
                         }
@@ -4597,13 +4475,10 @@ impl SoundFxApp {
                         }
                     },
                 );
-        });
+            });
         if let Some(state) = egui::AreaState::load(ctx, area_id) {
-            self.pitch_overlay_pos = Some(self.clamp_overlay_pos(
-                ctx,
-                overlay_size,
-                state.left_top_pos(),
-            ));
+            self.pitch_overlay_pos =
+                Some(self.clamp_overlay_pos(ctx, overlay_size, state.left_top_pos()));
         }
         self.center_pitch_overlay_next_frame = false;
         self.pitch_overlay_native_visuals_applied = false;
@@ -4664,20 +4539,20 @@ impl SoundFxApp {
                     ui.id().with("pitch-overlay-drag"),
                     Sense::click_and_drag(),
                 );
-        if self.overlay_only_mode {
-            if _drag_response.drag_started() {
-                overlay_ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
-            }
-        } else {
-            let overlay_rect = self.popup_safe_rect(overlay_ctx);
-            Self::update_overlay_drag_position(
-                overlay_ctx,
-                overlay_rect,
-                &_drag_response,
-                vec2(430.0, 104.0),
-                &mut self.pitch_overlay_pos,
-            );
-        }
+                if self.overlay_only_mode {
+                    if _drag_response.drag_started() {
+                        overlay_ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+                    }
+                } else {
+                    let overlay_rect = self.popup_safe_rect(overlay_ctx);
+                    Self::update_overlay_drag_position(
+                        overlay_ctx,
+                        overlay_rect,
+                        &_drag_response,
+                        vec2(430.0, 104.0),
+                        &mut self.pitch_overlay_pos,
+                    );
+                }
                 let top_highlight = Rect::from_min_max(
                     Pos2::new(ui.min_rect().left() + 18.0, ui.min_rect().top() + 1.0),
                     Pos2::new(ui.min_rect().right() - 58.0, ui.min_rect().top() + 14.0),
@@ -5137,7 +5012,7 @@ impl SoundFxApp {
                 let back_btn = ui.add(
                     Button::new(format!("< {}", self.t("library.exit_import_mode")))
                         .fill(Color32::from_rgb(227, 82, 149))
-                        .corner_radius(10.0)
+                        .corner_radius(10.0),
                 );
                 Self::decorate_button_response(ui, &back_btn);
                 if back_btn.clicked() {
@@ -5160,7 +5035,7 @@ impl SoundFxApp {
                     RichText::new(self.t("library.import_select_title"))
                         .font(FontId::new(16.0, FontFamily::Proportional))
                         .color(Self::strong_text_color())
-                        .strong()
+                        .strong(),
                 );
             } else {
                 let sounds_tab = ui.add_sized(
@@ -5206,66 +5081,12 @@ impl SoundFxApp {
                 }
             }
 
-            if self.library_tab == LibraryTab::Folders && self.library_current_folder.is_none() {
-                ui.add_space(12.0);
-                let hint = self.t("library.folder_placeholder");
-                let border_stroke = if self.folder_name_warning {
-                    Stroke::new(1.5, Color32::from_rgb(220, 53, 69))
-                } else {
-                    Stroke::new(1.0, Self::border_color())
-                };
-                let text_edit_response = Frame::new()
-                    .fill(Self::input_fill())
-                    .stroke(border_stroke)
-                    .corner_radius(12.0)
-                    .inner_margin(Margin::symmetric(12, 6))
-                    .show(ui, |ui| {
-                        ui.add_sized(
-                            [180.0, 20.0],
-                            egui::TextEdit::singleline(&mut self.new_folder_name)
-                                .frame(false)
-                                .hint_text(hint)
-                        )
-                    });
-
-                if text_edit_response.inner.changed() {
-                    self.folder_name_warning = false;
-                }
-                
-                ui.add_space(8.0);
-                let create_btn = ui.add(
-                    Button::new(Self::icon(0xe145, 14.0, Color32::WHITE))
-                        .fill(Color32::from_rgb(227, 82, 149))
-                        .corner_radius(10.0)
-                );
-                Self::decorate_button_response(ui, &create_btn);
-
-                let create_clicked = create_btn.clicked() 
-                    || (text_edit_response.inner.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
-
-                if create_clicked {
-                    let name = self.new_folder_name.trim().to_owned();
-                    if !name.is_empty() {
-                        let new_folder = crate::storage::Folder {
-                            id: Uuid::new_v4(),
-                            name,
-                        };
-                        self.folders.push(new_folder);
-                        self.new_folder_name.clear();
-                        self.folder_name_warning = false;
-                        let _ = self.storage.save_folders(&self.folders);
-                    } else {
-                        self.folder_name_warning = true;
-                    }
-                }
-            }
-
-            if self.library_tab == LibraryTab::Sounds || (self.library_tab == LibraryTab::Folders && self.library_current_folder.is_some()) {
+            if self.library_tab == LibraryTab::Sounds {
                 ui.add_space(12.0);
                 self.draw_library_tag_filter_row(ui);
             }
 
-            if !(self.library_tab == LibraryTab::Folders && self.library_current_folder.is_none()) {
+            if self.library_tab != LibraryTab::Folders {
                 ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                     let favorites_active = if self.library_tab == LibraryTab::Videos {
                         self.library_favorites_only_video
@@ -5355,7 +5176,7 @@ impl SoundFxApp {
             }
         });
         ui.add_space(10.0);
-        if !(self.library_tab == LibraryTab::Folders && self.library_current_folder.is_none()) {
+        if self.library_tab != LibraryTab::Folders {
             Frame::new()
                 .fill(Self::surface_fill())
                 .stroke(Stroke::new(1.0, Self::border_color()))
@@ -5395,40 +5216,60 @@ impl SoundFxApp {
                 ui.set_width(viewport_width);
                 ui.set_max_width(viewport_width);
 
-                if self.library_tab == LibraryTab::Folders && self.library_current_folder.is_none() {
+                if self.library_tab == LibraryTab::Folders {
                     self.draw_folders_list_view(ui);
                     return;
                 }
 
-                if self.library_tab == LibraryTab::Folders && self.library_current_folder.is_some() && self.folder_import_select_mode.is_none() {
+                if self.library_tab == LibraryTab::Videos {
+                    self.draw_video_library_grid(ui);
+                    return;
+                }
+
+                Frame::new()
+                    .fill(Self::surface_fill())
+                    .stroke(Stroke::new(1.0, Self::border_color()))
+                    .corner_radius(22.0)
+                    .inner_margin(Margin::same(14))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(Self::icon(0xe2c7, 16.0, Color32::from_rgb(227, 82, 149)));
+                            ui.label(
+                                RichText::new(self.t("library.folders"))
+                                    .size(13.0)
+                                    .color(Self::strong_text_color())
+                                    .strong(),
+                            );
+                            if let Some(folder_id) = self.library_current_folder {
+                                ui.add_space(8.0);
+                                ui.label(
+                                    RichText::new(self.folder_path_label(folder_id))
+                                        .size(11.5)
+                                        .color(Self::muted_text_color()),
+                                );
+                            }
+                        });
+                        ui.add_space(10.0);
+                        self.draw_folders_list_view(ui);
+                    });
+                ui.add_space(12.0);
+
+                if self.library_current_folder.is_some() && self.folder_import_select_mode.is_none()
+                {
                     let folder_id = self.library_current_folder.unwrap();
-                    let folder_name = self.folders.iter()
-                        .find(|f| f.id == folder_id)
-                        .map(|f| f.name.clone())
-                        .unwrap_or_else(|| "Folder".to_owned());
-                    
+                    let folder_name = self.folder_path_label(folder_id);
                     ui.horizontal(|ui| {
-                        let back_btn = ui.add(
-                            Button::new(Self::icon(0xe5c4, 16.0, Self::strong_text_color()))
-                                .fill(Self::surface_fill())
-                                .stroke(Stroke::new(1.0, Self::border_color()))
-                                .corner_radius(12.0)
-                        );
-                        if back_btn.clicked() {
-                            self.library_current_folder = None;
-                        }
-                        ui.add_space(8.0);
                         ui.label(
                             RichText::new(folder_name)
-                                .font(FontId::new(16.0, FontFamily::Proportional))
+                                .font(FontId::new(15.0, FontFamily::Proportional))
                                 .color(Self::strong_text_color())
-                                .strong()
+                                .strong(),
                         );
-                        ui.add_space(12.0);
+                        ui.add_space(10.0);
                         let import_btn = ui.add(
                             Button::new(format!("+ {}", self.t("library.import_sound_to_folder")))
                                 .fill(Color32::from_rgb(227, 82, 149))
-                                .corner_radius(10.0)
+                                .corner_radius(10.0),
                         );
                         Self::decorate_button_response(ui, &import_btn);
                         if import_btn.clicked() {
@@ -5438,11 +5279,6 @@ impl SoundFxApp {
                     ui.add_space(12.0);
                 }
                 ui.set_max_width(viewport_width);
-
-                if self.library_tab == LibraryTab::Videos {
-                    self.draw_video_library_grid(ui);
-                    return;
-                }
 
                 if self.sounds.is_empty() {
                     self.draw_empty_editor(ui);
@@ -5596,7 +5432,8 @@ impl SoundFxApp {
                                     offset: [0, 12],
                                     blur: 28,
                                     spread: 0,
-                                    color: Color32::from_rgba_premultiplied(86, 43, 67, 18).linear_multiply(opacity),
+                                    color: Color32::from_rgba_premultiplied(86, 43, 67, 18)
+                                        .linear_multiply(opacity),
                                 })
                                 .corner_radius(30.0)
                                 .inner_margin(Margin::same(card_padding.round() as i8))
@@ -5633,11 +5470,15 @@ impl SoundFxApp {
                                                     .truncate(),
                                                 );
 
-                                                if self.library_tab == LibraryTab::Folders && self.library_current_folder.is_some() && self.folder_import_select_mode.is_none() {
+                                                if self.library_current_folder.is_some()
+                                                    && self.folder_import_select_mode.is_none()
+                                                {
                                                     let remove_btn = ui.add(
-                                                        Button::new(Self::icon(0xe5cd, 11.0, meta_color))
-                                                            .fill(Color32::TRANSPARENT)
-                                                            .frame(false)
+                                                        Button::new(Self::icon(
+                                                            0xe5cd, 11.0, meta_color,
+                                                        ))
+                                                        .fill(Color32::TRANSPARENT)
+                                                        .frame(false),
                                                     );
                                                     Self::decorate_button_response(ui, &remove_btn);
                                                     if remove_btn.clicked() {
@@ -5651,11 +5492,12 @@ impl SoundFxApp {
                                         let bucket_count =
                                             (card_size * 0.34).round().clamp(20.0, 52.0) as usize;
                                         let waveform_samples = self.sound_waveform_samples(&sound);
-                                        let waveform_preview = Self::library_sound_waveform_preview_from_samples(
-                                            &sound,
-                                            &waveform_samples,
-                                            bucket_count,
-                                        );
+                                        let waveform_preview =
+                                            Self::library_sound_waveform_preview_from_samples(
+                                                &sound,
+                                                &waveform_samples,
+                                                bucket_count,
+                                            );
                                         let w_color1 = if hovered {
                                             Color32::from_rgb(255, 214, 232)
                                         } else {
@@ -5683,11 +5525,14 @@ impl SoundFxApp {
                                         if self.folder_import_select_mode.is_some() {
                                             ui.add_space(8.0);
                                             ui.horizontal(|ui| {
-                                                let center_gap = (inner_size - action_button_width) * 0.5;
+                                                let center_gap =
+                                                    (inner_size - action_button_width) * 0.5;
                                                 if center_gap > 0.0 {
                                                     ui.add_space(center_gap);
                                                 }
-                                                let is_loading = self.pending_preview_after_preload.is_some_and(|(id, _)| id == sound.id);
+                                                let is_loading = self
+                                                    .pending_preview_after_preload
+                                                    .is_some_and(|(id, _)| id == sound.id);
                                                 let play_btn = Self::icon_action(
                                                     ui,
                                                     action_button_size,
@@ -5724,7 +5569,9 @@ impl SoundFxApp {
                                                 {
                                                     favorite_sound = Some(sound.id);
                                                 }
-                                                let is_loading = self.pending_preview_after_preload.is_some_and(|(id, _)| id == sound.id);
+                                                let is_loading = self
+                                                    .pending_preview_after_preload
+                                                    .is_some_and(|(id, _)| id == sound.id);
                                                 if Self::icon_action(
                                                     ui,
                                                     action_button_size,
@@ -5772,11 +5619,14 @@ impl SoundFxApp {
                         });
 
                         if body_clicked && !self.folder_import_animating.contains_key(&sound.id) {
-                            let is_over_play = play_btn_response.as_ref().is_some_and(|r| r.hovered());
-                            let is_over_remove = remove_btn_response.as_ref().is_some_and(|r| r.hovered());
+                            let is_over_play =
+                                play_btn_response.as_ref().is_some_and(|r| r.hovered());
+                            let is_over_remove =
+                                remove_btn_response.as_ref().is_some_and(|r| r.hovered());
                             if !is_over_play && !is_over_remove {
                                 if let Some(_import_folder_id) = self.folder_import_select_mode {
-                                    self.folder_import_animating.insert(sound.id, Instant::now());
+                                    self.folder_import_animating
+                                        .insert(sound.id, Instant::now());
                                 } else {
                                     open_sound = Some(sound.id);
                                 }
@@ -6176,13 +6026,10 @@ impl SoundFxApp {
                     egui::Layout::top_down(Align::Min),
                     |ui| self.render_record_blob_overlay(ui, ctx, &snapshot, &mut should_stop),
                 );
-        });
+            });
         if let Some(state) = egui::AreaState::load(ctx, area_id) {
-            self.record_overlay_pos = Some(self.clamp_overlay_pos(
-                ctx,
-                overlay_size,
-                state.left_top_pos(),
-            ));
+            self.record_overlay_pos =
+                Some(self.clamp_overlay_pos(ctx, overlay_size, state.left_top_pos()));
         }
         self.center_record_overlay_next_frame = false;
         self.record_overlay_native_visuals_applied = false;
@@ -6440,11 +6287,10 @@ impl SoundFxApp {
                                 );
                                 ui.add_space(8.0);
                                 let waveform_samples = self.sound_waveform_samples(sound);
-                                let waveform_preview =
-                                    Self::trimmed_waveform_preview_from_samples(
-                                        sound,
-                                        &waveform_samples,
-                                    );
+                                let waveform_preview = Self::trimmed_waveform_preview_from_samples(
+                                    sound,
+                                    &waveform_samples,
+                                );
                                 Self::draw_wave_strip(
                                     ui,
                                     &waveform_preview,
@@ -6563,13 +6409,9 @@ impl SoundFxApp {
         let (sound_id, vocal_job_running, vocal_ready, music_job_running, music_ready) = {
             let sound = &self.sounds[index];
             let vocal_asset_path = sound.vocal_asset_path(self.storage.root_dir());
-            let vocal_ready = vocal_asset_path
-                .as_ref()
-                .is_some_and(|path| path.exists());
+            let vocal_ready = vocal_asset_path.as_ref().is_some_and(|path| path.exists());
             let music_asset_path = sound.music_asset_path(self.storage.root_dir());
-            let music_ready = music_asset_path
-                .as_ref()
-                .is_some_and(|path| path.exists());
+            let music_ready = music_asset_path.as_ref().is_some_and(|path| path.exists());
             let vocal_job_running = self.vocal_separation_running
                 && self.vocal_separation_kind == Some(SeparationStemKind::Vocal)
                 && matches!(
@@ -6699,6 +6541,10 @@ impl SoundFxApp {
         let folder_label = self.t("editor.folder");
         let no_folder_label = self.t("editor.no_folder");
         let app_folders = self.folders.clone();
+        let app_folder_options = app_folders
+            .iter()
+            .map(|folder| (folder.id, self.folder_path_label(folder.id)))
+            .collect::<Vec<_>>();
 
         Frame::new()
             .fill(Self::surface_fill())
@@ -6715,14 +6561,20 @@ impl SoundFxApp {
                 let sound = &mut self.sounds[index];
                 let controls_width = 52.0 + 52.0 + 52.0 + 64.0 + 64.0 + 36.0;
                 let row_gap = 8.0;
-                let back_button_width = if self.editing_from_folder.is_some() { 42.0 + 8.0 } else { 0.0 };
-                let name_width = (ui.available_width() - controls_width - row_gap - back_button_width).max(120.0);
+                let back_button_width = if self.editing_from_folder.is_some() {
+                    42.0 + 8.0
+                } else {
+                    0.0
+                };
+                let name_width =
+                    (ui.available_width() - controls_width - row_gap - back_button_width)
+                        .max(120.0);
 
                 ui.horizontal(|ui| {
                     if let Some(folder_id) = self.editing_from_folder {
                         if Self::icon_action(ui, [42.0, 34.0], 0xe5c4, false, false).clicked() {
                             self.app_view = AppView::Library;
-                            self.library_tab = LibraryTab::Folders;
+                            self.library_tab = LibraryTab::Sounds;
                             self.library_current_folder = Some(folder_id);
                             self.editing_from_folder = None;
                         }
@@ -6769,7 +6621,13 @@ impl SoundFxApp {
                             if Self::icon_action(
                                 ui,
                                 [64.0, 34.0],
-                                if is_loading { 0xe5d5 } else if is_playing { 0xe047 } else { 0xe037 },
+                                if is_loading {
+                                    0xe5d5
+                                } else if is_playing {
+                                    0xe047
+                                } else {
+                                    0xe037
+                                },
                                 is_loading || is_playing,
                                 false,
                             )
@@ -6859,8 +6717,10 @@ impl SoundFxApp {
                     let mut current_folder_name = no_folder_label.clone();
                     let mut selected_id = sound.folder_id;
                     if let Some(folder_id) = selected_id {
-                        if let Some(folder) = app_folders.iter().find(|f| f.id == folder_id) {
-                            current_folder_name = folder.name.clone();
+                        if let Some((_, folder_label)) =
+                            app_folder_options.iter().find(|(id, _)| *id == folder_id)
+                        {
+                            current_folder_name = folder_label.clone();
                         }
                     }
 
@@ -6868,11 +6728,21 @@ impl SoundFxApp {
                         .selected_text(current_folder_name)
                         .show_ui(ui, |ui| {
                             let mut choice_changed = false;
-                            if ui.selectable_value(&mut selected_id, None, &no_folder_label).clicked() {
+                            if ui
+                                .selectable_value(&mut selected_id, None, &no_folder_label)
+                                .clicked()
+                            {
                                 choice_changed = true;
                             }
-                            for folder in &app_folders {
-                                if ui.selectable_value(&mut selected_id, Some(folder.id), &folder.name).clicked() {
+                            for (folder_id, folder_label) in &app_folder_options {
+                                if ui
+                                    .selectable_value(
+                                        &mut selected_id,
+                                        Some(*folder_id),
+                                        folder_label,
+                                    )
+                                    .clicked()
+                                {
                                     choice_changed = true;
                                 }
                             }
@@ -6955,7 +6825,9 @@ impl SoundFxApp {
                                     .corner_radius(12.0),
                                 );
                                 if normalize_response
-                                    .on_hover_text("Automatically adjust volume to a standard listening level")
+                                    .on_hover_text(
+                                        "Automatically adjust volume to a standard listening level",
+                                    )
                                     .clicked()
                                 {
                                     normalize_request = true;
@@ -7799,7 +7671,8 @@ impl SoundFxApp {
                         };
                         let current_offset = requested_scroll_offset
                             .unwrap_or_else(|| (viewport_rect.left() - rect.left()).max(0.0));
-                        requested_scroll_offset = Some((current_offset + delta).clamp(0.0, max_offset));
+                        requested_scroll_offset =
+                            Some((current_offset + delta).clamp(0.0, max_offset));
                         ui.ctx().request_repaint();
                     }
 
@@ -7986,7 +7859,6 @@ impl SoundFxApp {
                             }
                         }
                     }
-
                 });
                 let scroll_offset = requested_scroll_offset
                     .unwrap_or_else(|| scroll_output.state.offset.x.max(0.0));
@@ -8055,22 +7927,14 @@ impl SoundFxApp {
             && let Some(path) = sound.music_asset_path(self.storage.root_dir())
             && path.exists()
         {
-            return self.cached_stem_waveform(
-                &self.music_waveform_cache,
-                sound.id,
-                &path,
-            );
+            return self.cached_stem_waveform(&self.music_waveform_cache, sound.id, &path);
         }
 
         if sound.vocal_only
             && let Some(path) = sound.vocal_asset_path(self.storage.root_dir())
             && path.exists()
         {
-            return self.cached_stem_waveform(
-                &self.vocal_waveform_cache,
-                sound.id,
-                &path,
-            );
+            return self.cached_stem_waveform(&self.vocal_waveform_cache, sound.id, &path);
         }
 
         sound.waveform.clone()
@@ -8081,22 +7945,14 @@ impl SoundFxApp {
             && let Some(path) = draft.music_separated_path.as_ref()
             && path.exists()
         {
-            return self.cached_stem_waveform(
-                &self.music_waveform_cache,
-                draft.sound.id,
-                path,
-            );
+            return self.cached_stem_waveform(&self.music_waveform_cache, draft.sound.id, path);
         }
 
         if draft.keep_vocal
             && let Some(path) = draft.vocal_separated_path.as_ref()
             && path.exists()
         {
-            return self.cached_stem_waveform(
-                &self.vocal_waveform_cache,
-                draft.sound.id,
-                path,
-            );
+            return self.cached_stem_waveform(&self.vocal_waveform_cache, draft.sound.id, path);
         }
 
         draft.sound.waveform.clone()
@@ -11028,25 +10884,13 @@ impl SoundFxApp {
             },
         ]
     }
+}
 
-    
-
-    
-
-    
-
-    
-
-    
-
-    }
-
+mod downloader;
 mod editor;
 mod library;
-mod settings;
-mod downloader;
 mod pitch_monitor;
-
+mod settings;
 
 impl eframe::App for SoundFxApp {
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
@@ -11317,7 +11161,7 @@ impl eframe::App for SoundFxApp {
         self.maybe_start_pending_processed_export();
 
         let is_folder_open = self.app_view == AppView::Library
-            && self.library_tab == LibraryTab::Folders
+            && self.library_tab != LibraryTab::Videos
             && self.library_current_folder.is_some();
 
         let external_file_hover = (self.app_view == AppView::Editor || is_folder_open)

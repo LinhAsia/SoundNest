@@ -40,7 +40,7 @@ use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 impl SoundFxApp {
-pub(super) fn trigger_record_hotkey_action(&mut self, ctx: &Context) {
+    pub(super) fn trigger_record_hotkey_action(&mut self, ctx: &Context) {
         if self.recorder.snapshot().running {
             self.reveal_record_review_on_open = true;
             self.stop_recording(Some(ctx));
@@ -53,7 +53,7 @@ pub(super) fn trigger_record_hotkey_action(&mut self, ctx: &Context) {
         }
     }
 
-pub(super) fn trigger_pitch_hotkey_action(&mut self, ctx: &Context) {
+    pub(super) fn trigger_pitch_hotkey_action(&mut self, ctx: &Context) {
         let snapshot = self.pitch_monitor.snapshot();
         if snapshot.running {
             self.pitch_monitor.stop();
@@ -99,7 +99,7 @@ pub(super) fn trigger_pitch_hotkey_action(&mut self, ctx: &Context) {
         }
     }
 
-pub(super) fn handle_space_preview(&mut self, ctx: &Context) {
+    pub(super) fn handle_space_preview(&mut self, ctx: &Context) {
         if self.is_transition_active() {
             return;
         }
@@ -172,13 +172,13 @@ pub(super) fn handle_space_preview(&mut self, ctx: &Context) {
         self.preview_sound_from_position(sound.id, Some(cursor_secs));
     }
 
-pub(super) fn handle_record_hotkey(&mut self, ctx: &Context) {
+    pub(super) fn handle_record_hotkey(&mut self, ctx: &Context) {
         self.record_hotkey_manager.set_repaint_context(ctx.clone());
 
         if self.capture_record_hotkey || self.capture_pitch_hotkey {
             let mut add_hotkey: Option<Hotkey> = None;
             let mut cancel = false;
-            
+
             fn is_modifier_key(key: egui::Key) -> bool {
                 let name = format!("{:?}", key);
                 matches!(
@@ -223,10 +223,14 @@ pub(super) fn handle_record_hotkey(&mut self, ctx: &Context) {
                             if *key == egui::Key::Escape {
                                 cancel = true;
                             } else {
-                                if self.capture_record_hotkey && self.preview_record_hotkey.map(|hk| hk.key) == Some(*key) {
+                                if self.capture_record_hotkey
+                                    && self.preview_record_hotkey.map(|hk| hk.key) == Some(*key)
+                                {
                                     add_hotkey = self.preview_record_hotkey;
                                 }
-                                if self.capture_pitch_hotkey && self.preview_pitch_hotkey.map(|hk| hk.key) == Some(*key) {
+                                if self.capture_pitch_hotkey
+                                    && self.preview_pitch_hotkey.map(|hk| hk.key) == Some(*key)
+                                {
                                     add_hotkey = self.preview_pitch_hotkey;
                                 }
                             }
@@ -248,9 +252,12 @@ pub(super) fn handle_record_hotkey(&mut self, ctx: &Context) {
                 if self.capture_record_hotkey {
                     if !self.record_hotkeys.contains(&hotkey) {
                         self.record_hotkeys.push(hotkey);
-                        let names: Vec<String> = self.record_hotkeys.iter().map(|k| k.to_string()).collect();
+                        let names: Vec<String> =
+                            self.record_hotkeys.iter().map(|k| k.to_string()).collect();
                         let _ = self.storage.save_record_hotkeys(&names);
-                        if let Err(error) = self.record_hotkey_manager.set_hotkeys(&self.record_hotkeys) {
+                        if let Err(error) =
+                            self.record_hotkey_manager.set_hotkeys(&self.record_hotkeys)
+                        {
                             self.set_error_status(error);
                         }
                     }
@@ -260,9 +267,13 @@ pub(super) fn handle_record_hotkey(&mut self, ctx: &Context) {
                 if self.capture_pitch_hotkey {
                     if !self.pitch_hotkeys.contains(&hotkey) {
                         self.pitch_hotkeys.push(hotkey);
-                        let names: Vec<String> = self.pitch_hotkeys.iter().map(|k| k.to_string()).collect();
+                        let names: Vec<String> =
+                            self.pitch_hotkeys.iter().map(|k| k.to_string()).collect();
                         let _ = self.storage.save_pitch_hotkeys(&names);
-                        if let Err(error) = self.record_hotkey_manager.set_secondary_hotkeys(&self.pitch_hotkeys) {
+                        if let Err(error) = self
+                            .record_hotkey_manager
+                            .set_secondary_hotkeys(&self.pitch_hotkeys)
+                        {
                             self.set_error_status(error);
                         }
                     }
@@ -287,7 +298,8 @@ pub(super) fn handle_record_hotkey(&mut self, ctx: &Context) {
                             repeat: false,
                             modifiers,
                             ..
-                        } = event {
+                        } = event
+                        {
                             *key == hotkey.key
                                 && (modifiers.ctrl || modifiers.command) == hotkey.ctrl
                                 && modifiers.alt == hotkey.alt
@@ -309,7 +321,8 @@ pub(super) fn handle_record_hotkey(&mut self, ctx: &Context) {
                             repeat: false,
                             modifiers,
                             ..
-                        } = event {
+                        } = event
+                        {
                             *key == hotkey.key
                                 && (modifiers.ctrl || modifiers.command) == hotkey.ctrl
                                 && modifiers.alt == hotkey.alt

@@ -73,6 +73,8 @@ pub struct SoundEffect {
 pub struct Folder {
     pub id: Uuid,
     pub name: String,
+    #[serde(default)]
+    pub parent_id: Option<Uuid>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -262,10 +264,8 @@ impl Storage {
         let bundled_sounds_dir = root_dir.join("bundled-sounds");
         let exports_dir = root_dir.join("exports");
         fs::create_dir_all(&sounds_dir).context("unable to create sounds directory")?;
-        fs::create_dir_all(&vocal_sounds_dir)
-            .context("unable to create vocal sounds directory")?;
-        fs::create_dir_all(&music_sounds_dir)
-            .context("unable to create music sounds directory")?;
+        fs::create_dir_all(&vocal_sounds_dir).context("unable to create vocal sounds directory")?;
+        fs::create_dir_all(&music_sounds_dir).context("unable to create music sounds directory")?;
         fs::create_dir_all(&videos_dir).context("unable to create videos directory")?;
         fs::create_dir_all(&settings_sounds_dir)
             .context("unable to create settings sounds directory")?;
@@ -304,17 +304,15 @@ impl Storage {
         let mut library: LibraryFile =
             serde_json::from_str(&raw).context("invalid library file format")?;
 
-        library
-            .sounds
-            .retain(|sound| {
-                sound.asset_path(&self.root_dir).exists()
-                    || sound
-                        .vocal_asset_path(&self.root_dir)
-                        .is_some_and(|path| path.exists())
-                    || sound
-                        .music_asset_path(&self.root_dir)
-                        .is_some_and(|path| path.exists())
-            });
+        library.sounds.retain(|sound| {
+            sound.asset_path(&self.root_dir).exists()
+                || sound
+                    .vocal_asset_path(&self.root_dir)
+                    .is_some_and(|path| path.exists())
+                || sound
+                    .music_asset_path(&self.root_dir)
+                    .is_some_and(|path| path.exists())
+        });
 
         for sound in &mut library.sounds {
             sound.clamp_trim();
@@ -328,7 +326,11 @@ impl Storage {
         self.save_library_with_folders(sounds, &folders)
     }
 
-    pub fn save_library_with_folders(&self, sounds: &[SoundEffect], folders: &[Folder]) -> Result<()> {
+    pub fn save_library_with_folders(
+        &self,
+        sounds: &[SoundEffect],
+        folders: &[Folder],
+    ) -> Result<()> {
         let payload = LibraryFile {
             sounds: sounds.to_vec(),
             folders: folders.to_vec(),
@@ -343,7 +345,8 @@ impl Storage {
             return Ok(Vec::new());
         }
         let raw = fs::read_to_string(&self.library_path).context("unable to read library file")?;
-        let library: LibraryFile = serde_json::from_str(&raw).context("invalid library file format")?;
+        let library: LibraryFile =
+            serde_json::from_str(&raw).context("invalid library file format")?;
         Ok(library.folders)
     }
 
@@ -502,7 +505,6 @@ impl Storage {
         self.save_preferences(&preferences)
     }
 
-
     pub fn load_record_hotkeys(&self) -> Result<Vec<String>> {
         let preferences = self.load_preferences()?;
         if let Some(list) = preferences.record_hotkeys {
@@ -520,7 +522,6 @@ impl Storage {
         preferences.record_hotkey = hotkeys.first().cloned();
         self.save_preferences(&preferences)
     }
-
 
     pub fn load_pitch_hotkeys(&self) -> Result<Vec<String>> {
         let preferences = self.load_preferences()?;
@@ -795,10 +796,11 @@ impl Storage {
     pub fn duplicate_trimmed_sound_at(root_dir: &Path, sound: &SoundEffect) -> Result<SoundEffect> {
         let export_path = Self::export_processed_sound_at(root_dir, sound)?;
         if export_path.exists() {
-            let import_result = Self::import_sound_at(root_dir, &export_path).map(|mut imported_sound| {
-                imported_sound.name = format!("{} trim", sound.name);
-                imported_sound
-            });
+            let import_result =
+                Self::import_sound_at(root_dir, &export_path).map(|mut imported_sound| {
+                    imported_sound.name = format!("{} trim", sound.name);
+                    imported_sound
+                });
             let _ = fs::remove_file(&export_path);
             return import_result;
         }
@@ -814,7 +816,8 @@ impl Storage {
             return Ok(false);
         }
 
-        let analysis = analyze_audio_file(&sound.playback_asset_path(&self.root_dir), WAVEFORM_BUCKETS)?;
+        let analysis =
+            analyze_audio_file(&sound.playback_asset_path(&self.root_dir), WAVEFORM_BUCKETS)?;
         sound.duration_secs = analysis.duration_secs;
         if sound.waveform.is_empty() {
             sound.waveform = analysis.waveform;
@@ -881,7 +884,11 @@ impl Storage {
     }
 
     pub fn export_processed_sound_at(root_dir: &Path, sound: &SoundEffect) -> Result<PathBuf> {
-        Self::export_processed_sound_from_path_at(root_dir, &sound.playback_asset_path(root_dir), sound)
+        Self::export_processed_sound_from_path_at(
+            root_dir,
+            &sound.playback_asset_path(root_dir),
+            sound,
+        )
     }
 
     pub fn drag_sound_source_path(&self, sound: &SoundEffect) -> Result<PathBuf> {
@@ -923,9 +930,8 @@ impl Storage {
                 let _ = fs::remove_file(&temp_path);
                 return Ok(export_path);
             }
-            fs::rename(&temp_path, &export_path).with_context(|| {
-                format!("unable to finalize {}", export_path.display())
-            })?;
+            fs::rename(&temp_path, &export_path)
+                .with_context(|| format!("unable to finalize {}", export_path.display()))?;
             return Ok(export_path);
         }
 
@@ -974,13 +980,27 @@ impl Storage {
         let underwater = if sound.underwater_enabled { "-und" } else { "" };
         let robot = if sound.robot_enabled { "-rob" } else { "" };
         let pitch_shift = if sound.pitch_shift_enabled {
-            format!("-ps{:03}", (sound.pitch_shift_semitones * 10.0).round() as i32)
+            format!(
+                "-ps{:03}",
+                (sound.pitch_shift_semitones * 10.0).round() as i32
+            )
         } else {
             "".to_string()
         };
         format!(
             "-proc-v{:04}-s{:04}-a{:06}-b{:06}{}{}{}{}{}{}{}{}",
-            volume, speed, trim_start, trim_end, stem, reverb, telephone, distortion, echo, underwater, robot, pitch_shift
+            volume,
+            speed,
+            trim_start,
+            trim_end,
+            stem,
+            reverb,
+            telephone,
+            distortion,
+            echo,
+            underwater,
+            robot,
+            pitch_shift
         )
     }
 
@@ -1447,7 +1467,12 @@ pub fn apply_sound_effects(
         apply_robot_effect(samples, channels, sample_rate.max(1));
     }
     if sound.pitch_shift_enabled {
-        apply_pitch_shift_effect(samples, channels, sample_rate.max(1), sound.pitch_shift_semitones);
+        apply_pitch_shift_effect(
+            samples,
+            channels,
+            sample_rate.max(1),
+            sound.pitch_shift_semitones,
+        );
     }
 }
 
@@ -1466,14 +1491,14 @@ fn apply_echo_effect(samples: &mut [f32], channels: usize, sample_rate: u32) {
     let delay_samples = ((sample_rate as f32 * delay_secs).round() as usize).max(1) * channels;
     let mut delay_buffer = vec![0.0f32; delay_samples];
     let mut write_pos = 0;
-    
+
     for sample_index in 0..samples.len() {
         let dry = samples[sample_index];
         let delayed = delay_buffer[write_pos];
-        
+
         samples[sample_index] = dry + delayed * wet;
         delay_buffer[write_pos] = dry + delayed * feedback;
-        
+
         write_pos += 1;
         if write_pos >= delay_samples {
             write_pos = 0;
@@ -1486,9 +1511,9 @@ fn apply_underwater_effect(samples: &mut [f32], channels: usize, sample_rate: u3
     let low_pass_cutoff = 350.0;
     let low_pass_rc = 1.0 / (std::f32::consts::TAU * low_pass_cutoff);
     let low_pass_alpha = dt / (low_pass_rc + dt);
-    
+
     let mut lp_prev_y = vec![0.0f32; channels];
-    
+
     for frame in samples.chunks_exact_mut(channels) {
         for (channel, sample) in frame.iter_mut().enumerate() {
             let x = *sample;
@@ -1503,22 +1528,23 @@ fn apply_robot_effect(samples: &mut [f32], channels: usize, sample_rate: u32) {
     let freq = 50.0;
     let t_step = 1.0 / sample_rate as f32;
     let comb_delay_secs = 0.005;
-    let comb_delay_samples = ((sample_rate as f32 * comb_delay_secs).round() as usize).max(1) * channels;
+    let comb_delay_samples =
+        ((sample_rate as f32 * comb_delay_secs).round() as usize).max(1) * channels;
     let feedback = 0.6;
     let mut comb_buffer = vec![0.0f32; comb_delay_samples];
     let mut write_pos = 0;
-    
+
     for sample_index in 0..samples.len() {
         let time = (sample_index / channels) as f32 * t_step;
         let modulator = (std::f32::consts::TAU * freq * time).sin();
         let ring_mod = samples[sample_index] * (0.4 + 0.6 * modulator);
-        
+
         let delayed = comb_buffer[write_pos];
         let comb_out = ring_mod + delayed * feedback;
         comb_buffer[write_pos] = comb_out;
-        
+
         samples[sample_index] = comb_out.clamp(-1.0, 1.0);
-        
+
         write_pos += 1;
         if write_pos >= comb_delay_samples {
             write_pos = 0;
@@ -1526,7 +1552,12 @@ fn apply_robot_effect(samples: &mut [f32], channels: usize, sample_rate: u32) {
     }
 }
 
-fn apply_pitch_shift_effect(samples: &mut [f32], channels: usize, sample_rate: u32, semitones: f32) {
+fn apply_pitch_shift_effect(
+    samples: &mut [f32],
+    channels: usize,
+    sample_rate: u32,
+    semitones: f32,
+) {
     if semitones.abs() < 0.05 {
         return;
     }
@@ -1534,38 +1565,38 @@ fn apply_pitch_shift_effect(samples: &mut [f32], channels: usize, sample_rate: u
     let size = ((sample_rate as f32 * 0.08).round() as usize).max(256); // 80ms delay buffer
     let mut delay_buf = vec![vec![0.0f32; size]; channels];
     let mut write_pos = 0;
-    
+
     let mut read_ptr_offset = 0.0f32;
     let original = samples.to_vec();
-    
+
     for frame_idx in 0..(samples.len() / channels) {
         let delay_a = read_ptr_offset;
         let delay_b = (read_ptr_offset + (size as f32 / 2.0)) % size as f32;
-        
+
         let w_a = if delay_a < (size as f32 / 2.0) {
             delay_a / (size as f32 / 2.0)
         } else {
             (size as f32 - delay_a) / (size as f32 / 2.0)
         };
         let w_b = 1.0 - w_a;
-        
+
         for ch in 0..channels {
             let sample_val = original[frame_idx * channels + ch];
             delay_buf[ch][write_pos] = sample_val;
-            
+
             let idx_a = (write_pos + size - delay_a.floor() as usize) % size;
             let idx_a_next = (idx_a + size - 1) % size;
             let frac_a = delay_a.fract();
             let val_a = delay_buf[ch][idx_a] * (1.0 - frac_a) + delay_buf[ch][idx_a_next] * frac_a;
-            
+
             let idx_b = (write_pos + size - delay_b.floor() as usize) % size;
             let idx_b_next = (idx_b + size - 1) % size;
             let frac_b = delay_b.fract();
             let val_b = delay_buf[ch][idx_b] * (1.0 - frac_b) + delay_buf[ch][idx_b_next] * frac_b;
-            
+
             samples[frame_idx * channels + ch] = val_a * w_a + val_b * w_b;
         }
-        
+
         write_pos = (write_pos + 1) % size;
         read_ptr_offset += 1.0 - ratio;
         if read_ptr_offset < 0.0 {

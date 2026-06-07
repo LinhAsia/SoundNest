@@ -40,7 +40,7 @@ use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 impl SoundFxApp {
-pub(super) fn available_import_roots() -> Vec<PathBuf> {
+    pub(super) fn available_import_roots() -> Vec<PathBuf> {
         ["C:\\", "D:\\"]
             .into_iter()
             .map(PathBuf::from)
@@ -48,7 +48,7 @@ pub(super) fn available_import_roots() -> Vec<PathBuf> {
             .collect()
     }
 
-pub(super) fn set_import_dir(&mut self, path: Option<PathBuf>) {
+    pub(super) fn set_import_dir(&mut self, path: Option<PathBuf>) {
         self.import_dir = path.unwrap_or_default();
         let _ = self.storage.save_import_dir(
             (!self.import_dir.as_os_str().is_empty()).then_some(self.import_dir.as_path()),
@@ -56,7 +56,7 @@ pub(super) fn set_import_dir(&mut self, path: Option<PathBuf>) {
         self.refresh_import_audio_entries();
     }
 
-pub(super) fn refresh_pitch_capture_devices(&mut self) {
+    pub(super) fn refresh_pitch_capture_devices(&mut self) {
         match list_capture_devices() {
             Ok(devices) => {
                 self.pitch_capture_devices = devices;
@@ -77,7 +77,7 @@ pub(super) fn refresh_pitch_capture_devices(&mut self) {
         }
     }
 
-pub(super) fn refresh_record_capture_devices(&mut self) {
+    pub(super) fn refresh_record_capture_devices(&mut self) {
         match list_capture_devices() {
             Ok(devices) => {
                 self.record_capture_devices = devices;
@@ -99,7 +99,7 @@ pub(super) fn refresh_record_capture_devices(&mut self) {
         }
     }
 
-pub(super) fn refresh_stream_input_capture_devices(&mut self) {
+    pub(super) fn refresh_stream_input_capture_devices(&mut self) {
         match list_capture_devices() {
             Ok(devices) => {
                 self.stream_input_capture_devices = devices;
@@ -121,7 +121,7 @@ pub(super) fn refresh_stream_input_capture_devices(&mut self) {
         }
     }
 
-pub(super) fn start_demucs_install(&mut self, ctx: &Context) {
+    pub(super) fn start_demucs_install(&mut self, ctx: &Context) {
         if self.demucs_installing {
             return;
         }
@@ -135,7 +135,7 @@ pub(super) fn start_demucs_install(&mut self, ctx: &Context) {
         ctx.request_repaint();
     }
 
-pub(super) fn start_demucs_model_preload(&mut self, ctx: &Context) {
+    pub(super) fn start_demucs_model_preload(&mut self, ctx: &Context) {
         if self.demucs_model_loading || !crate::vocal_separation::is_demucs_available() {
             return;
         }
@@ -160,7 +160,7 @@ pub(super) fn start_demucs_model_preload(&mut self, ctx: &Context) {
         ctx.request_repaint();
     }
 
-pub(super) fn stop_demucs_model_work(&mut self) {
+    pub(super) fn stop_demucs_model_work(&mut self) {
         if self.demucs_model_loading {
             if let Some(cancel_flag) = self.demucs_model_cancel.as_ref() {
                 cancel_flag.store(true, Ordering::Relaxed);
@@ -181,7 +181,7 @@ pub(super) fn stop_demucs_model_work(&mut self) {
         }
     }
 
-pub(super) fn uninstall_demucs_from_settings(&mut self) {
+    pub(super) fn uninstall_demucs_from_settings(&mut self) {
         match crate::vocal_separation::uninstall_demucs() {
             Ok(()) => {
                 self.demucs_install_error = None;
@@ -201,7 +201,7 @@ pub(super) fn uninstall_demucs_from_settings(&mut self) {
         }
     }
 
-pub(super) fn begin_async_stream_driver_probe(&mut self) {
+    pub(super) fn begin_async_stream_driver_probe(&mut self) {
         self.stream_driver_checked = false;
         let tx = self.stream_driver_tx.clone();
         thread::spawn(move || {
@@ -210,7 +210,7 @@ pub(super) fn begin_async_stream_driver_probe(&mut self) {
         });
     }
 
-pub(super) fn start_stream_driver_install(&mut self, ctx: &Context) {
+    pub(super) fn start_stream_driver_install(&mut self, ctx: &Context) {
         if self.stream_driver_busy || self.stream_driver_installed {
             return;
         }
@@ -225,7 +225,7 @@ pub(super) fn start_stream_driver_install(&mut self, ctx: &Context) {
         ctx.request_repaint();
     }
 
-pub(super) fn start_stream_driver_uninstall(&mut self, ctx: &Context) {
+    pub(super) fn start_stream_driver_uninstall(&mut self, ctx: &Context) {
         if self.stream_driver_busy {
             return;
         }
@@ -240,7 +240,7 @@ pub(super) fn start_stream_driver_uninstall(&mut self, ctx: &Context) {
         ctx.request_repaint();
     }
 
-pub(super) fn apply_stream_input_routing(&mut self) {
+    pub(super) fn apply_stream_input_routing(&mut self) {
         let mic_available = self.selected_stream_input_device.is_some()
             || !self.stream_input_capture_devices.is_empty();
         let monitor_microphone = self.stream_input_monitor_microphone && mic_available;
@@ -266,7 +266,7 @@ pub(super) fn apply_stream_input_routing(&mut self) {
         }
     }
 
-pub(super) fn gemini_api_key_field(
+    pub(super) fn gemini_api_key_field(
         ui: &mut Ui,
         label: &str,
         api_key: &mut String,
@@ -311,7 +311,7 @@ pub(super) fn gemini_api_key_field(
         changed
     }
 
-pub(super) fn poll_demucs_install_result(&mut self, ctx: &Context) {
+    pub(super) fn poll_demucs_install_result(&mut self, ctx: &Context) {
         while let Ok(result) = self.demucs_install_rx.try_recv() {
             self.demucs_installing = false;
             match result {
@@ -328,7 +328,7 @@ pub(super) fn poll_demucs_install_result(&mut self, ctx: &Context) {
         }
     }
 
-pub(super) fn poll_demucs_model_result(&mut self, ctx: &Context) {
+    pub(super) fn poll_demucs_model_result(&mut self, ctx: &Context) {
         while let Ok(message) = self.demucs_model_rx.try_recv() {
             self.demucs_model_loading = false;
             self.demucs_model_cancel = None;
@@ -352,7 +352,7 @@ pub(super) fn poll_demucs_model_result(&mut self, ctx: &Context) {
         }
     }
 
-pub(super) fn poll_stream_driver_result(&mut self, ctx: &Context) {
+    pub(super) fn poll_stream_driver_result(&mut self, ctx: &Context) {
         while let Ok(message) = self.stream_driver_rx.try_recv() {
             match message {
                 StreamDriverMessage::ProbeFinished(Ok(installed)) => {
@@ -387,7 +387,7 @@ pub(super) fn poll_stream_driver_result(&mut self, ctx: &Context) {
         }
     }
 
-pub(super) fn poll_stream_input_router(&mut self, ctx: &Context) {
+    pub(super) fn poll_stream_input_router(&mut self, ctx: &Context) {
         let snapshot = self.stream_input_router.snapshot();
         if snapshot.running || snapshot.error.is_some() {
             ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
@@ -397,7 +397,7 @@ pub(super) fn poll_stream_input_router(&mut self, ctx: &Context) {
         }
     }
 
-pub(super) fn apply_theme(ctx: &Context, dark_theme: bool) {
+    pub(super) fn apply_theme(ctx: &Context, dark_theme: bool) {
         Self::set_theme_enabled(dark_theme);
 
         let mut style = (*ctx.style()).clone();
@@ -504,7 +504,7 @@ pub(super) fn apply_theme(ctx: &Context, dark_theme: bool) {
         ctx.set_style(style);
     }
 
-pub(super) fn page_fill() -> Color32 {
+    pub(super) fn page_fill() -> Color32 {
         if Self::dark_theme_enabled() {
             Color32::from_rgb(17, 14, 20)
         } else {
@@ -512,7 +512,7 @@ pub(super) fn page_fill() -> Color32 {
         }
     }
 
-pub(super) fn surface_fill() -> Color32 {
+    pub(super) fn surface_fill() -> Color32 {
         if Self::dark_theme_enabled() {
             Color32::from_rgb(24, 20, 29)
         } else {
@@ -520,7 +520,7 @@ pub(super) fn surface_fill() -> Color32 {
         }
     }
 
-pub(super) fn panel_fill() -> Color32 {
+    pub(super) fn panel_fill() -> Color32 {
         if Self::dark_theme_enabled() {
             Color32::from_rgb(29, 25, 35)
         } else {
@@ -528,7 +528,7 @@ pub(super) fn panel_fill() -> Color32 {
         }
     }
 
-pub(super) fn border_color() -> Color32 {
+    pub(super) fn border_color() -> Color32 {
         if Self::dark_theme_enabled() {
             Color32::from_rgb(78, 64, 87)
         } else {
@@ -536,7 +536,7 @@ pub(super) fn border_color() -> Color32 {
         }
     }
 
-pub(super) fn subtle_border_color() -> Color32 {
+    pub(super) fn subtle_border_color() -> Color32 {
         if Self::dark_theme_enabled() {
             Color32::from_rgb(88, 72, 96)
         } else {
@@ -544,7 +544,7 @@ pub(super) fn subtle_border_color() -> Color32 {
         }
     }
 
-pub(super) fn strong_text_color() -> Color32 {
+    pub(super) fn strong_text_color() -> Color32 {
         if Self::dark_theme_enabled() {
             Color32::from_rgb(246, 233, 241)
         } else {
@@ -552,7 +552,7 @@ pub(super) fn strong_text_color() -> Color32 {
         }
     }
 
-pub(super) fn muted_text_color() -> Color32 {
+    pub(super) fn muted_text_color() -> Color32 {
         if Self::dark_theme_enabled() {
             Color32::from_rgb(191, 174, 189)
         } else {
@@ -560,11 +560,11 @@ pub(super) fn muted_text_color() -> Color32 {
         }
     }
 
-pub(super) fn t(&self, key: &str) -> String {
+    pub(super) fn t(&self, key: &str) -> String {
         self.localization.text(key)
     }
 
-pub(super) fn render_settings_panel(&mut self, ctx: &Context) {
+    pub(super) fn render_settings_panel(&mut self, ctx: &Context) {
         if !self.show_settings_panel {
             return;
         }

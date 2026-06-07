@@ -15,11 +15,8 @@ pub fn calculate_normalization_gain(asset_path: &Path) -> Result<f32> {
         bail!("audio file is empty");
     }
 
-    let mean_square = samples
-        .iter()
-        .map(|&sample| sample * sample)
-        .sum::<f32>()
-        / samples.len() as f32;
+    let mean_square =
+        samples.iter().map(|&sample| sample * sample).sum::<f32>() / samples.len() as f32;
     let current_rms = mean_square.sqrt();
 
     if current_rms < 0.00001 {

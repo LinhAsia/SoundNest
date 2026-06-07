@@ -396,7 +396,8 @@ mod windows_impl {
 
                 if is_key_down || is_key_up {
                     let target_hotkeys = state.target_hotkeys.lock().unwrap().clone();
-                    let secondary_target_hotkeys = state.secondary_target_hotkeys.lock().unwrap().clone();
+                    let secondary_target_hotkeys =
+                        state.secondary_target_hotkeys.lock().unwrap().clone();
 
                     let mut matched_primary = None;
                     let mut matched_secondary = None;
@@ -406,12 +407,18 @@ mod windows_impl {
                         if let Ok(vk) = hotkey.vk_code() {
                             if vk == info.vkCode {
                                 if is_key_down {
-                                    if check_modifiers(hotkey.ctrl, hotkey.alt, hotkey.shift, hotkey.win) {
+                                    if check_modifiers(
+                                        hotkey.ctrl,
+                                        hotkey.alt,
+                                        hotkey.shift,
+                                        hotkey.win,
+                                    ) {
                                         matched_primary = Some(idx);
                                         break;
                                     }
                                 } else {
-                                    let pressed = state.pressed_indices.lock().unwrap().contains(&idx);
+                                    let pressed =
+                                        state.pressed_indices.lock().unwrap().contains(&idx);
                                     if pressed {
                                         matched_primary = Some(idx);
                                         break;
@@ -427,12 +434,21 @@ mod windows_impl {
                             if let Ok(vk) = hotkey.vk_code() {
                                 if vk == info.vkCode {
                                     if is_key_down {
-                                        if check_modifiers(hotkey.ctrl, hotkey.alt, hotkey.shift, hotkey.win) {
+                                        if check_modifiers(
+                                            hotkey.ctrl,
+                                            hotkey.alt,
+                                            hotkey.shift,
+                                            hotkey.win,
+                                        ) {
                                             matched_secondary = Some(idx);
                                             break;
                                         }
                                     } else {
-                                        let pressed = state.secondary_pressed_indices.lock().unwrap().contains(&idx);
+                                        let pressed = state
+                                            .secondary_pressed_indices
+                                            .lock()
+                                            .unwrap()
+                                            .contains(&idx);
                                         if pressed {
                                             matched_secondary = Some(idx);
                                             break;
@@ -461,7 +477,9 @@ mod windows_impl {
                             state.secondary_pressed_indices.lock().unwrap().insert(idx);
                         } else {
                             state.secondary_pressed_indices.lock().unwrap().remove(&idx);
-                            state.secondary_trigger_count.fetch_add(1, Ordering::Relaxed);
+                            state
+                                .secondary_trigger_count
+                                .fetch_add(1, Ordering::Relaxed);
                             if let Some(ctx) = state.repaint_ctx.lock().unwrap().clone() {
                                 ctx.request_repaint();
                             }
@@ -481,7 +499,7 @@ mod windows_impl {
             let sys_alt = key_down(VK_MENU.0 as i32);
             let sys_shift = key_down(VK_SHIFT.0 as i32);
             let sys_win = key_down(VK_LWIN.0 as i32) || key_down(VK_RWIN.0 as i32);
-            
+
             sys_ctrl == ctrl && sys_alt == alt && sys_shift == shift && sys_win == win
         }
     }

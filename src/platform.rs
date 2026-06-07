@@ -48,11 +48,11 @@ mod windows_platform {
             WindowsAndMessaging::{
                 CreateWindowExW, DestroyWindow, FindWindowW, GWL_EXSTYLE, GWL_STYLE, GetCursorPos,
                 GetWindowLongW, HWND_NOTOPMOST, HWND_TOPMOST, IDC_ARROW, LoadCursorW, SW_MINIMIZE,
-                SW_SHOWNOACTIVATE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE,
-                SWP_NOOWNERZORDER, SWP_NOSIZE, SetCursor, SetWindowLongW, SetWindowPos, ShowWindow,
-                ULW_ALPHA, UpdateLayeredWindow, WS_CAPTION, WS_EX_APPWINDOW, WS_EX_LAYERED,
-                WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_MAXIMIZEBOX, WS_MINIMIZEBOX,
-                WS_POPUP, WS_SYSMENU, WS_THICKFRAME,
+                SW_SHOWNOACTIVATE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER,
+                SWP_NOSIZE, SetCursor, SetWindowLongW, SetWindowPos, ShowWindow, ULW_ALPHA,
+                UpdateLayeredWindow, WS_CAPTION, WS_EX_APPWINDOW, WS_EX_LAYERED, WS_EX_TOOLWINDOW,
+                WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_POPUP,
+                WS_SYSMENU, WS_THICKFRAME,
             },
         },
     };

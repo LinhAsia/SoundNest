@@ -213,8 +213,7 @@ pub fn preload_demucs_model_cancellable(
         }
 
         let vocal_path = output_dir.join("vocals.wav");
-        if !vocal_path.exists() && find_named_wav_recursively(&output_dir, "vocals.wav").is_none()
-        {
+        if !vocal_path.exists() && find_named_wav_recursively(&output_dir, "vocals.wav").is_none() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(format!(
@@ -311,7 +310,10 @@ fn run_demucs_cancellable(
             return Err("Cancelled".to_string());
         }
 
-        match child.try_wait().map_err(|e| format!("Failed waiting for demucs: {e}"))? {
+        match child
+            .try_wait()
+            .map_err(|e| format!("Failed waiting for demucs: {e}"))?
+        {
             Some(_) => break,
             None => thread::sleep(Duration::from_millis(200)),
         }
@@ -393,10 +395,7 @@ fn mix_wav_stems(input_paths: &[PathBuf], output_path: &Path) -> Result<(), Stri
             output_channels = spec.channels;
             output_sample_rate = spec.sample_rate;
         } else if spec.channels != output_channels || spec.sample_rate != output_sample_rate {
-            return Err(format!(
-                "Stem format mismatch in {}",
-                input_path.display()
-            ));
+            return Err(format!("Stem format mismatch in {}", input_path.display()));
         }
 
         let samples = read_wav_samples_as_f32(&mut reader, spec)?;
