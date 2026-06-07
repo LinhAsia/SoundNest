@@ -53,6 +53,7 @@ const DEFAULT_OUTRO_FADE_START_RATIO: f32 = 0.0;
 const TRANSITION_WAVE_BUCKETS: usize = 160;
 const LIBRARY_GRID_MIN_COLUMNS: usize = 3;
 const LIBRARY_GRID_MAX_COLUMNS: usize = 8;
+const LIBRARY_TAG_COLLAPSED_COUNT: usize = 12;
 const RECORD_EXPORT_VIDEO_FPS_OPTIONS: [u32; 3] = [
     record_video::LOW_VIDEO_FPS,
     record_video::STANDARD_VIDEO_FPS,
@@ -311,9 +312,11 @@ pub struct SoundFxApp {
     pub(super) library_tab: LibraryTab,
     pub(super) folders: Vec<crate::storage::Folder>,
     pub(super) library_current_folder: Option<Uuid>,
+    pub(super) library_collapsed_folders: HashSet<Uuid>,
     pub(super) editing_folder_id: Option<Uuid>,
     pub(super) folder_rename_name: String,
     pub(super) new_folder_name: String,
+    pub(super) library_folder_create_open: bool,
     pub(super) recorder: Recorder,
     pub(super) record_name: String,
     pub(super) record_input_source: PitchInputSource,
@@ -373,6 +376,7 @@ pub struct SoundFxApp {
     pub(super) settings_show_exit_sound: bool,
     pub(super) library_audio_query: String,
     pub(super) library_audio_tag_filter: Option<String>,
+    pub(super) library_audio_tags_expanded: bool,
     pub(super) library_video_query: String,
     pub(super) library_favorites_only_audio: bool,
     pub(super) library_favorites_only_video: bool,
@@ -606,9 +610,11 @@ impl SoundFxApp {
             library_tab: LibraryTab::Sounds,
             folders,
             library_current_folder: None,
+            library_collapsed_folders: HashSet::new(),
             editing_folder_id: None,
             folder_rename_name: String::new(),
             new_folder_name: String::new(),
+            library_folder_create_open: false,
             recorder: Recorder::new(),
             record_name: "recording".to_owned(),
             record_input_source: PitchInputSource::System,
@@ -684,6 +690,7 @@ impl SoundFxApp {
             settings_show_exit_sound: false,
             library_audio_query: String::new(),
             library_audio_tag_filter: None,
+            library_audio_tags_expanded: false,
             library_video_query: String::new(),
             library_favorites_only_audio: false,
             library_favorites_only_video: false,
@@ -5254,30 +5261,6 @@ impl SoundFxApp {
                     });
                 ui.add_space(12.0);
 
-                if self.library_current_folder.is_some() && self.folder_import_select_mode.is_none()
-                {
-                    let folder_id = self.library_current_folder.unwrap();
-                    let folder_name = self.folder_path_label(folder_id);
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new(folder_name)
-                                .font(FontId::new(15.0, FontFamily::Proportional))
-                                .color(Self::strong_text_color())
-                                .strong(),
-                        );
-                        ui.add_space(10.0);
-                        let import_btn = ui.add(
-                            Button::new(format!("+ {}", self.t("library.import_sound_to_folder")))
-                                .fill(Color32::from_rgb(227, 82, 149))
-                                .corner_radius(10.0),
-                        );
-                        Self::decorate_button_response(ui, &import_btn);
-                        if import_btn.clicked() {
-                            self.folder_import_select_mode = Some(folder_id);
-                        }
-                    });
-                    ui.add_space(12.0);
-                }
                 ui.set_max_width(viewport_width);
 
                 if self.sounds.is_empty() {
@@ -5285,426 +5268,433 @@ impl SoundFxApp {
                     return;
                 }
 
-                let spacing = 14.0;
-                let layout_width = ui.clip_rect().width().min(ui.available_width());
-                let columns = self
-                    .library_grid_columns
-                    .clamp(LIBRARY_GRID_MIN_COLUMNS, LIBRARY_GRID_MAX_COLUMNS);
-                let sounds = self.filtered_library_sounds();
-                if sounds.is_empty() {
-                    self.draw_empty_editor(ui);
-                    return;
-                }
-                let mut open_sound = None;
-                let mut preview_sound = None;
-                let mut copy_sound = None;
-                let mut drag_sound = None;
-                let mut favorite_sound = None;
-                let mut remove_sound_from_folder = None;
-
-                let total_gap_width = spacing * (columns.saturating_sub(1)) as f32;
-                let minimum_grid_width = total_gap_width + 22.0 * columns as f32;
-                let target_grid_width = (layout_width - 28.0).max(minimum_grid_width);
-                let card_size = ((target_grid_width - total_gap_width) / columns as f32).max(22.0);
-                let grid_width = card_size * columns as f32 + total_gap_width;
-                let side_padding = ((layout_width - grid_width) * 0.5).max(0.0);
-                let row_count = sounds.len().div_ceil(columns);
-
-                for (row_index, row) in sounds.chunks(columns).enumerate() {
-                    let (row_rect, _) =
-                        ui.allocate_exact_size(vec2(layout_width, card_size), Sense::hover());
-
-                    for (column_index, sound) in row.iter().enumerate() {
-                        let tile_rect = Rect::from_min_size(
-                            Pos2::new(
-                                row_rect.left()
-                                    + side_padding
-                                    + column_index as f32 * (card_size + spacing),
-                                row_rect.top(),
-                            ),
-                            vec2(card_size, card_size),
-                        );
-                        let body_response = ui.interact(
-                            tile_rect,
-                            ui.id().with(("library-grid", sound.id)),
-                            if modal_open {
-                                Sense::hover()
-                            } else {
-                                Sense::click_and_drag()
-                            },
-                        );
-                        let pointer_hover = !modal_open
-                            && ui
-                                .ctx()
-                                .input(|input| input.pointer.hover_pos())
-                                .is_some_and(|pos| tile_rect.contains(pos));
-                        let hovered = !modal_open && pointer_hover;
-
-                        if hovered {
-                            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
-                        }
-                        if titlebar_drag_active {
-                            self.pending_sound_drag = None;
-                        }
-                        if !modal_open
-                            && !library_slider_active
-                            && !titlebar_drag_active
-                            && Self::pointer_primary_pressed_within(ui.ctx(), tile_rect)
-                        {
-                            self.pending_sound_drag = Some(sound.id);
-                        }
-                        if !modal_open
-                            && !library_slider_active
-                            && !titlebar_drag_active
-                            && self.pending_sound_drag == Some(sound.id)
-                            && pointer_hover
-                            && ui.ctx().input(|input| input.pointer.primary_down())
-                        {
-                            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
-                        }
-                        if !modal_open
-                            && !library_slider_active
-                            && !titlebar_drag_active
-                            && self.pending_sound_drag == Some(sound.id)
-                            && Self::pointer_primary_drag_ready(ui.ctx())
-                        {
-                            drag_sound = Some(sound.id);
-                            self.pending_sound_drag = None;
-                        }
-                        let mut body_clicked = false;
-                        if !modal_open && body_response.clicked() {
-                            body_clicked = true;
-                        }
-
-                        let mut scale = 1.0;
-                        let mut opacity = 1.0;
-                        if let Some(start_time) = self.folder_import_animating.get(&sound.id) {
-                            let elapsed = start_time.elapsed().as_secs_f32();
-                            let progress = (elapsed / 0.2).clamp(0.0, 1.0);
-                            scale = 1.0 - progress;
-                            opacity = 1.0 - progress;
-                            ui.ctx().request_repaint();
-                        }
-
-                        let card_center = tile_rect.center();
-                        let animated_size = vec2(card_size * scale, card_size * scale);
-                        let animated_rect = Rect::from_center_size(card_center, animated_size);
-
-                        let mut play_btn_response = None;
-                        let mut remove_btn_response = None;
-
-                        ui.scope_builder(egui::UiBuilder::new().max_rect(animated_rect), |ui| {
-                            ui.style_mut().interaction.selectable_labels = false;
-                            let fill = if hovered {
-                                Color32::from_rgb(227, 82, 149)
-                            } else {
-                                Self::surface_fill()
-                            };
-                            let stroke = if hovered {
-                                Color32::from_rgb(227, 82, 149)
-                            } else {
-                                Self::border_color()
-                            };
-                            let title_color = if hovered {
-                                Color32::WHITE
-                            } else {
-                                Self::strong_text_color()
-                            };
-                            let meta_color = if hovered {
-                                Color32::from_rgba_premultiplied(255, 255, 255, 196)
-                            } else {
-                                Self::muted_text_color()
-                            };
-                            let card_padding = (card_size * 0.12).clamp(4.0, 16.0);
-                            let compact_card = card_size < 118.0;
-                            let ultra_compact_card = card_size < 76.0;
-
-                            // Apply opacity
-                            let fill = fill.linear_multiply(opacity);
-                            let stroke = stroke.linear_multiply(opacity);
-                            let title_color = title_color.linear_multiply(opacity);
-                            let meta_color = meta_color.linear_multiply(opacity);
-
-                            Frame::new()
-                                .fill(fill)
-                                .stroke(Stroke::new(1.0, stroke))
-                                .shadow(Shadow {
-                                    offset: [0, 12],
-                                    blur: 28,
-                                    spread: 0,
-                                    color: Color32::from_rgba_premultiplied(86, 43, 67, 18)
-                                        .linear_multiply(opacity),
-                                })
-                                .corner_radius(30.0)
-                                .inner_margin(Margin::same(card_padding.round() as i8))
-                                .show(ui, |ui| {
-                                    let inner_size = (card_size - card_padding * 2.0).max(8.0);
-                                    let action_gap = if inner_size < 132.0 { 4.0 } else { 8.0 };
-                                    let action_button_width =
-                                        ((inner_size - action_gap * 2.0) / 3.0).clamp(28.0, 46.0);
-                                    let action_button_height = if action_button_width < 34.0 {
-                                        28.0
-                                    } else {
-                                        31.0
-                                    };
-                                    let action_button_size =
-                                        [action_button_width, action_button_height];
-                                    let action_icon_size = if action_button_width < 34.0 {
-                                        16.0
-                                    } else {
-                                        18.0
-                                    };
-                                    ui.set_min_size(vec2(inner_size, inner_size));
-                                    ui.set_width(inner_size);
-                                    ui.vertical(|ui| {
-                                        if !ultra_compact_card {
-                                            ui.horizontal(|ui| {
-                                                ui.add_sized(
-                                                    [inner_size - 22.0, 18.0],
-                                                    egui::Label::new(
-                                                        RichText::new(&sound.name)
-                                                            .size(12.5)
-                                                            .color(title_color)
-                                                            .strong(),
-                                                    )
-                                                    .truncate(),
-                                                );
-
-                                                if self.library_current_folder.is_some()
-                                                    && self.folder_import_select_mode.is_none()
-                                                {
-                                                    let remove_btn = ui.add(
-                                                        Button::new(Self::icon(
-                                                            0xe5cd, 11.0, meta_color,
-                                                        ))
-                                                        .fill(Color32::TRANSPARENT)
-                                                        .frame(false),
-                                                    );
-                                                    Self::decorate_button_response(ui, &remove_btn);
-                                                    if remove_btn.clicked() {
-                                                        remove_sound_from_folder = Some(sound.id);
-                                                    }
-                                                    remove_btn_response = Some(remove_btn);
-                                                }
-                                            });
-                                            ui.add_space(7.0);
-                                        }
-                                        let bucket_count =
-                                            (card_size * 0.34).round().clamp(20.0, 52.0) as usize;
-                                        let waveform_samples = self.sound_waveform_samples(&sound);
-                                        let waveform_preview =
-                                            Self::library_sound_waveform_preview_from_samples(
-                                                &sound,
-                                                &waveform_samples,
-                                                bucket_count,
-                                            );
-                                        let w_color1 = if hovered {
-                                            Color32::from_rgb(255, 214, 232)
-                                        } else {
-                                            Color32::from_rgb(214, 51, 132)
-                                        };
-                                        let w_color2 = if hovered {
-                                            Color32::from_rgb(255, 214, 232)
-                                        } else {
-                                            Color32::from_rgb(238, 213, 227)
-                                        };
-                                        let w_fill = if hovered {
-                                            Color32::from_rgba_premultiplied(255, 255, 255, 22)
-                                        } else {
-                                            Self::panel_fill()
-                                        };
-                                        Self::draw_wave_strip(
-                                            ui,
-                                            &waveform_preview,
-                                            None,
-                                            w_color1.linear_multiply(opacity),
-                                            w_color2.linear_multiply(opacity),
-                                            w_fill.linear_multiply(opacity),
-                                            (card_size * 0.38).clamp(18.0, 78.0),
-                                        );
-                                        if self.folder_import_select_mode.is_some() {
-                                            ui.add_space(8.0);
-                                            ui.horizontal(|ui| {
-                                                let center_gap =
-                                                    (inner_size - action_button_width) * 0.5;
-                                                if center_gap > 0.0 {
-                                                    ui.add_space(center_gap);
-                                                }
-                                                let is_loading = self
-                                                    .pending_preview_after_preload
-                                                    .is_some_and(|(id, _)| id == sound.id);
-                                                let play_btn = Self::icon_action(
-                                                    ui,
-                                                    action_button_size,
-                                                    if is_loading { 0xe5d5 } else { 0xe037 },
-                                                    is_loading,
-                                                    false,
-                                                );
-                                                if play_btn.clicked() {
-                                                    if is_loading {
-                                                        self.stop_preview();
-                                                    } else {
-                                                        preview_sound = Some(sound.id);
-                                                    }
-                                                }
-                                                play_btn_response = Some(play_btn);
-                                            });
-                                        } else if !compact_card {
-                                            ui.add_space(9.0);
-                                            ui.label(
-                                                RichText::new(format_time(sound.trimmed_length()))
-                                                    .size(11.5)
-                                                    .color(meta_color),
-                                            );
-                                            ui.add_space(8.0);
-                                            ui.horizontal(|ui| {
-                                                ui.spacing_mut().item_spacing.x = action_gap;
-                                                if Self::favorite_button_sized(
-                                                    ui,
-                                                    sound.favorite,
-                                                    action_button_size,
-                                                    action_icon_size,
-                                                )
-                                                .clicked()
-                                                {
-                                                    favorite_sound = Some(sound.id);
-                                                }
-                                                let is_loading = self
-                                                    .pending_preview_after_preload
-                                                    .is_some_and(|(id, _)| id == sound.id);
-                                                if Self::icon_action(
-                                                    ui,
-                                                    action_button_size,
-                                                    if is_loading { 0xe5d5 } else { 0xe037 },
-                                                    is_loading,
-                                                    false,
-                                                )
-                                                .clicked()
-                                                {
-                                                    if is_loading {
-                                                        self.stop_preview();
-                                                    } else {
-                                                        preview_sound = Some(sound.id);
-                                                    }
-                                                }
-                                                if Self::icon_action(
-                                                    ui,
-                                                    action_button_size,
-                                                    0xe14d,
-                                                    self.sound_copy_feedback_active(
-                                                        ui.ctx(),
-                                                        sound.id,
-                                                    ),
-                                                    self.sound_copy_feedback_active(
-                                                        ui.ctx(),
-                                                        sound.id,
-                                                    ),
-                                                )
-                                                .clicked()
-                                                {
-                                                    copy_sound = Some(sound.id);
-                                                }
-                                            });
-                                            if self.sound_copy_feedback_active(ui.ctx(), sound.id) {
-                                                ui.add_space(6.0);
-                                                ui.label(
-                                                    RichText::new("Copied")
-                                                        .size(11.0)
-                                                        .color(meta_color),
-                                                );
-                                            }
-                                        }
-                                    });
-                                });
-                        });
-
-                        if body_clicked && !self.folder_import_animating.contains_key(&sound.id) {
-                            let is_over_play =
-                                play_btn_response.as_ref().is_some_and(|r| r.hovered());
-                            let is_over_remove =
-                                remove_btn_response.as_ref().is_some_and(|r| r.hovered());
-                            if !is_over_play && !is_over_remove {
-                                if let Some(_import_folder_id) = self.folder_import_select_mode {
-                                    self.folder_import_animating
-                                        .insert(sound.id, Instant::now());
-                                } else {
-                                    open_sound = Some(sound.id);
-                                }
-                            }
-                        }
+                if self.library_current_folder.is_none() || self.folder_import_select_mode.is_some()
+                {
+                    let sounds = self.filtered_library_sounds();
+                    if sounds.is_empty() {
+                        self.draw_empty_editor(ui);
+                        return;
                     }
-
-                    if row_index + 1 < row_count {
-                        ui.add_space(spacing);
-                    }
-                }
-
-                let mut completed_imports = Vec::new();
-                self.folder_import_animating.retain(|sound_id, start_time| {
-                    if start_time.elapsed().as_secs_f32() >= 0.2 {
-                        completed_imports.push(*sound_id);
-                        false
-                    } else {
-                        true
-                    }
-                });
-                if !completed_imports.is_empty() {
-                    if let Some(folder_id) = self.folder_import_select_mode {
-                        for sound_id in completed_imports {
-                            if let Some(s) = self.sounds.iter_mut().find(|s| s.id == sound_id) {
-                                s.folder_id = Some(folder_id);
-                            }
-                        }
-                        self.mark_dirty(ui.ctx());
-                    }
-                }
-
-                if let Some(sound_id) = remove_sound_from_folder {
-                    if let Some(s) = self.sounds.iter_mut().find(|s| s.id == sound_id) {
-                        s.folder_id = None;
-                    }
-                    self.mark_dirty(ui.ctx());
-                }
-
-                ui.add_space(208.0);
-
-                if let Some(sound_id) = preview_sound {
-                    self.preview_sound(sound_id);
-                }
-                if let Some(sound_id) = drag_sound {
-                    if let Some(sound) = self
-                        .sounds
-                        .iter()
-                        .find(|sound| sound.id == sound_id)
-                        .cloned()
-                    {
-                        if let Err(error) = self.drag_sound_file_out(ui.ctx(), &sound) {
-                            self.set_error_status(error);
-                        }
-                    }
-                }
-                if let Some(sound_id) = copy_sound {
-                    if let Some(sound) = self
-                        .sounds
-                        .iter()
-                        .find(|sound| sound.id == sound_id)
-                        .cloned()
-                    {
-                        if let Err(error) = self.copy_sound_file_to_clipboard(&sound) {
-                            self.set_error_status(error);
-                        } else {
-                            self.mark_sound_copied(ui.ctx(), sound_id);
-                            self.status = Some("Copied to clipboard".to_owned());
-                        }
-                    }
-                }
-                if let Some(sound_id) = favorite_sound {
-                    self.toggle_sound_favorite(sound_id, ui.ctx());
-                }
-                if let Some(sound_id) = open_sound {
-                    self.open_sound_from_library(sound_id);
+                    let layout_width = ui.clip_rect().width().min(ui.available_width());
+                    self.draw_library_sound_grid_content(
+                        ui,
+                        &sounds,
+                        layout_width,
+                        modal_open,
+                        library_slider_active,
+                        titlebar_drag_active,
+                    );
                 }
             });
+    }
+
+    fn draw_library_sound_grid_content(
+        &mut self,
+        ui: &mut Ui,
+        sounds: &[SoundEffect],
+        layout_width: f32,
+        modal_open: bool,
+        library_slider_active: bool,
+        titlebar_drag_active: bool,
+    ) {
+        let spacing = 14.0;
+        let columns = self
+            .library_grid_columns
+            .clamp(LIBRARY_GRID_MIN_COLUMNS, LIBRARY_GRID_MAX_COLUMNS);
+        let mut open_sound = None;
+        let mut preview_sound = None;
+        let mut copy_sound = None;
+        let mut drag_sound = None;
+        let mut favorite_sound = None;
+        let mut remove_sound_from_folder = None;
+
+        let total_gap_width = spacing * (columns.saturating_sub(1)) as f32;
+        let minimum_grid_width = total_gap_width + 22.0 * columns as f32;
+        let target_grid_width = (layout_width - 28.0).max(minimum_grid_width);
+        let card_size = ((target_grid_width - total_gap_width) / columns as f32).max(22.0);
+        let grid_width = card_size * columns as f32 + total_gap_width;
+        let side_padding = ((layout_width - grid_width) * 0.5).max(0.0);
+        let row_count = sounds.len().div_ceil(columns);
+
+        for (row_index, row) in sounds.chunks(columns).enumerate() {
+            let (row_rect, _) =
+                ui.allocate_exact_size(vec2(layout_width, card_size), Sense::hover());
+
+            for (column_index, sound) in row.iter().enumerate() {
+                let tile_rect = Rect::from_min_size(
+                    Pos2::new(
+                        row_rect.left()
+                            + side_padding
+                            + column_index as f32 * (card_size + spacing),
+                        row_rect.top(),
+                    ),
+                    vec2(card_size, card_size),
+                );
+                let body_response = ui.interact(
+                    tile_rect,
+                    ui.id().with(("library-grid", sound.id)),
+                    if modal_open {
+                        Sense::hover()
+                    } else {
+                        Sense::click_and_drag()
+                    },
+                );
+                let pointer_hover = !modal_open
+                    && ui
+                        .ctx()
+                        .input(|input| input.pointer.hover_pos())
+                        .is_some_and(|pos| tile_rect.contains(pos));
+                let hovered = !modal_open && pointer_hover;
+
+                if hovered {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+                }
+                if titlebar_drag_active {
+                    self.pending_sound_drag = None;
+                }
+                if !modal_open
+                    && !library_slider_active
+                    && !titlebar_drag_active
+                    && Self::pointer_primary_pressed_within(ui.ctx(), tile_rect)
+                {
+                    self.pending_sound_drag = Some(sound.id);
+                }
+                if !modal_open
+                    && !library_slider_active
+                    && !titlebar_drag_active
+                    && self.pending_sound_drag == Some(sound.id)
+                    && pointer_hover
+                    && ui.ctx().input(|input| input.pointer.primary_down())
+                {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                }
+                if !modal_open
+                    && !library_slider_active
+                    && !titlebar_drag_active
+                    && self.pending_sound_drag == Some(sound.id)
+                    && Self::pointer_primary_drag_ready(ui.ctx())
+                {
+                    drag_sound = Some(sound.id);
+                    self.pending_sound_drag = None;
+                }
+                let mut body_clicked = false;
+                if !modal_open && body_response.clicked() {
+                    body_clicked = true;
+                }
+
+                let mut scale = 1.0;
+                let mut opacity = 1.0;
+                if let Some(start_time) = self.folder_import_animating.get(&sound.id) {
+                    let elapsed = start_time.elapsed().as_secs_f32();
+                    let progress = (elapsed / 0.2).clamp(0.0, 1.0);
+                    scale = 1.0 - progress;
+                    opacity = 1.0 - progress;
+                    ui.ctx().request_repaint();
+                }
+
+                let card_center = tile_rect.center();
+                let animated_size = vec2(card_size * scale, card_size * scale);
+                let animated_rect = Rect::from_center_size(card_center, animated_size);
+
+                let mut play_btn_response = None;
+                let mut remove_btn_response = None;
+
+                ui.scope_builder(egui::UiBuilder::new().max_rect(animated_rect), |ui| {
+                    ui.style_mut().interaction.selectable_labels = false;
+                    let fill = if hovered {
+                        Color32::from_rgb(227, 82, 149)
+                    } else {
+                        Self::surface_fill()
+                    };
+                    let stroke = if hovered {
+                        Color32::from_rgb(227, 82, 149)
+                    } else {
+                        Self::border_color()
+                    };
+                    let title_color = if hovered {
+                        Color32::WHITE
+                    } else {
+                        Self::strong_text_color()
+                    };
+                    let meta_color = if hovered {
+                        Color32::from_rgba_premultiplied(255, 255, 255, 196)
+                    } else {
+                        Self::muted_text_color()
+                    };
+                    let card_padding = (card_size * 0.12).clamp(4.0, 16.0);
+                    let compact_card = card_size < 118.0;
+                    let ultra_compact_card = card_size < 76.0;
+
+                    let fill = fill.linear_multiply(opacity);
+                    let stroke = stroke.linear_multiply(opacity);
+                    let title_color = title_color.linear_multiply(opacity);
+                    let meta_color = meta_color.linear_multiply(opacity);
+
+                    Frame::new()
+                        .fill(fill)
+                        .stroke(Stroke::new(1.0, stroke))
+                        .shadow(Shadow {
+                            offset: [0, 12],
+                            blur: 28,
+                            spread: 0,
+                            color: Color32::from_rgba_premultiplied(86, 43, 67, 18)
+                                .linear_multiply(opacity),
+                        })
+                        .corner_radius(30.0)
+                        .inner_margin(Margin::same(card_padding.round() as i8))
+                        .show(ui, |ui| {
+                            let inner_size = (card_size - card_padding * 2.0).max(8.0);
+                            let action_gap = if inner_size < 132.0 { 4.0 } else { 8.0 };
+                            let action_button_width =
+                                ((inner_size - action_gap * 2.0) / 3.0).clamp(28.0, 46.0);
+                            let action_button_height = if action_button_width < 34.0 {
+                                28.0
+                            } else {
+                                31.0
+                            };
+                            let action_button_size = [action_button_width, action_button_height];
+                            let action_icon_size = if action_button_width < 34.0 {
+                                16.0
+                            } else {
+                                18.0
+                            };
+                            ui.set_min_size(vec2(inner_size, inner_size));
+                            ui.set_width(inner_size);
+                            ui.vertical(|ui| {
+                                if !ultra_compact_card {
+                                    ui.horizontal(|ui| {
+                                        ui.add_sized(
+                                            [inner_size - 22.0, 18.0],
+                                            egui::Label::new(
+                                                RichText::new(&sound.name)
+                                                    .size(12.5)
+                                                    .color(title_color)
+                                                    .strong(),
+                                            )
+                                            .truncate(),
+                                        );
+
+                                        if self.library_current_folder.is_some()
+                                            && self.folder_import_select_mode.is_none()
+                                        {
+                                            let remove_btn = ui.add(
+                                                Button::new(Self::icon(0xe5cd, 11.0, meta_color))
+                                                    .fill(Color32::TRANSPARENT)
+                                                    .frame(false),
+                                            );
+                                            Self::decorate_button_response(ui, &remove_btn);
+                                            if remove_btn.clicked() {
+                                                remove_sound_from_folder = Some(sound.id);
+                                            }
+                                            remove_btn_response = Some(remove_btn);
+                                        }
+                                    });
+                                    ui.add_space(7.0);
+                                }
+                                let bucket_count =
+                                    (card_size * 0.34).round().clamp(20.0, 52.0) as usize;
+                                let waveform_samples = self.sound_waveform_samples(sound);
+                                let waveform_preview =
+                                    Self::library_sound_waveform_preview_from_samples(
+                                        sound,
+                                        &waveform_samples,
+                                        bucket_count,
+                                    );
+                                let w_color1 = if hovered {
+                                    Color32::from_rgb(255, 214, 232)
+                                } else {
+                                    Color32::from_rgb(214, 51, 132)
+                                };
+                                let w_color2 = if hovered {
+                                    Color32::from_rgb(255, 214, 232)
+                                } else {
+                                    Color32::from_rgb(238, 213, 227)
+                                };
+                                let w_fill = if hovered {
+                                    Color32::from_rgba_premultiplied(255, 255, 255, 22)
+                                } else {
+                                    Self::panel_fill()
+                                };
+                                Self::draw_wave_strip(
+                                    ui,
+                                    &waveform_preview,
+                                    None,
+                                    w_color1.linear_multiply(opacity),
+                                    w_color2.linear_multiply(opacity),
+                                    w_fill.linear_multiply(opacity),
+                                    (card_size * 0.38).clamp(18.0, 78.0),
+                                );
+                                if self.folder_import_select_mode.is_some() {
+                                    ui.add_space(8.0);
+                                    ui.horizontal(|ui| {
+                                        let center_gap = (inner_size - action_button_width) * 0.5;
+                                        if center_gap > 0.0 {
+                                            ui.add_space(center_gap);
+                                        }
+                                        let is_loading = self
+                                            .pending_preview_after_preload
+                                            .is_some_and(|(id, _)| id == sound.id);
+                                        let play_btn = Self::icon_action(
+                                            ui,
+                                            action_button_size,
+                                            if is_loading { 0xe5d5 } else { 0xe037 },
+                                            is_loading,
+                                            false,
+                                        );
+                                        if play_btn.clicked() {
+                                            if is_loading {
+                                                self.stop_preview();
+                                            } else {
+                                                preview_sound = Some(sound.id);
+                                            }
+                                        }
+                                        play_btn_response = Some(play_btn);
+                                    });
+                                } else if !compact_card {
+                                    ui.add_space(9.0);
+                                    ui.label(
+                                        RichText::new(format_time(sound.trimmed_length()))
+                                            .size(11.5)
+                                            .color(meta_color),
+                                    );
+                                    ui.add_space(8.0);
+                                    ui.horizontal(|ui| {
+                                        ui.spacing_mut().item_spacing.x = action_gap;
+                                        if Self::favorite_button_sized(
+                                            ui,
+                                            sound.favorite,
+                                            action_button_size,
+                                            action_icon_size,
+                                        )
+                                        .clicked()
+                                        {
+                                            favorite_sound = Some(sound.id);
+                                        }
+                                        let is_loading = self
+                                            .pending_preview_after_preload
+                                            .is_some_and(|(id, _)| id == sound.id);
+                                        if Self::icon_action(
+                                            ui,
+                                            action_button_size,
+                                            if is_loading { 0xe5d5 } else { 0xe037 },
+                                            is_loading,
+                                            false,
+                                        )
+                                        .clicked()
+                                        {
+                                            if is_loading {
+                                                self.stop_preview();
+                                            } else {
+                                                preview_sound = Some(sound.id);
+                                            }
+                                        }
+                                        if Self::icon_action(
+                                            ui,
+                                            action_button_size,
+                                            0xe14d,
+                                            self.sound_copy_feedback_active(ui.ctx(), sound.id),
+                                            self.sound_copy_feedback_active(ui.ctx(), sound.id),
+                                        )
+                                        .clicked()
+                                        {
+                                            copy_sound = Some(sound.id);
+                                        }
+                                    });
+                                    if self.sound_copy_feedback_active(ui.ctx(), sound.id) {
+                                        ui.add_space(6.0);
+                                        ui.label(
+                                            RichText::new("Copied").size(11.0).color(meta_color),
+                                        );
+                                    }
+                                }
+                            });
+                        });
+                });
+
+                if body_clicked && !self.folder_import_animating.contains_key(&sound.id) {
+                    let is_over_play = play_btn_response.as_ref().is_some_and(|r| r.hovered());
+                    let is_over_remove = remove_btn_response.as_ref().is_some_and(|r| r.hovered());
+                    if !is_over_play && !is_over_remove {
+                        if let Some(_import_folder_id) = self.folder_import_select_mode {
+                            self.folder_import_animating
+                                .insert(sound.id, Instant::now());
+                        } else {
+                            open_sound = Some(sound.id);
+                        }
+                    }
+                }
+            }
+
+            if row_index + 1 < row_count {
+                ui.add_space(spacing);
+            }
+        }
+
+        let mut completed_imports = Vec::new();
+        self.folder_import_animating.retain(|sound_id, start_time| {
+            if start_time.elapsed().as_secs_f32() >= 0.2 {
+                completed_imports.push(*sound_id);
+                false
+            } else {
+                true
+            }
+        });
+        if !completed_imports.is_empty() {
+            if let Some(folder_id) = self.folder_import_select_mode {
+                for sound_id in completed_imports {
+                    if let Some(s) = self.sounds.iter_mut().find(|s| s.id == sound_id) {
+                        s.folder_id = Some(folder_id);
+                    }
+                }
+                self.mark_dirty(ui.ctx());
+            }
+        }
+
+        if let Some(sound_id) = remove_sound_from_folder {
+            if let Some(s) = self.sounds.iter_mut().find(|s| s.id == sound_id) {
+                s.folder_id = None;
+            }
+            self.mark_dirty(ui.ctx());
+        }
+
+        ui.add_space(208.0);
+
+        if let Some(sound_id) = preview_sound {
+            self.preview_sound(sound_id);
+        }
+        if let Some(sound_id) = drag_sound {
+            if let Some(sound) = self
+                .sounds
+                .iter()
+                .find(|sound| sound.id == sound_id)
+                .cloned()
+            {
+                if let Err(error) = self.drag_sound_file_out(ui.ctx(), &sound) {
+                    self.set_error_status(error);
+                }
+            }
+        }
+        if let Some(sound_id) = copy_sound {
+            if let Some(sound) = self
+                .sounds
+                .iter()
+                .find(|sound| sound.id == sound_id)
+                .cloned()
+            {
+                if let Err(error) = self.copy_sound_file_to_clipboard(&sound) {
+                    self.set_error_status(error);
+                } else {
+                    self.mark_sound_copied(ui.ctx(), sound_id);
+                    self.status = Some("Copied to clipboard".to_owned());
+                }
+            }
+        }
+        if let Some(sound_id) = favorite_sound {
+            self.toggle_sound_favorite(sound_id, ui.ctx());
+        }
+        if let Some(sound_id) = open_sound {
+            self.open_sound_from_library(sound_id);
+        }
     }
 
     fn draw_video_library_grid(&mut self, ui: &mut Ui) {

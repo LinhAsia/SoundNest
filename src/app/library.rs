@@ -41,7 +41,19 @@ use uuid::Uuid;
 
 impl SoundFxApp {
     pub(super) fn filtered_library_sounds(&self) -> Vec<SoundEffect> {
-        let active_folder_ids = self.active_folder_filter_ids();
+        self.filtered_library_sounds_for_folder(self.library_current_folder, true)
+    }
+
+    pub(super) fn filtered_library_sounds_for_folder(
+        &self,
+        folder_id: Option<Uuid>,
+        include_descendants: bool,
+    ) -> Vec<SoundEffect> {
+        let active_folder_ids = if include_descendants {
+            folder_id.map(|root_id| self.folder_branch_ids(root_id))
+        } else {
+            folder_id.map(|root_id| HashSet::from([root_id]))
+        };
         let active_tag_filter = self.active_audio_tag_filter();
         let filtered = self
             .sounds
@@ -65,11 +77,6 @@ impl SoundFxApp {
         let (favorites, regular): (Vec<_>, Vec<_>) =
             filtered.into_iter().partition(|sound| sound.favorite);
         favorites.into_iter().chain(regular).collect()
-    }
-
-    pub(super) fn active_folder_filter_ids(&self) -> Option<HashSet<Uuid>> {
-        let root_id = self.library_current_folder?;
-        Some(self.folder_branch_ids(root_id))
     }
 
     pub(super) fn folder_branch_ids(&self, root_id: Uuid) -> HashSet<Uuid> {
@@ -108,7 +115,7 @@ impl SoundFxApp {
         folders
     }
 
-pub(super) fn folder_path_label(&self, folder_id: Uuid) -> String {
+    pub(super) fn folder_path_label(&self, folder_id: Uuid) -> String {
         let mut names = Vec::new();
         let mut current = Some(folder_id);
         while let Some(id) = current {
@@ -148,6 +155,9 @@ pub(super) fn folder_path_label(&self, folder_id: Uuid) -> String {
             parent_id,
         };
         self.folders.push(new_folder.clone());
+        if let Some(parent_id) = parent_id {
+            self.library_collapsed_folders.remove(&parent_id);
+        }
         self.library_current_folder = Some(new_folder.id);
         self.new_folder_name.clear();
         self.folder_name_warning = false;
@@ -158,6 +168,8 @@ pub(super) fn folder_path_label(&self, folder_id: Uuid) -> String {
         let removed_ids = self.folder_branch_ids(root_id);
         self.folders
             .retain(|folder| !removed_ids.contains(&folder.id));
+        self.library_collapsed_folders
+            .retain(|folder_id| !removed_ids.contains(folder_id));
         let _ = self.storage.save_folders(&self.folders);
         for sound in &mut self.sounds {
             if sound
@@ -540,6 +552,34 @@ pub(super) fn folder_path_label(&self, folder_id: Uuid) -> String {
             return;
         }
 
+        let active_filter = self.library_audio_tag_filter.clone();
+        let active_hidden_tag = active_filter
+            .as_deref()
+            .filter(|tag| {
+                !self.library_audio_tags_expanded
+                    && !tags
+                        .iter()
+                        .take(LIBRARY_TAG_COLLAPSED_COUNT)
+                        .any(|value| value.eq_ignore_ascii_case(tag))
+            })
+            .map(str::to_owned);
+        let mut visible_tags = if self.library_audio_tags_expanded {
+            tags.clone()
+        } else {
+            tags.iter()
+                .take(LIBRARY_TAG_COLLAPSED_COUNT)
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        if let Some(tag) = active_hidden_tag
+            && !visible_tags
+                .iter()
+                .any(|value| value.eq_ignore_ascii_case(&tag))
+        {
+            visible_tags.push(tag);
+        }
+        let has_hidden_tags = tags.len() > visible_tags.len();
+
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
             ui.label(
@@ -547,16 +587,32 @@ pub(super) fn folder_path_label(&self, folder_id: Uuid) -> String {
                     .size(12.0)
                     .color(Self::muted_text_color()),
             );
-            let active_filter = self.library_audio_tag_filter.clone();
             let all_active = active_filter.is_none();
             if Self::tag_chip_button(ui, &self.t("library.tag_all"), all_active).clicked() {
                 self.library_audio_tag_filter = None;
             }
 
-            for tag in tags {
+            for tag in visible_tags {
                 let active = active_filter.as_deref().is_some_and(|value| value == tag);
                 if Self::tag_chip_button(ui, &tag, active).clicked() {
                     self.library_audio_tag_filter = if active { None } else { Some(tag) };
+                }
+            }
+
+            if has_hidden_tags || self.library_audio_tags_expanded {
+                let toggle_label = if self.library_audio_tags_expanded {
+                    format!(
+                        "{} Less",
+                        Self::icon(0xe5ce, 13.0, Self::strong_text_color()).text()
+                    )
+                } else {
+                    format!(
+                        "{} More",
+                        Self::icon(0xe5cf, 13.0, Self::strong_text_color()).text()
+                    )
+                };
+                if Self::tag_chip_button(ui, &toggle_label, false).clicked() {
+                    self.library_audio_tags_expanded = !self.library_audio_tags_expanded;
                 }
             }
         });
@@ -916,89 +972,116 @@ pub(super) fn folder_path_label(&self, folder_id: Uuid) -> String {
             .map(|folder_id| self.folder_path_label(folder_id))
             .unwrap_or_else(|| "Root".to_owned());
 
-        ui.label(
-            RichText::new("Create folder in:")
-                .size(11.5)
-                .color(Self::muted_text_color()),
+        let add_folder_btn = ui.add_sized(
+            [160.0, 32.0],
+            Button::new(
+                RichText::new(if self.library_folder_create_open {
+                    "Hide Add Folder"
+                } else {
+                    "+ Add Folder"
+                })
+                .size(12.5)
+                .color(Color32::WHITE),
+            )
+            .fill(Color32::from_rgb(227, 82, 149))
+            .corner_radius(12.0),
         );
-        ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            Frame::new()
+        Self::decorate_button_response(ui, &add_folder_btn);
+        if add_folder_btn.clicked() {
+            self.library_folder_create_open = !self.library_folder_create_open;
+            self.folder_name_warning = false;
+        }
+
+        if self.library_folder_create_open {
+            ui.add_space(10.0);
+            ui.label(
+                RichText::new("Create folder in:")
+                    .size(11.5)
+                    .color(Self::muted_text_color()),
+            );
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                Frame::new()
+                    .fill(Self::input_fill())
+                    .stroke(Stroke::new(1.0, Self::border_color()))
+                    .corner_radius(12.0)
+                    .inner_margin(Margin::symmetric(12, 6))
+                    .show(ui, |ui| {
+                        ui.add_sized(
+                            [220.0, 20.0],
+                            egui::Label::new(
+                                RichText::new(selected_parent_label)
+                                    .size(12.5)
+                                    .color(Self::strong_text_color()),
+                            )
+                            .truncate(),
+                        );
+                    });
+                if self.library_current_folder.is_some() {
+                    let clear_btn = ui.add_sized(
+                        [92.0, 30.0],
+                        Self::action_button(RichText::new("To root").size(12.0), false, false),
+                    );
+                    Self::decorate_button_response(ui, &clear_btn);
+                    if clear_btn.clicked() {
+                        self.library_current_folder = None;
+                    }
+                }
+            });
+            ui.add_space(8.0);
+
+            let border_stroke = if self.folder_name_warning {
+                Stroke::new(1.5, Color32::from_rgb(220, 53, 69))
+            } else {
+                Stroke::new(1.0, Self::border_color())
+            };
+            let folder_hint = self.t("library.folder_placeholder");
+            let create_edit = Frame::new()
                 .fill(Self::input_fill())
-                .stroke(Stroke::new(1.0, Self::border_color()))
+                .stroke(border_stroke)
                 .corner_radius(12.0)
                 .inner_margin(Margin::symmetric(12, 6))
                 .show(ui, |ui| {
                     ui.add_sized(
                         [220.0, 20.0],
-                        egui::Label::new(
-                            RichText::new(selected_parent_label)
-                                .size(12.5)
-                                .color(Self::strong_text_color()),
-                        )
-                        .truncate(),
-                    );
+                        egui::TextEdit::singleline(&mut self.new_folder_name)
+                            .frame(false)
+                            .hint_text(folder_hint),
+                    )
                 });
-            if self.library_current_folder.is_some() {
-                let clear_btn = ui.add_sized(
-                    [92.0, 30.0],
-                    Self::action_button(RichText::new("To root").size(12.0), false, false),
-                );
-                Self::decorate_button_response(ui, &clear_btn);
-                if clear_btn.clicked() {
-                    self.library_current_folder = None;
+            if create_edit.inner.changed() {
+                self.folder_name_warning = false;
+            }
+            ui.add_space(8.0);
+            let create_btn = ui.add_sized(
+                [160.0, 32.0],
+                Button::new(
+                    RichText::new(format!("+ {}", self.t("library.create_folder")))
+                        .size(12.5)
+                        .color(Color32::WHITE),
+                )
+                .fill(Color32::from_rgb(227, 82, 149))
+                .corner_radius(12.0),
+            );
+            Self::decorate_button_response(ui, &create_btn);
+            let create_clicked = create_btn.clicked()
+                || (create_edit.inner.lost_focus()
+                    && ui.input(|input| input.key_pressed(egui::Key::Enter)));
+            if create_clicked {
+                let name = self.new_folder_name.trim().to_owned();
+                if name.is_empty() {
+                    self.folder_name_warning = true;
+                } else {
+                    self.create_folder(name, self.library_current_folder);
+                    self.library_folder_create_open = false;
                 }
             }
-        });
-        ui.add_space(8.0);
 
-        let border_stroke = if self.folder_name_warning {
-            Stroke::new(1.5, Color32::from_rgb(220, 53, 69))
+            ui.add_space(14.0);
         } else {
-            Stroke::new(1.0, Self::border_color())
-        };
-        let folder_hint = self.t("library.folder_placeholder");
-        let create_edit = Frame::new()
-            .fill(Self::input_fill())
-            .stroke(border_stroke)
-            .corner_radius(12.0)
-            .inner_margin(Margin::symmetric(12, 6))
-            .show(ui, |ui| {
-                ui.add_sized(
-                    [220.0, 20.0],
-                    egui::TextEdit::singleline(&mut self.new_folder_name)
-                        .frame(false)
-                        .hint_text(folder_hint),
-                )
-            });
-        if create_edit.inner.changed() {
-            self.folder_name_warning = false;
-        }
-        ui.add_space(8.0);
-        let create_btn = ui.add_sized(
-            [160.0, 32.0],
-            Button::new(
-                RichText::new(format!("+ {}", self.t("library.create_folder")))
-                    .size(12.5)
-                    .color(Color32::WHITE),
-            )
-            .fill(Color32::from_rgb(227, 82, 149))
-            .corner_radius(12.0),
-        );
-        Self::decorate_button_response(ui, &create_btn);
-        let create_clicked = create_btn.clicked()
-            || (create_edit.inner.lost_focus()
-                && ui.input(|input| input.key_pressed(egui::Key::Enter)));
-        if create_clicked {
-            let name = self.new_folder_name.trim().to_owned();
-            if name.is_empty() {
-                self.folder_name_warning = true;
-            } else {
-                self.create_folder(name, self.library_current_folder);
-            }
+            ui.add_space(12.0);
         }
 
-        ui.add_space(14.0);
         if self.folders.is_empty() {
             ui.label(
                 RichText::new(self.t("library.no_folders"))
@@ -1013,6 +1096,7 @@ pub(super) fn folder_path_label(&self, folder_id: Uuid) -> String {
         let mut rename_folder_id = None;
         let mut rename_commit = None;
         let mut finish_editing = false;
+        let mut toggle_folder_id = None;
 
         for folder in self.sorted_child_folders(None) {
             self.draw_folder_tree_node(
@@ -1024,12 +1108,18 @@ pub(super) fn folder_path_label(&self, folder_id: Uuid) -> String {
                 &mut rename_folder_id,
                 &mut rename_commit,
                 &mut finish_editing,
+                &mut toggle_folder_id,
             );
         }
 
         if let Some(folder_id) = select_folder_id {
             self.library_current_folder = Some(folder_id);
             self.editing_folder_id = None;
+        }
+        if let Some(folder_id) = toggle_folder_id {
+            if !self.library_collapsed_folders.insert(folder_id) {
+                self.library_collapsed_folders.remove(&folder_id);
+            }
         }
         if let Some(folder_id) = delete_folder_id {
             self.delete_folder_branch(folder_id);
@@ -1065,12 +1155,15 @@ pub(super) fn folder_path_label(&self, folder_id: Uuid) -> String {
         rename_folder_id: &mut Option<Uuid>,
         rename_commit: &mut Option<(Uuid, String)>,
         finish_editing: &mut bool,
+        toggle_folder_id: &mut Option<Uuid>,
     ) {
         let is_selected = self.library_current_folder == Some(folder.id);
         let is_editing = self.editing_folder_id == Some(folder.id);
         let total_count = self.total_sound_count_for_folder(folder.id);
         let direct_count = self.direct_sound_count_for_folder(folder.id);
-        let has_children = !self.sorted_child_folders(Some(folder.id)).is_empty();
+        let children = self.sorted_child_folders(Some(folder.id));
+        let has_children = !children.is_empty();
+        let is_collapsed = has_children && self.library_collapsed_folders.contains(&folder.id);
         let indent = 18.0 * depth as f32;
         let fill = if is_selected {
             if Self::dark_theme_enabled() {
@@ -1093,10 +1186,16 @@ pub(super) fn folder_path_label(&self, folder_id: Uuid) -> String {
             .corner_radius(16.0)
             .inner_margin(Margin::symmetric(12, 10))
             .show(ui, |ui| {
+                let mut delete_btn_response = None;
+                let mut rename_btn_response = None;
                 ui.horizontal(|ui| {
                     ui.add_space(indent);
                     ui.label(Self::icon(
-                        if has_children { 0xe2c7 } else { 0xe2c8 },
+                        if has_children {
+                            if is_collapsed { 0xe5cc } else { 0xe5cf }
+                        } else {
+                            0xe2c8
+                        },
                         18.0,
                         Color32::from_rgb(227, 82, 149),
                     ));
@@ -1148,6 +1247,7 @@ pub(super) fn folder_path_label(&self, folder_id: Uuid) -> String {
                         if delete_btn.clicked() {
                             *delete_folder_id = Some(folder.id);
                         }
+                        delete_btn_response = Some(delete_btn);
                         if !is_editing {
                             let rename_btn = ui.add(
                                 Button::new(Self::icon(0xe254, 12.0, Self::muted_text_color()))
@@ -1158,9 +1258,12 @@ pub(super) fn folder_path_label(&self, folder_id: Uuid) -> String {
                             if rename_btn.clicked() {
                                 *rename_folder_id = Some(folder.id);
                             }
+                            rename_btn_response = Some(rename_btn);
                         }
                     });
                 });
+
+                (delete_btn_response, rename_btn_response)
             });
 
         if !is_editing {
@@ -1168,23 +1271,256 @@ pub(super) fn folder_path_label(&self, folder_id: Uuid) -> String {
             if response.hovered() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             }
-            if response.clicked() {
+            let delete_hovered = row.inner.0.as_ref().is_some_and(|value| value.hovered());
+            let rename_hovered = row.inner.1.as_ref().is_some_and(|value| value.hovered());
+            if response.clicked() && !delete_hovered && !rename_hovered {
                 *select_folder_id = Some(folder.id);
+                if has_children {
+                    *toggle_folder_id = Some(folder.id);
+                }
             }
         }
 
-        ui.add_space(8.0);
-        for child in self.sorted_child_folders(Some(folder.id)) {
-            self.draw_folder_tree_node(
-                ui,
-                &child,
-                depth + 1,
-                select_folder_id,
-                delete_folder_id,
-                rename_folder_id,
-                rename_commit,
-                finish_editing,
-            );
+        if is_selected && self.library_tab == LibraryTab::Sounds && !is_collapsed {
+            ui.add_space(8.0);
+            self.draw_inline_folder_sounds(ui, folder, indent + 26.0);
+        }
+
+        if !is_collapsed {
+            ui.add_space(8.0);
+            for child in children {
+                self.draw_folder_tree_node(
+                    ui,
+                    &child,
+                    depth + 1,
+                    select_folder_id,
+                    delete_folder_id,
+                    rename_folder_id,
+                    rename_commit,
+                    finish_editing,
+                    toggle_folder_id,
+                );
+            }
+        }
+    }
+
+    fn draw_inline_folder_sounds(
+        &mut self,
+        ui: &mut Ui,
+        folder: &crate::storage::Folder,
+        left_indent: f32,
+    ) {
+        ui.horizontal(|ui| {
+            ui.add_space(left_indent);
+            ui.vertical(|ui| {
+                Frame::new()
+                    .fill(Self::panel_fill())
+                    .stroke(Stroke::new(1.0, Self::border_color()))
+                    .corner_radius(18.0)
+                    .inner_margin(Margin::same(12))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new(self.folder_path_label(folder.id))
+                                    .size(12.5)
+                                    .color(Self::strong_text_color())
+                                    .strong(),
+                            );
+                            if self.folder_import_select_mode.is_none() {
+                                ui.add_space(10.0);
+                                let import_btn = ui.add(
+                                    Button::new(format!(
+                                        "+ {}",
+                                        self.t("library.import_sound_to_folder")
+                                    ))
+                                    .fill(Color32::from_rgb(227, 82, 149))
+                                    .corner_radius(10.0),
+                                );
+                                Self::decorate_button_response(ui, &import_btn);
+                                if import_btn.clicked() {
+                                    self.folder_import_select_mode = Some(folder.id);
+                                }
+                            }
+                        });
+                        ui.add_space(10.0);
+
+                        let sounds =
+                            self.filtered_library_sounds_for_folder(Some(folder.id), false);
+                        if sounds.is_empty() {
+                            ui.label(
+                                RichText::new("No sounds in this folder yet.")
+                                    .size(11.5)
+                                    .color(Self::muted_text_color()),
+                            );
+                            return;
+                        }
+
+                        for sound in sounds {
+                            self.draw_inline_folder_sound_row(ui, &sound);
+                            ui.add_space(8.0);
+                        }
+                    });
+            });
+        });
+    }
+
+    fn draw_inline_folder_sound_row(&mut self, ui: &mut Ui, sound: &SoundEffect) {
+        let mut preview_sound = None;
+        let mut copy_sound = None;
+        let mut favorite_sound = None;
+        let mut remove_sound_from_folder = None;
+        let mut open_sound = false;
+        let mut favorite_response = None;
+        let mut play_response = None;
+        let mut copy_response = None;
+        let mut remove_response = None;
+
+        let row = Frame::new()
+            .fill(Self::surface_fill())
+            .stroke(Stroke::new(1.0, Self::border_color()))
+            .corner_radius(16.0)
+            .inner_margin(Margin::symmetric(12, 10))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(&sound.name)
+                                    .size(12.8)
+                                    .color(Self::strong_text_color())
+                                    .strong(),
+                            )
+                            .truncate(),
+                        );
+                        ui.add_space(6.0);
+                        let waveform_samples = self.sound_waveform_samples(sound);
+                        let waveform_preview = Self::library_sound_waveform_preview_from_samples(
+                            sound,
+                            &waveform_samples,
+                            48,
+                        );
+                        Self::draw_wave_strip(
+                            ui,
+                            &waveform_preview,
+                            None,
+                            Color32::from_rgb(214, 51, 132),
+                            Color32::from_rgb(238, 213, 227),
+                            Self::panel_fill(),
+                            34.0,
+                        );
+                    });
+
+                    ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                        if self.folder_import_select_mode.is_none() {
+                            let remove_btn = ui.add(
+                                Button::new(Self::icon(0xe5cd, 12.0, Self::muted_text_color()))
+                                    .fill(Color32::TRANSPARENT)
+                                    .frame(false),
+                            );
+                            Self::decorate_button_response(ui, &remove_btn);
+                            if remove_btn.clicked() {
+                                remove_sound_from_folder = Some(sound.id);
+                            }
+                            remove_response = Some(remove_btn);
+                        }
+                        let copy_btn = Self::icon_action(
+                            ui,
+                            [36.0, 30.0],
+                            0xe14d,
+                            self.sound_copy_feedback_active(ui.ctx(), sound.id),
+                            self.sound_copy_feedback_active(ui.ctx(), sound.id),
+                        );
+                        if copy_btn.clicked() {
+                            copy_sound = Some(sound.id);
+                        }
+                        copy_response = Some(copy_btn);
+                        let is_loading = self
+                            .pending_preview_after_preload
+                            .is_some_and(|(id, _)| id == sound.id);
+                        let play_btn = Self::icon_action(
+                            ui,
+                            [36.0, 30.0],
+                            if is_loading { 0xe5d5 } else { 0xe037 },
+                            is_loading,
+                            false,
+                        );
+                        if play_btn.clicked() {
+                            if is_loading {
+                                self.stop_preview();
+                            } else {
+                                preview_sound = Some(sound.id);
+                            }
+                        }
+                        play_response = Some(play_btn);
+                        let favorite_btn =
+                            Self::favorite_button_sized(ui, sound.favorite, [36.0, 30.0], 16.0);
+                        if favorite_btn.clicked() {
+                            favorite_sound = Some(sound.id);
+                        }
+                        favorite_response = Some(favorite_btn);
+                        ui.add_space(10.0);
+                        ui.label(
+                            RichText::new(format_time(sound.trimmed_length()))
+                                .size(11.5)
+                                .color(Self::muted_text_color()),
+                        );
+                    });
+                });
+            });
+
+        let response = ui.interact(
+            row.response.rect,
+            ui.id().with(("folder-sound-row", sound.id)),
+            Sense::click(),
+        );
+        if response.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        let over_action = favorite_response
+            .as_ref()
+            .is_some_and(|value| value.hovered())
+            || play_response.as_ref().is_some_and(|value| value.hovered())
+            || copy_response.as_ref().is_some_and(|value| value.hovered())
+            || remove_response
+                .as_ref()
+                .is_some_and(|value| value.hovered());
+        if response.clicked() && !over_action {
+            open_sound = true;
+        }
+
+        if let Some(sound_id) = preview_sound {
+            self.preview_sound(sound_id);
+        }
+        if let Some(sound_id) = copy_sound {
+            if let Some(sound) = self
+                .sounds
+                .iter()
+                .find(|candidate| candidate.id == sound_id)
+                .cloned()
+            {
+                if let Err(error) = self.copy_sound_file_to_clipboard(&sound) {
+                    self.set_error_status(error);
+                } else {
+                    self.mark_sound_copied(ui.ctx(), sound_id);
+                    self.status = Some("Copied to clipboard".to_owned());
+                }
+            }
+        }
+        if let Some(sound_id) = favorite_sound {
+            self.toggle_sound_favorite(sound_id, ui.ctx());
+        }
+        if let Some(sound_id) = remove_sound_from_folder {
+            if let Some(sound) = self
+                .sounds
+                .iter_mut()
+                .find(|candidate| candidate.id == sound_id)
+            {
+                sound.folder_id = None;
+            }
+            self.mark_dirty(ui.ctx());
+        }
+        if open_sound {
+            self.open_sound_from_library(sound.id);
         }
     }
 }
