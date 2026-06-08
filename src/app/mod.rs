@@ -4543,14 +4543,21 @@ impl SoundFxApp {
         } else {
             vec2(430.0, 104.0)
         };
-        let overlay_pos =
-            if self.center_pitch_overlay_next_frame || self.pitch_overlay_pos.is_none() {
-                let centered = self.centered_overlay_pos(ctx, overlay_size);
-                self.pitch_overlay_pos = Some(centered);
-                centered
-            } else {
-                self.pitch_overlay_pos.unwrap_or_default()
-            };
+        let overlay_pos = if self.overlay_only_mode {
+            let anchored = Pos2::ZERO;
+            self.pitch_overlay_pos = Some(anchored);
+            anchored
+        } else if self.center_pitch_overlay_next_frame || self.pitch_overlay_pos.is_none() {
+            let centered = self.centered_overlay_pos(ctx, overlay_size);
+            self.pitch_overlay_pos = Some(centered);
+            centered
+        } else {
+            self.clamp_overlay_pos(
+                ctx,
+                overlay_size,
+                self.pitch_overlay_pos.unwrap_or_default(),
+            )
+        };
         ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
         let area_id = egui::Id::new("pitch-overlay-panel");
         egui::Area::new(area_id)
@@ -9719,7 +9726,6 @@ impl SoundFxApp {
             self.delete_folder_branch(folder_id);
         }
     }
-
 
     fn transition_progress(&mut self, ctx: &Context) -> Option<(TransitionPhase, f32)> {
         let phase = self.startup.phase;
