@@ -1049,7 +1049,7 @@ impl SoundFxApp {
             .unwrap_or_else(|| "Root".to_owned());
 
         ui.horizontal(|ui| {
-            if self.library_current_folder.is_some() {
+            if self.library_folder_view == LibraryFolderView::Grid && self.library_current_folder.is_some() {
                 let back_btn = Self::icon_action(ui, [34.0, 28.0], 0xe5c4, false, false);
                 if back_btn.clicked() {
                     if let Some(folder_id) = self.library_current_folder {
@@ -1730,7 +1730,7 @@ impl SoundFxApp {
             .corner_radius(16.0)
             .inner_margin(Margin::symmetric(12, 10))
             .show(ui, |ui| {
-                ui.set_width(card_width);
+                ui.set_width(card_width - 24.0);
                 let mut delete_btn_response = None;
                 let mut rename_btn_response = None;
                 let mut import_btn_response = None;
