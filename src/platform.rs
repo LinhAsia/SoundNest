@@ -415,7 +415,7 @@ mod windows_platform {
         height: usize,
         spec: &DragGhostSpec,
     ) {
-        let (card_fill, panel_fill, stroke, wave) = if spec.dark_theme {
+        let (mut card_fill, panel_fill, mut stroke, wave) = if spec.dark_theme {
             (
                 [29, 24, 35, 242],
                 [22, 18, 27, 250],
@@ -430,18 +430,21 @@ mod windows_platform {
                 [214, 51, 132, 245],
             )
         };
+        let mut shadow = [86, 43, 67, 34];
 
-        fill_round_rect(
-            buffer,
-            width,
-            height,
-            8.0,
-            10.0,
-            148.0,
-            156.0,
-            28.0,
-            [86, 43, 67, 34],
-        );
+        if spec.kind == DragGhostKind::Folder {
+            if spec.dark_theme {
+                card_fill = [78, 46, 18, 244];
+                stroke = [255, 170, 72, 224];
+                shadow = [120, 72, 20, 46];
+            } else {
+                card_fill = [255, 219, 158, 246];
+                stroke = [235, 144, 44, 214];
+                shadow = [166, 106, 28, 38];
+            }
+        }
+
+        fill_round_rect(buffer, width, height, 8.0, 10.0, 148.0, 156.0, 28.0, shadow);
         fill_round_rect(
             buffer, width, height, 0.0, 0.0, 164.0, 176.0, 28.0, card_fill,
         );
