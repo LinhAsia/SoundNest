@@ -964,7 +964,11 @@ impl SoundFxApp {
     }
 
     fn popup_safe_rect(&self, ctx: &Context) -> Rect {
-        self.modal_safe_rect(ctx)
+        if self.overlay_only_mode {
+            ctx.screen_rect().shrink(4.0)
+        } else {
+            self.modal_safe_rect(ctx)
+        }
     }
 
     fn centered_overlay_pos(&self, ctx: &Context, size: Vec2) -> Pos2 {
