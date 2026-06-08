@@ -1,12 +1,19 @@
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DragGhostKind {
+    Sound,
+    Folder,
+}
+
 #[derive(Clone, Debug)]
 pub struct DragGhostSpec {
+    pub kind: DragGhostKind,
     pub waveform: Vec<f32>,
     pub dark_theme: bool,
 }
 
 #[cfg(windows)]
 mod windows_platform {
-    use crate::platform::DragGhostSpec;
+    use crate::platform::{DragGhostKind, DragGhostSpec};
     use anyhow::{Context, Result, bail};
     use eframe::Frame;
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -367,6 +374,41 @@ mod windows_platform {
         }
     }
 
+    fn draw_folder_icon(
+        buffer: &mut [u8],
+        width: usize,
+        height: usize,
+        x: f32,
+        y: f32,
+        rect_w: f32,
+        rect_h: f32,
+        body: [u8; 4],
+        tab: [u8; 4],
+    ) {
+        fill_round_rect(
+            buffer,
+            width,
+            height,
+            x + rect_w * 0.08,
+            y + rect_h * 0.22,
+            rect_w * 0.42,
+            rect_h * 0.2,
+            8.0,
+            tab,
+        );
+        fill_round_rect(
+            buffer,
+            width,
+            height,
+            x,
+            y + rect_h * 0.34,
+            rect_w,
+            rect_h * 0.48,
+            12.0,
+            body,
+        );
+    }
+
     fn draw_drag_ghost_pixels(
         buffer: &mut [u8],
         width: usize,
@@ -448,17 +490,54 @@ mod windows_platform {
         fill_round_rect(
             buffer, width, height, 14.0, 48.0, 136.0, 62.0, 18.0, panel_fill,
         );
-        draw_wave_bars(
-            buffer,
-            width,
-            height,
-            22.0,
-            58.0,
-            120.0,
-            42.0,
-            &spec.waveform,
-            wave,
-        );
+        match spec.kind {
+            DragGhostKind::Sound => draw_wave_bars(
+                buffer,
+                width,
+                height,
+                22.0,
+                58.0,
+                120.0,
+                42.0,
+                &spec.waveform,
+                wave,
+            ),
+            DragGhostKind::Folder => {
+                draw_folder_icon(
+                    buffer,
+                    width,
+                    height,
+                    24.0,
+                    56.0,
+                    40.0,
+                    30.0,
+                    [242, 140, 56, 240],
+                    [255, 196, 123, 240],
+                );
+                draw_wave_bars(
+                    buffer,
+                    width,
+                    height,
+                    76.0,
+                    58.0,
+                    58.0,
+                    22.0,
+                    &spec.waveform,
+                    wave,
+                );
+                draw_wave_bars(
+                    buffer,
+                    width,
+                    height,
+                    76.0,
+                    80.0,
+                    44.0,
+                    14.0,
+                    &spec.waveform,
+                    [stroke[0], stroke[1], stroke[2], 190],
+                );
+            }
+        }
         fill_round_rect(
             buffer,
             width,

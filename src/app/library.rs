@@ -222,6 +222,26 @@ impl SoundFxApp {
             .count()
     }
 
+    pub(super) fn folder_drag_ghost_waveform(&self, folder_id: Uuid) -> Vec<f32> {
+        let direct_count = self.direct_sound_count_for_folder(folder_id) as f32;
+        let child_count = self
+            .folders
+            .iter()
+            .filter(|folder| folder.parent_id == Some(folder_id))
+            .count() as f32;
+        let total_count = self.total_sound_count_for_folder(folder_id) as f32;
+        let mut waveform = vec![
+            (0.18 + (child_count / 12.0).min(0.82)).clamp(0.12, 1.0),
+            (0.16 + (direct_count / 18.0).min(0.84)).clamp(0.12, 1.0),
+            (0.14 + (total_count / 40.0).min(0.86)).clamp(0.12, 1.0),
+            (0.12 + ((child_count + direct_count) / 28.0).min(0.88)).clamp(0.12, 1.0),
+        ];
+        waveform.extend_from_slice(&[
+            0.32, 0.58, 0.46, 0.72, 0.52, 0.84, 0.48, 0.68, 0.36, 0.56, 0.42, 0.64,
+        ]);
+        waveform
+    }
+
     pub(super) fn create_folder(&mut self, name: String, parent_id: Option<Uuid>) {
         let new_folder_id = self.create_folder_record(name, parent_id);
         let _ = self.storage.save_folders(&self.folders);

@@ -144,6 +144,7 @@ impl SoundFxApp {
         self.pending_sound_drag = None;
         let drag_waveform = self.sound_waveform_samples(sound);
         let drag_ghost = platform::DragGhostSpec {
+            kind: platform::DragGhostKind::Sound,
             waveform: Self::trimmed_waveform_preview_from_samples(sound, &drag_waveform),
             dark_theme: self.dark_theme,
         };
@@ -159,7 +160,12 @@ impl SoundFxApp {
         self.ignored_drop_path =
             Some(fs::canonicalize(&drag_path).unwrap_or_else(|_| drag_path.clone()));
         self.pending_folder_drag = None;
-        platform::drag_file_out(&drag_path, None)
+        let drag_ghost = platform::DragGhostSpec {
+            kind: platform::DragGhostKind::Folder,
+            waveform: self.folder_drag_ghost_waveform(folder_id),
+            dark_theme: self.dark_theme,
+        };
+        platform::drag_file_out(&drag_path, Some(&drag_ghost))
     }
 
     pub(super) fn copy_video_file_to_clipboard(&self, video: &VideoAsset) -> Result<()> {
