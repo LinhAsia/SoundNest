@@ -3,6 +3,7 @@ use directories::ProjectDirs;
 use hound::{SampleFormat, WavSpec, WavWriter};
 use rodio::{Decoder, Source};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::fs::File;
 use std::io::BufReader;
@@ -951,6 +952,114 @@ impl Storage {
         }
     }
 
+    pub fn drag_folder_source_path(
+        &self,
+        root_folder_id: Uuid,
+        folders: &[Folder],
+        sounds: &[SoundEffect],
+    ) -> Result<PathBuf> {
+        let root_folder = folders
+            .iter()
+            .find(|folder| folder.id == root_folder_id)
+            .context("folder not found")?;
+        let mut folder_ids = vec![root_folder_id];
+        let mut index = 0usize;
+        while let Some(parent_id) = folder_ids.get(index).copied() {
+            index += 1;
+            for folder in folders
+                .iter()
+                .filter(|folder| folder.parent_id == Some(parent_id))
+            {
+                folder_ids.push(folder.id);
+            }
+        }
+
+        let branch_ids = folder_ids.iter().copied().collect::<Vec<_>>();
+        let branch_lookup = branch_ids
+            .iter()
+            .copied()
+            .collect::<std::collections::HashSet<_>>();
+        let staging_root = self.exports_dir.join("folder-drag").join(format!(
+            "{}-{}",
+            sanitize_file_system_name(&root_folder.name, "folder"),
+            root_folder.id
+        ));
+        if staging_root.exists() {
+            let _ = fs::remove_dir_all(&staging_root);
+        }
+
+        let root_export_dir =
+            staging_root.join(sanitize_file_system_name(&root_folder.name, "folder"));
+        fs::create_dir_all(&root_export_dir)
+            .with_context(|| format!("unable to create {}", root_export_dir.display()))?;
+
+        let mut export_paths = HashMap::new();
+        export_paths.insert(root_folder_id, root_export_dir.clone());
+        for folder_id in branch_ids.iter().copied().skip(1) {
+            let folder = folders
+                .iter()
+                .find(|candidate| candidate.id == folder_id)
+                .context("folder branch is missing a node")?;
+            let parent_id = folder
+                .parent_id
+                .context("folder branch parent is missing")?;
+            let parent_path = export_paths
+                .get(&parent_id)
+                .cloned()
+                .context("folder branch export parent is missing")?;
+            let folder_path = unique_directory_path(
+                &parent_path,
+                &sanitize_file_system_name(&folder.name, "folder"),
+            );
+            fs::create_dir_all(&folder_path)
+                .with_context(|| format!("unable to create {}", folder_path.display()))?;
+            export_paths.insert(folder_id, folder_path);
+        }
+
+        for sound in sounds.iter().filter(|sound| {
+            sound
+                .folder_id
+                .is_some_and(|folder_id| branch_lookup.contains(&folder_id))
+        }) {
+            let source_path = self.drag_sound_source_path(sound)?;
+            let Some(folder_id) = sound.folder_id else {
+                continue;
+            };
+            let target_dir = export_paths
+                .get(&folder_id)
+                .cloned()
+                .context("folder export target is missing")?;
+            let extension = source_path
+                .extension()
+                .and_then(|value| value.to_str())
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or("wav");
+            let target_path = unique_file_path(
+                &target_dir,
+                &sanitize_file_system_name(&sound.name, "sound"),
+                extension,
+            );
+            if let Some(parent) = target_path.parent() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("unable to create {}", parent.display()))?;
+            }
+            match fs::hard_link(&source_path, &target_path) {
+                Ok(()) => {}
+                Err(_) => {
+                    fs::copy(&source_path, &target_path).with_context(|| {
+                        format!(
+                            "unable to export {} to {}",
+                            source_path.display(),
+                            target_path.display()
+                        )
+                    })?;
+                }
+            }
+        }
+
+        Ok(root_export_dir)
+    }
+
     pub fn export_processed_sound_from_path(
         &self,
         source_path: &Path,
@@ -1734,6 +1843,47 @@ fn sanitize_stem(name: &str) -> String {
     } else {
         trimmed.to_owned()
     }
+}
+
+fn sanitize_file_system_name(name: &str, fallback: &str) -> String {
+    let cleaned = name
+        .chars()
+        .map(|ch| match ch {
+            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => '_',
+            ch if ch.is_control() => '_',
+            _ => ch,
+        })
+        .collect::<String>();
+    let trimmed = cleaned
+        .trim()
+        .trim_end_matches(['.', ' '])
+        .trim_matches('_');
+    if trimmed.is_empty() {
+        fallback.to_owned()
+    } else {
+        trimmed.to_owned()
+    }
+}
+
+fn unique_directory_path(parent: &Path, base_name: &str) -> PathBuf {
+    let mut candidate = parent.join(base_name);
+    let mut index = 2usize;
+    while candidate.exists() {
+        candidate = parent.join(format!("{base_name} ({index})"));
+        index += 1;
+    }
+    candidate
+}
+
+fn unique_file_path(parent: &Path, base_name: &str, extension: &str) -> PathBuf {
+    let extension = extension.trim_start_matches('.');
+    let mut candidate = parent.join(format!("{base_name}.{extension}"));
+    let mut index = 2usize;
+    while candidate.exists() {
+        candidate = parent.join(format!("{base_name} ({index}).{extension}"));
+        index += 1;
+    }
+    candidate
 }
 
 fn default_speed() -> f32 {

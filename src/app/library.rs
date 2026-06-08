@@ -223,6 +223,14 @@ impl SoundFxApp {
     }
 
     pub(super) fn create_folder(&mut self, name: String, parent_id: Option<Uuid>) {
+        let new_folder_id = self.create_folder_record(name, parent_id);
+        let _ = self.storage.save_folders(&self.folders);
+        self.library_current_folder = Some(new_folder_id);
+        self.new_folder_name.clear();
+        self.folder_name_warning = false;
+    }
+
+    pub(super) fn create_folder_record(&mut self, name: String, parent_id: Option<Uuid>) -> Uuid {
         let new_folder = crate::storage::Folder {
             id: Uuid::new_v4(),
             name,
@@ -232,10 +240,7 @@ impl SoundFxApp {
         if let Some(parent_id) = parent_id {
             self.library_collapsed_folders.remove(&parent_id);
         }
-        self.library_current_folder = Some(new_folder.id);
-        self.new_folder_name.clear();
-        self.folder_name_warning = false;
-        let _ = self.storage.save_folders(&self.folders);
+        new_folder.id
     }
 
     pub(super) fn delete_folder_branch(&mut self, root_id: Uuid) {
@@ -1239,6 +1244,7 @@ impl SoundFxApp {
     }
 
     fn draw_folders_tree_view(&mut self, ui: &mut egui::Ui) {
+        let clipboard_paste_ready = self.clipboard_has_supported_audio();
         let mut select_folder_id = None;
         let mut delete_folder_id = None;
         let mut rename_folder_id = None;
@@ -1259,6 +1265,7 @@ impl SoundFxApp {
                 &mut finish_editing,
                 &mut toggle_folder_id,
                 &mut clear_selected_folder,
+                clipboard_paste_ready,
             );
         }
 
@@ -1274,6 +1281,7 @@ impl SoundFxApp {
     }
 
     fn draw_folders_grid_view(&mut self, ui: &mut egui::Ui) {
+        let clipboard_paste_ready = self.clipboard_has_supported_audio();
         let mut select_folder_id = None;
         let mut delete_folder_id = None;
         let mut rename_folder_id = None;
@@ -1307,6 +1315,7 @@ impl SoundFxApp {
                             &mut finish_editing,
                             &mut toggle_folder_id,
                             &mut clear_selected_folder,
+                            clipboard_paste_ready,
                         );
                         if (index + 1) % columns == 0 {
                             ui.end_row();
@@ -1431,6 +1440,7 @@ impl SoundFxApp {
         finish_editing: &mut bool,
         toggle_folder_id: &mut Option<Uuid>,
         clear_selected_folder: &mut bool,
+        clipboard_paste_ready: bool,
     ) {
         let is_selected = self.library_current_folder == Some(folder.id);
         let is_editing = self.editing_folder_id == Some(folder.id);
@@ -1634,13 +1644,17 @@ impl SoundFxApp {
                                     }
                                     import_btn_response = Some(import_btn);
                                     ui.add_space(6.0);
-                                    let paste_btn = ui.add_sized(
-                                        [58.0, 30.0],
-                                        Button::new(RichText::new("Paste").size(11.5))
-                                            .fill(folder_accent)
-                                            .stroke(Stroke::new(1.0, folder_accent_soft))
-                                            .corner_radius(10.0),
-                                    );
+                                    let paste_btn = ui
+                                        .add_enabled_ui(clipboard_paste_ready, |ui| {
+                                            ui.add_sized(
+                                                [58.0, 30.0],
+                                                Button::new(RichText::new("Paste").size(11.5))
+                                                    .fill(folder_accent)
+                                                    .stroke(Stroke::new(1.0, folder_accent_soft))
+                                                    .corner_radius(10.0),
+                                            )
+                                        })
+                                        .inner;
                                     Self::decorate_button_response(ui, &paste_btn);
                                     if paste_btn.clicked() {
                                         match self
@@ -1678,9 +1692,25 @@ impl SoundFxApp {
                     row.response.rect.max.y,
                 ),
             );
-            let response = ui.interact(open_rect, ui.id().with(folder.id), Sense::click());
+            let response = ui.interact(open_rect, ui.id().with(folder.id), Sense::click_and_drag());
             if response.hovered() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+            let titlebar_drag_active = self.titlebar_drag_active(ui.ctx());
+            if titlebar_drag_active {
+                self.pending_folder_drag = None;
+            } else if response.drag_started() {
+                self.pending_folder_drag = Some(folder.id);
+            } else if response.drag_stopped() {
+                self.pending_folder_drag = None;
+            } else if response.dragged()
+                && self.pending_folder_drag == Some(folder.id)
+                && Self::pointer_primary_drag_ready(ui.ctx())
+            {
+                if let Err(error) = self.drag_folder_out(folder.id) {
+                    self.set_error_status(error);
+                }
+                self.pending_folder_drag = None;
             }
             let delete_hovered = row.inner.0.as_ref().is_some_and(|value| value.hovered());
             let rename_hovered = row.inner.1.as_ref().is_some_and(|value| value.hovered());
@@ -1735,6 +1765,7 @@ impl SoundFxApp {
                     finish_editing,
                     toggle_folder_id,
                     clear_selected_folder,
+                    clipboard_paste_ready,
                 );
             }
         }
@@ -1753,6 +1784,7 @@ impl SoundFxApp {
         finish_editing: &mut bool,
         _toggle_folder_id: &mut Option<Uuid>,
         _clear_selected_folder: &mut bool,
+        clipboard_paste_ready: bool,
     ) {
         let folder_accent = Color32::from_rgb(242, 140, 56);
         let is_selected = self.library_current_folder == Some(folder.id);
@@ -1910,12 +1942,16 @@ impl SoundFxApp {
                             && self.library_tab == LibraryTab::Sounds
                             && self.folder_import_select_mode.is_none()
                         {
-                            let paste_btn = ui.add_sized(
-                                [58.0, 30.0],
-                                Button::new(RichText::new("Paste").size(10.8))
-                                    .fill(folder_accent)
-                                    .corner_radius(10.0),
-                            );
+                            let paste_btn = ui
+                                .add_enabled_ui(clipboard_paste_ready, |ui| {
+                                    ui.add_sized(
+                                        [58.0, 30.0],
+                                        Button::new(RichText::new("Paste").size(10.8))
+                                            .fill(folder_accent)
+                                            .corner_radius(10.0),
+                                    )
+                                })
+                                .inner;
                             Self::decorate_button_response(ui, &paste_btn);
                             if paste_btn.clicked() {
                                 match self.paste_clipboard_sounds_to_folder(folder.id, ui.ctx()) {
@@ -1975,10 +2011,26 @@ impl SoundFxApp {
             let response = ui.interact(
                 row.response.rect,
                 ui.id().with(("grid", folder.id)),
-                Sense::click(),
+                Sense::click_and_drag(),
             );
             if response.hovered() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+            let titlebar_drag_active = self.titlebar_drag_active(ui.ctx());
+            if titlebar_drag_active {
+                self.pending_folder_drag = None;
+            } else if response.drag_started() {
+                self.pending_folder_drag = Some(folder.id);
+            } else if response.drag_stopped() {
+                self.pending_folder_drag = None;
+            } else if response.dragged()
+                && self.pending_folder_drag == Some(folder.id)
+                && Self::pointer_primary_drag_ready(ui.ctx())
+            {
+                if let Err(error) = self.drag_folder_out(folder.id) {
+                    self.set_error_status(error);
+                }
+                self.pending_folder_drag = None;
             }
             let delete_hovered = row.inner.0.as_ref().is_some_and(|value| value.hovered());
             let rename_hovered = row.inner.1.as_ref().is_some_and(|value| value.hovered());
@@ -2205,10 +2257,26 @@ impl SoundFxApp {
         let response = ui.interact(
             open_rect,
             ui.id().with(("folder-sound-row", sound.id)),
-            Sense::click(),
+            Sense::click_and_drag(),
         );
         if response.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        let titlebar_drag_active = self.titlebar_drag_active(ui.ctx());
+        if titlebar_drag_active {
+            self.pending_sound_drag = None;
+        } else if response.drag_started() {
+            self.pending_sound_drag = Some(sound.id);
+        } else if response.drag_stopped() {
+            self.pending_sound_drag = None;
+        } else if response.dragged()
+            && self.pending_sound_drag == Some(sound.id)
+            && Self::pointer_primary_drag_ready(ui.ctx())
+        {
+            if let Err(error) = self.drag_sound_file_out(ui.ctx(), sound) {
+                self.set_error_status(error);
+            }
+            self.pending_sound_drag = None;
         }
         let over_action = favorite_response
             .as_ref()

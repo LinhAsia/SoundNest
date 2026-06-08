@@ -152,6 +152,16 @@ impl SoundFxApp {
         result
     }
 
+    pub(super) fn drag_folder_out(&mut self, folder_id: Uuid) -> Result<()> {
+        let drag_path =
+            self.storage
+                .drag_folder_source_path(folder_id, &self.folders, &self.sounds)?;
+        self.ignored_drop_path =
+            Some(fs::canonicalize(&drag_path).unwrap_or_else(|_| drag_path.clone()));
+        self.pending_folder_drag = None;
+        platform::drag_file_out(&drag_path, None)
+    }
+
     pub(super) fn copy_video_file_to_clipboard(&self, video: &VideoAsset) -> Result<()> {
         let video_path = video.asset_path(self.storage.root_dir());
         self.copy_file_path_to_clipboard(&video_path)
@@ -236,11 +246,7 @@ impl SoundFxApp {
         }
     }
 
-    pub(super) fn paste_clipboard_sounds_to_folder(
-        &mut self,
-        folder_id: Uuid,
-        ctx: &Context,
-    ) -> Result<usize> {
+    pub(super) fn clipboard_file_paths(&self) -> Result<Vec<PathBuf>> {
         #[cfg(windows)]
         {
             let _clipboard =
@@ -249,40 +255,41 @@ impl SoundFxApp {
             FileList
                 .read_clipboard(&mut clipboard_paths)
                 .context("unable to read files from clipboard")?;
+            return Ok(clipboard_paths);
+        }
 
-            let mut imported = Vec::new();
-            let mut ignored = 0usize;
-            for path in clipboard_paths {
-                if !path.exists() || !super::is_supported_audio(&path) {
-                    ignored += 1;
-                    continue;
-                }
+        #[cfg(not(windows))]
+        {
+            anyhow::bail!("Clipboard file access is only available on Windows");
+        }
+    }
 
-                match self.storage.import_sound(&path) {
-                    Ok(mut sound) => {
-                        sound.folder_id = Some(folder_id);
-                        imported.push(sound);
-                    }
-                    Err(error) => self.set_error_status(error),
-                }
-            }
+    pub(super) fn clipboard_has_supported_audio(&self) -> bool {
+        self.clipboard_file_paths()
+            .map(|paths| {
+                paths
+                    .iter()
+                    .any(|path| Self::path_contains_supported_audio(path))
+            })
+            .unwrap_or(false)
+    }
 
-            if imported.is_empty() {
-                if ignored > 0 {
-                    anyhow::bail!("Clipboard has no supported audio files");
-                }
+    pub(super) fn paste_clipboard_sounds_to_folder(
+        &mut self,
+        folder_id: Uuid,
+        ctx: &Context,
+    ) -> Result<usize> {
+        #[cfg(windows)]
+        {
+            let clipboard_paths = self.clipboard_file_paths()?;
+            if clipboard_paths.is_empty() {
                 anyhow::bail!("Clipboard does not contain any files");
             }
-
-            imported.reverse();
-            let imported_count = imported.len();
-            for sound in imported {
-                self.selected = Some(sound.id);
-                self.sounds.insert(0, sound);
+            let imported_count = self.import_paths_to_folder(clipboard_paths, Some(folder_id))?;
+            if imported_count == 0 {
+                anyhow::bail!("Clipboard has no supported audio files");
             }
-            self.library_audio_tag_filter = None;
-            self.mark_dirty(ctx);
-            self.clear_status();
+            let _ = ctx;
             return Ok(imported_count);
         }
 
@@ -686,7 +693,14 @@ impl SoundFxApp {
             paths.push(path);
         }
         if !paths.is_empty() {
-            self.import_paths(paths);
+            let target_folder_id = if is_folder_open {
+                self.library_current_folder
+            } else {
+                None
+            };
+            if let Err(error) = self.import_paths_to_folder(paths, target_folder_id) {
+                self.set_error_status(error);
+            }
         }
     }
 

@@ -465,6 +465,7 @@ pub struct SoundFxApp {
     pub(super) editor_drop_armed: bool,
     pub(super) editor_drop_rect: Option<Rect>,
     pub(super) pending_sound_drag: Option<Uuid>,
+    pub(super) pending_folder_drag: Option<Uuid>,
     pub(super) ignored_drop_path: Option<PathBuf>,
     pub(super) download_panel_tab: DownloadPanelTab,
     pub(super) tts_text: String,
@@ -795,6 +796,7 @@ impl SoundFxApp {
             editor_drop_armed: false,
             editor_drop_rect: None,
             pending_sound_drag: None,
+            pending_folder_drag: None,
             ignored_drop_path: None,
             download_panel_tab: DownloadPanelTab::Download,
             tts_text: String::new(),
@@ -1215,38 +1217,140 @@ impl SoundFxApp {
     }
 
     fn import_paths(&mut self, paths: Vec<PathBuf>) {
+        if let Err(error) = self.import_paths_to_folder(paths, None) {
+            self.set_error_status(error);
+        }
+    }
+
+    fn import_paths_to_folder(
+        &mut self,
+        paths: Vec<PathBuf>,
+        target_folder_id: Option<Uuid>,
+    ) -> Result<usize> {
         let mut imported = Vec::new();
         let mut ignored = 0usize;
+        let mut folders_changed = false;
 
         for path in paths {
-            if !is_supported_audio(&path) {
-                ignored += 1;
-                continue;
-            }
-
-            match self.storage.import_sound(&path) {
-                Ok(sound) => imported.push(sound),
-                Err(error) => self.set_error_status(error),
-            }
+            self.import_path_entry(
+                &path,
+                target_folder_id,
+                &mut imported,
+                &mut ignored,
+                &mut folders_changed,
+            )?;
         }
 
         if imported.is_empty() {
             if ignored > 0 && self.status.is_none() {
-                self.set_error_status("Unsupported file");
+                anyhow::bail!("No supported audio files were found");
             }
-            return;
+            return Ok(0);
         }
 
         imported.reverse();
-        for mut sound in imported {
-            sound.folder_id = None;
+        let imported_count = imported.len();
+        for sound in imported {
             self.selected = Some(sound.id);
             self.sounds.insert(0, sound);
         }
 
         self.library_audio_tag_filter = None;
-        let _ = ignored;
+        if target_folder_id.is_some() {
+            self.library_current_folder = target_folder_id;
+        }
+        let _ = folders_changed;
         self.save_now();
+        Ok(imported_count)
+    }
+
+    fn import_path_entry(
+        &mut self,
+        path: &Path,
+        target_folder_id: Option<Uuid>,
+        imported: &mut Vec<SoundEffect>,
+        ignored: &mut usize,
+        folders_changed: &mut bool,
+    ) -> Result<bool> {
+        if Self::should_skip_import_path(path) {
+            *ignored += 1;
+            return Ok(false);
+        }
+
+        if path.is_dir() {
+            if !Self::path_contains_supported_audio(path) {
+                *ignored += 1;
+                return Ok(false);
+            }
+
+            let folder_name = path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("Folder")
+                .to_owned();
+            let folder_id = self.create_folder_record(folder_name, target_folder_id);
+            *folders_changed = true;
+
+            for child_path in Self::sorted_directory_entries(path)? {
+                let _ = self.import_path_entry(
+                    &child_path,
+                    Some(folder_id),
+                    imported,
+                    ignored,
+                    folders_changed,
+                )?;
+            }
+            return Ok(true);
+        }
+
+        if !is_supported_audio(path) {
+            *ignored += 1;
+            return Ok(false);
+        }
+
+        let mut sound = self.storage.import_sound(path)?;
+        sound.folder_id = target_folder_id;
+        imported.push(sound);
+        Ok(true)
+    }
+
+    fn sorted_directory_entries(path: &Path) -> Result<Vec<PathBuf>> {
+        let mut entries = fs::read_dir(path)
+            .with_context(|| format!("unable to read {}", path.display()))?
+            .flatten()
+            .map(|entry| entry.path())
+            .collect::<Vec<_>>();
+        entries.sort_by(|left, right| {
+            right
+                .is_dir()
+                .cmp(&left.is_dir())
+                .then_with(|| left.file_name().cmp(&right.file_name()))
+        });
+        Ok(entries)
+    }
+
+    fn path_contains_supported_audio(path: &Path) -> bool {
+        if Self::should_skip_import_path(path) {
+            return false;
+        }
+        if path.is_file() {
+            return is_supported_audio(path);
+        }
+        if !path.is_dir() {
+            return false;
+        }
+
+        let Ok(entries) = fs::read_dir(path) else {
+            return false;
+        };
+        for entry in entries.flatten() {
+            if Self::path_contains_supported_audio(&entry.path()) {
+                return true;
+            }
+        }
+        false
     }
 
     fn open_sound_from_library(&mut self, sound_id: Uuid) {
@@ -2121,7 +2225,10 @@ impl SoundFxApp {
     }
 
     fn save_now(&mut self) -> bool {
-        match self.storage.save_library(&self.sounds) {
+        match self
+            .storage
+            .save_library_with_folders(&self.sounds, &self.folders)
+        {
             Ok(()) => {
                 self.pending_save = false;
                 self.clear_status();
@@ -11211,6 +11318,7 @@ impl eframe::App for SoundFxApp {
         self.prune_copy_feedback(ctx);
         if !ctx.input(|input| input.pointer.primary_down()) {
             self.pending_sound_drag = None;
+            self.pending_folder_drag = None;
         }
 
         self.play_startup_sound_if_needed(ctx);
