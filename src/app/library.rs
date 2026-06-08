@@ -102,7 +102,6 @@ impl SoundFxApp {
         favorites.into_iter().chain(regular).collect()
     }
 
-
     pub(super) fn folder_branch_ids(&self, root_id: Uuid) -> HashSet<Uuid> {
         let mut ids = HashSet::from([root_id]);
         let mut stack = vec![root_id];
@@ -1049,7 +1048,9 @@ impl SoundFxApp {
             .unwrap_or_else(|| "Root".to_owned());
 
         ui.horizontal(|ui| {
-            if self.library_folder_view == LibraryFolderView::Grid && self.library_current_folder.is_some() {
+            if self.library_folder_view == LibraryFolderView::Grid
+                && self.library_current_folder.is_some()
+            {
                 let back_btn = Self::icon_action(ui, [34.0, 28.0], 0xe5c4, false, false);
                 if back_btn.clicked() {
                     if let Some(folder_id) = self.library_current_folder {
@@ -1363,7 +1364,6 @@ impl SoundFxApp {
         }
     }
 
-
     fn apply_folder_tree_actions(
         &mut self,
         select_folder_id: Option<Uuid>,
@@ -1441,15 +1441,32 @@ impl SoundFxApp {
         let has_children = !children.is_empty();
         let is_collapsed = has_children && self.library_collapsed_folders.contains(&folder.id);
 
-        let (folder_accent, folder_accent_soft, folder_icon_code) = if subfolders_count > 0 && direct_count > 0 {
-            (Color32::from_rgb(33, 150, 243), Color32::from_rgb(179, 219, 255), if is_collapsed { 0xe2c7 } else { 0xe2c8 })
-        } else if subfolders_count > 0 {
-            (Color32::from_rgb(242, 140, 56), Color32::from_rgb(255, 202, 145), if is_collapsed { 0xe2c7 } else { 0xe2c8 })
-        } else if direct_count > 0 {
-            (Color32::from_rgb(227, 82, 149), Color32::from_rgb(255, 182, 219), 0xe061)
-        } else {
-            (Self::muted_text_color(), Self::muted_text_color().linear_multiply(0.5), if is_collapsed { 0xe2c7 } else { 0xe2c8 })
-        };
+        let (folder_accent, folder_accent_soft, folder_icon_code) =
+            if subfolders_count > 0 && direct_count > 0 {
+                (
+                    Color32::from_rgb(33, 150, 243),
+                    Color32::from_rgb(179, 219, 255),
+                    if is_collapsed { 0xe2c7 } else { 0xe2c8 },
+                )
+            } else if subfolders_count > 0 {
+                (
+                    Color32::from_rgb(242, 140, 56),
+                    Color32::from_rgb(255, 202, 145),
+                    if is_collapsed { 0xe2c7 } else { 0xe2c8 },
+                )
+            } else if direct_count > 0 {
+                (
+                    Color32::from_rgb(227, 82, 149),
+                    Color32::from_rgb(255, 182, 219),
+                    0xe061,
+                )
+            } else {
+                (
+                    Self::muted_text_color(),
+                    Self::muted_text_color().linear_multiply(0.5),
+                    if is_collapsed { 0xe2c7 } else { 0xe2c8 },
+                )
+            };
 
         let indent = 18.0 * depth as f32;
         let show_folder_actions = is_selected || (has_children && !is_collapsed);
@@ -1527,11 +1544,7 @@ impl SoundFxApp {
                                 ui.add_space(icon_gap);
                             }
                             ui.add_space(8.0);
-                            ui.label(Self::icon(
-                                folder_icon_code,
-                                18.0,
-                                folder_accent,
-                            ));
+                            ui.label(Self::icon(folder_icon_code, 18.0, folder_accent));
                             ui.add_space(8.0);
                             ui.vertical(|ui| {
                                 if is_editing {
@@ -1701,7 +1714,9 @@ impl SoundFxApp {
         let has_sounds = is_selected
             && self.library_tab == LibraryTab::Sounds
             && !is_collapsed
-            && !self.filtered_library_sounds_for_folder(Some(folder.id), false).is_empty();
+            && !self
+                .filtered_library_sounds_for_folder(Some(folder.id), false)
+                .is_empty();
 
         if has_sounds {
             ui.add_space(8.0);
@@ -1762,13 +1777,19 @@ impl SoundFxApp {
         let show_folder_actions = is_selected || (has_children && !is_collapsed);
 
         let (card_accent, folder_icon_code) = if subfolders_count > 0 && direct_count > 0 {
-            (Color32::from_rgb(33, 150, 243), if is_collapsed { 0xe2c7 } else { 0xe2c8 })
+            (
+                Color32::from_rgb(33, 150, 243),
+                if is_collapsed { 0xe2c7 } else { 0xe2c8 },
+            )
         } else if subfolders_count > 0 {
             (folder_accent, if is_collapsed { 0xe2c7 } else { 0xe2c8 })
         } else if direct_count > 0 {
             (Color32::from_rgb(227, 82, 149), 0xe061)
         } else {
-            (Self::muted_text_color(), if is_collapsed { 0xe2c7 } else { 0xe2c8 })
+            (
+                Self::muted_text_color(),
+                if is_collapsed { 0xe2c7 } else { 0xe2c8 },
+            )
         };
 
         let fill = if Self::dark_theme_enabled() {
@@ -1842,11 +1863,7 @@ impl SoundFxApp {
                         } else {
                             ui.add_space(16.0);
                         }
-                        ui.label(Self::icon(
-                            folder_icon_code,
-                            16.0,
-                            card_accent,
-                        ));
+                        ui.label(Self::icon(folder_icon_code, 16.0, card_accent));
                     });
                     ui.add_space(6.0);
                     if is_editing {
@@ -2127,7 +2144,7 @@ impl SoundFxApp {
                     ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                         if self.folder_import_select_mode.is_none() {
                             let remove_btn = ui.add(
-                                Button::new(Self::icon(0xe5cd, 12.0, Self::muted_text_color()))
+                                Button::new(Self::icon(0xe872, 12.0, Self::muted_text_color()))
                                     .fill(Color32::TRANSPARENT)
                                     .frame(false),
                             );
