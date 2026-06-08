@@ -1233,17 +1233,9 @@ impl SoundFxApp {
             return;
         }
 
-        let current_folder_id = if self.library_tab == LibraryTab::Videos {
-            None
-        } else {
-            self.library_current_folder
-        };
-
         imported.reverse();
         for mut sound in imported {
-            if let Some(folder_id) = current_folder_id {
-                sound.folder_id = Some(folder_id);
-            }
+            sound.folder_id = None;
             self.selected = Some(sound.id);
             self.sounds.insert(0, sound);
         }
@@ -2772,7 +2764,7 @@ impl SoundFxApp {
                 if Self::icon_titlebar(
                     ui,
                     [42.0, 30.0],
-                    0xe03b,
+                    0xe2c7,
                     self.app_view == AppView::Library,
                     false,
                 )
@@ -6688,13 +6680,6 @@ impl SoundFxApp {
         let tags_hint = self.t("editor.tags_hint");
         let tags_available_label = self.t("editor.tags_available");
         let available_tags = self.distinct_sound_tags();
-        let folder_label = self.t("editor.folder");
-        let no_folder_label = self.t("editor.no_folder");
-        let app_folders = self.folders.clone();
-        let app_folder_options = app_folders
-            .iter()
-            .map(|folder| (folder.id, self.folder_path_label(folder.id)))
-            .collect::<Vec<_>>();
 
         Frame::new()
             .fill(Self::surface_fill())
@@ -6855,59 +6840,7 @@ impl SoundFxApp {
                         });
                 });
 
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(&folder_label)
-                            .size(11.5)
-                            .color(Self::muted_text_color())
-                            .strong(),
-                    );
-                    ui.add_space(8.0);
-                    let mut current_folder_name = no_folder_label.clone();
-                    let mut selected_id = sound.folder_id;
-                    if let Some(folder_id) = selected_id {
-                        if let Some((_, folder_label)) =
-                            app_folder_options.iter().find(|(id, _)| *id == folder_id)
-                        {
-                            current_folder_name = folder_label.clone();
-                        }
-                    }
-
-                    let combo_response = egui::ComboBox::from_id_salt(sound.id)
-                        .selected_text(current_folder_name)
-                        .show_ui(ui, |ui| {
-                            let mut choice_changed = false;
-                            if ui
-                                .selectable_value(&mut selected_id, None, &no_folder_label)
-                                .clicked()
-                            {
-                                choice_changed = true;
-                            }
-                            for (folder_id, folder_label) in &app_folder_options {
-                                if ui
-                                    .selectable_value(
-                                        &mut selected_id,
-                                        Some(*folder_id),
-                                        folder_label,
-                                    )
-                                    .clicked()
-                                {
-                                    choice_changed = true;
-                                }
-                            }
-                            choice_changed
-                        });
-
-                    if let Some(choice_changed) = combo_response.inner {
-                        if choice_changed {
-                            sound.folder_id = selected_id;
-                            changed = true;
-                        }
-                    }
-                });
-
-                ui.add_space(16.0);
+                ui.add_space(12.0);
 
                 Frame::new()
                     .fill(Self::panel_fill())
