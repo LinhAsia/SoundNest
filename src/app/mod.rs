@@ -54,6 +54,7 @@ const TRANSITION_WAVE_BUCKETS: usize = 160;
 const LIBRARY_GRID_MIN_COLUMNS: usize = 3;
 const LIBRARY_GRID_MAX_COLUMNS: usize = 8;
 const LIBRARY_TAG_COLLAPSED_COUNT: usize = 12;
+const LIBRARY_LIST_ROW_HEIGHT: f32 = 146.0;
 const RECORD_EXPORT_VIDEO_FPS_OPTIONS: [u32; 3] = [
     record_video::LOW_VIDEO_FPS,
     record_video::STANDARD_VIDEO_FPS,
@@ -6216,204 +6217,213 @@ impl SoundFxApp {
                 });
             let search_block_rect = search_panel.response.rect.expand2(vec2(12.0, 10.0));
             ui.add_space(12.0);
+            let visible_sounds = self.filtered_library_sounds();
+            if visible_sounds.is_empty() {
+                Frame::new()
+                    .fill(Self::surface_fill())
+                    .stroke(Stroke::new(1.0, Self::border_color()))
+                    .shadow(Shadow {
+                        offset: [0, 10],
+                        blur: 22,
+                        spread: 0,
+                        color: Self::shadow_color(),
+                    })
+                    .corner_radius(28.0)
+                    .inner_margin(Margin::same(22))
+                    .show(ui, |ui| {
+                        ui.label(
+                            RichText::new("+")
+                                .size(28.0)
+                                .color(Color32::from_rgb(214, 51, 132)),
+                        );
+                    });
+                return;
+            }
+
+            let modal_open = self.has_modal_panel();
+            let titlebar_drag_active = self.titlebar_drag_active(ui.ctx());
+            let search_drag_blocked = ui.ctx().input(|input| {
+                input
+                    .pointer
+                    .hover_pos()
+                    .or(input.pointer.press_origin())
+                    .is_some_and(|pos| search_block_rect.contains(pos))
+            });
+            let mut preview_request = None;
+            let mut drag_request = None;
+
             ScrollArea::vertical()
                 .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    let visible_sounds = self.filtered_library_sounds();
-                    if visible_sounds.is_empty() {
-                        Frame::new()
-                            .fill(Self::surface_fill())
-                            .stroke(Stroke::new(1.0, Self::border_color()))
-                            .shadow(Shadow {
-                                offset: [0, 10],
-                                blur: 22,
-                                spread: 0,
-                                color: Self::shadow_color(),
-                            })
-                            .corner_radius(28.0)
-                            .inner_margin(Margin::same(22))
-                            .show(ui, |ui| {
-                                ui.label(
-                                    RichText::new("+")
-                                        .size(28.0)
-                                        .color(Color32::from_rgb(214, 51, 132)),
-                                );
-                            });
-                        return;
-                    }
-
-                    let modal_open = self.has_modal_panel();
-                    let titlebar_drag_active = self.titlebar_drag_active(ui.ctx());
-                    let search_drag_blocked = ui.ctx().input(|input| {
-                        input
-                            .pointer
-                            .hover_pos()
-                            .or(input.pointer.press_origin())
-                            .is_some_and(|pos| search_block_rect.contains(pos))
-                    });
-                    let mut preview_request = None;
-                    let mut drag_request = None;
-
-                    for sound in &visible_sounds {
-                        let selected = self.selected == Some(sound.id);
-                        let playing = self
-                            .audio
-                            .as_ref()
-                            .is_some_and(|audio| audio.is_playing(sound.id));
-                        let progress = self
-                            .audio
-                            .as_ref()
-                            .and_then(|audio| audio.playback_progress(sound.id));
-                        let frame = Frame::new()
-                            .fill(if selected {
-                                if self.dark_theme {
-                                    Color32::from_rgb(60, 25, 52)
-                                } else {
-                                    Color32::from_rgb(255, 239, 247)
-                                }
-                            } else {
-                                Self::surface_fill()
-                            })
-                            .stroke(Stroke::new(
-                                1.0,
-                                if selected {
-                                    Color32::from_rgb(235, 118, 171)
-                                } else {
-                                    Self::border_color()
-                                },
-                            ))
-                            .shadow(Shadow {
-                                offset: [0, 10],
-                                blur: 24,
-                                spread: 0,
-                                color: if selected {
-                                    Color32::from_rgba_premultiplied(138, 45, 93, 26)
-                                } else {
-                                    Color32::from_rgba_premultiplied(82, 48, 70, 14)
-                                },
-                            })
-                            .corner_radius(28.0)
-                            .inner_margin(Margin::same(18))
-                            .show(ui, |ui| {
-                                ui.style_mut().interaction.selectable_labels = false;
-                                ui.label(
-                                    RichText::new(&sound.name)
-                                        .size(16.5)
-                                        .color(Self::strong_text_color())
-                                        .strong(),
-                                );
-                                ui.add_space(8.0);
-                                let waveform_samples = self.sound_waveform_samples(sound);
-                                let waveform_preview = Self::trimmed_waveform_preview_from_samples(
-                                    sound,
-                                    &waveform_samples,
-                                );
-                                Self::draw_wave_strip(
-                                    ui,
-                                    &waveform_preview,
-                                    progress,
-                                    Color32::from_rgb(214, 51, 132),
-                                    Color32::from_rgb(238, 213, 227),
-                                    Self::panel_fill(),
-                                    52.0,
-                                );
-                                ui.add_space(10.0);
-                                ui.horizontal(|ui| {
-                                    ui.label(
-                                        RichText::new(format_time(sound.trimmed_length()))
-                                            .size(12.0)
-                                            .color(Self::muted_text_color()),
-                                    );
-                                    ui.separator();
-                                    ui.label(
-                                        RichText::new(format!("{:.0}%", sound.volume * 100.0))
-                                            .size(12.0)
-                                            .color(Self::muted_text_color()),
-                                    );
-                                    if playing {
-                                        ui.separator();
-                                        ui.label(Self::icon(
-                                            0xe050,
-                                            14.0,
-                                            Color32::from_rgb(214, 51, 132),
-                                        ));
+                .show_rows(
+                    ui,
+                    LIBRARY_LIST_ROW_HEIGHT,
+                    visible_sounds.len(),
+                    |ui, row_range| {
+                        for row_index in row_range {
+                            let sound = &visible_sounds[row_index];
+                            let selected = self.selected == Some(sound.id);
+                            let playing = self
+                                .audio
+                                .as_ref()
+                                .is_some_and(|audio| audio.is_playing(sound.id));
+                            let progress = self
+                                .audio
+                                .as_ref()
+                                .and_then(|audio| audio.playback_progress(sound.id));
+                            let frame = Frame::new()
+                                .fill(if selected {
+                                    if self.dark_theme {
+                                        Color32::from_rgb(60, 25, 52)
+                                    } else {
+                                        Color32::from_rgb(255, 239, 247)
                                     }
+                                } else {
+                                    Self::surface_fill()
+                                })
+                                .stroke(Stroke::new(
+                                    1.0,
+                                    if selected {
+                                        Color32::from_rgb(235, 118, 171)
+                                    } else {
+                                        Self::border_color()
+                                    },
+                                ))
+                                .shadow(Shadow {
+                                    offset: [0, 10],
+                                    blur: 24,
+                                    spread: 0,
+                                    color: if selected {
+                                        Color32::from_rgba_premultiplied(138, 45, 93, 26)
+                                    } else {
+                                        Color32::from_rgba_premultiplied(82, 48, 70, 14)
+                                    },
+                                })
+                                .corner_radius(28.0)
+                                .inner_margin(Margin::same(18))
+                                .show(ui, |ui| {
+                                    ui.style_mut().interaction.selectable_labels = false;
+                                    ui.label(
+                                        RichText::new(&sound.name)
+                                            .size(16.5)
+                                            .color(Self::strong_text_color())
+                                            .strong(),
+                                    );
+                                    ui.add_space(8.0);
+                                    let waveform_samples = self.sound_waveform_samples(sound);
+                                    let waveform_preview =
+                                        Self::trimmed_waveform_preview_from_samples(
+                                            sound,
+                                            &waveform_samples,
+                                        );
+                                    Self::draw_wave_strip(
+                                        ui,
+                                        &waveform_preview,
+                                        progress,
+                                        Color32::from_rgb(214, 51, 132),
+                                        Color32::from_rgb(238, 213, 227),
+                                        Self::panel_fill(),
+                                        52.0,
+                                    );
+                                    ui.add_space(10.0);
+                                    ui.horizontal(|ui| {
+                                        ui.label(
+                                            RichText::new(format_time(sound.trimmed_length()))
+                                                .size(12.0)
+                                                .color(Self::muted_text_color()),
+                                        );
+                                        ui.separator();
+                                        ui.label(
+                                            RichText::new(format!("{:.0}%", sound.volume * 100.0))
+                                                .size(12.0)
+                                                .color(Self::muted_text_color()),
+                                        );
+                                        if playing {
+                                            ui.separator();
+                                            ui.label(Self::icon(
+                                                0xe050,
+                                                14.0,
+                                                Color32::from_rgb(214, 51, 132),
+                                            ));
+                                        }
+                                    });
                                 });
-                            });
-                        let scrollbar_gutter = 18.0;
-                        let interactive_rect = Rect::from_min_max(
-                            frame.response.rect.min,
-                            Pos2::new(
-                                (frame.response.rect.max.x - scrollbar_gutter)
-                                    .max(frame.response.rect.min.x),
-                                frame.response.rect.max.y,
-                            ),
-                        );
+                            let scrollbar_gutter = 18.0;
+                            let interactive_rect = Rect::from_min_max(
+                                frame.response.rect.min,
+                                Pos2::new(
+                                    (frame.response.rect.max.x - scrollbar_gutter)
+                                        .max(frame.response.rect.min.x),
+                                    frame.response.rect.max.y,
+                                ),
+                            );
 
-                        let response = ui.interact(
-                            interactive_rect,
-                            ui.id().with(sound.id),
-                            Sense::click_and_drag(),
-                        );
-                        let pointer_hover = ui
-                            .ctx()
-                            .input(|input| input.pointer.hover_pos())
-                            .is_some_and(|pos| interactive_rect.contains(pos));
-                        if search_drag_blocked {
-                            self.pending_sound_drag = None;
+                            let response = ui.interact(
+                                interactive_rect,
+                                ui.id().with(sound.id),
+                                Sense::click_and_drag(),
+                            );
+                            let pointer_hover = ui
+                                .ctx()
+                                .input(|input| input.pointer.hover_pos())
+                                .is_some_and(|pos| interactive_rect.contains(pos));
+                            if search_drag_blocked {
+                                self.pending_sound_drag = None;
+                            }
+                            if titlebar_drag_active {
+                                self.pending_sound_drag = None;
+                            }
+                            if !modal_open
+                                && !search_drag_blocked
+                                && !titlebar_drag_active
+                                && Self::pointer_primary_pressed_within(ui.ctx(), interactive_rect)
+                            {
+                                self.pending_sound_drag = Some(sound.id);
+                            }
+                            if !modal_open && !search_drag_blocked && pointer_hover {
+                                ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+                            }
+                            if !modal_open
+                                && !search_drag_blocked
+                                && !titlebar_drag_active
+                                && self.pending_sound_drag == Some(sound.id)
+                                && pointer_hover
+                                && ui.ctx().input(|input| input.pointer.primary_down())
+                            {
+                                ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                            }
+                            if !modal_open
+                                && !search_drag_blocked
+                                && !titlebar_drag_active
+                                && self.pending_sound_drag == Some(sound.id)
+                                && Self::pointer_primary_drag_ready(ui.ctx())
+                            {
+                                drag_request = Some(sound.id);
+                                self.pending_sound_drag = None;
+                            }
+                            if !modal_open && response.clicked() {
+                                self.selected = Some(sound.id);
+                                preview_request = Some(sound.id);
+                            }
+                            if row_index + 1 < visible_sounds.len() {
+                                ui.add_space(12.0);
+                            }
                         }
-                        if titlebar_drag_active {
-                            self.pending_sound_drag = None;
-                        }
-                        if !modal_open
-                            && !search_drag_blocked
-                            && !titlebar_drag_active
-                            && Self::pointer_primary_pressed_within(ui.ctx(), interactive_rect)
-                        {
-                            self.pending_sound_drag = Some(sound.id);
-                        }
-                        if !modal_open && !search_drag_blocked && pointer_hover {
-                            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
-                        }
-                        if !modal_open
-                            && !search_drag_blocked
-                            && !titlebar_drag_active
-                            && self.pending_sound_drag == Some(sound.id)
-                            && pointer_hover
-                            && ui.ctx().input(|input| input.pointer.primary_down())
-                        {
-                            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
-                        }
-                        if !modal_open
-                            && !search_drag_blocked
-                            && !titlebar_drag_active
-                            && self.pending_sound_drag == Some(sound.id)
-                            && Self::pointer_primary_drag_ready(ui.ctx())
-                        {
-                            drag_request = Some(sound.id);
-                            self.pending_sound_drag = None;
-                        }
-                        if !modal_open && response.clicked() {
-                            self.selected = Some(sound.id);
-                            preview_request = Some(sound.id);
-                        }
-                        ui.add_space(12.0);
-                    }
+                    },
+                );
 
-                    if let Some(sound_id) = preview_request {
-                        self.preview_sound(sound_id);
-                    }
-                    if let Some(sound_id) = drag_request
-                        && let Some(sound) = self
-                            .sounds
-                            .iter()
-                            .find(|sound| sound.id == sound_id)
-                            .cloned()
-                        && let Err(error) = self.drag_sound_file_out(ui.ctx(), &sound)
-                    {
-                        self.set_error_status(error);
-                    }
-                });
+            if let Some(sound_id) = preview_request {
+                self.preview_sound(sound_id);
+            }
+            if let Some(sound_id) = drag_request
+                && let Some(sound) = self
+                    .sounds
+                    .iter()
+                    .find(|sound| sound.id == sound_id)
+                    .cloned()
+                && let Err(error) = self.drag_sound_file_out(ui.ctx(), &sound)
+            {
+                self.set_error_status(error);
+            }
         });
     }
 

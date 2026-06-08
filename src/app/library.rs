@@ -1290,7 +1290,7 @@ impl SoundFxApp {
 
         if is_selected && self.library_tab == LibraryTab::Sounds && !is_collapsed {
             ui.add_space(8.0);
-            self.draw_inline_folder_sounds(ui, folder, indent + 26.0);
+            self.draw_inline_folder_sounds(ui, folder, (indent + 8.0).min(24.0));
         }
 
         if !is_collapsed {
