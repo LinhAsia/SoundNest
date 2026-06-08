@@ -380,6 +380,7 @@ pub struct SoundFxApp {
     pub(super) show_stream_panel: bool,
     pub(super) show_settings_panel: bool,
     pub(super) show_trim_commit_panel: bool,
+    pub(super) show_delete_folder_confirm: Option<Uuid>,
     pub(super) import_dir: PathBuf,
     pub(super) import_audio_entries: Vec<PathBuf>,
     pub(super) app_view: AppView,
@@ -693,6 +694,7 @@ impl SoundFxApp {
             show_stream_panel: false,
             show_settings_panel: false,
             show_trim_commit_panel: false,
+            show_delete_folder_confirm: None,
             import_dir,
             import_audio_entries: Vec::new(),
             app_view: AppView::Editor,
@@ -4098,6 +4100,7 @@ impl SoundFxApp {
             || self.show_settings_panel
             || self.video_viewer.is_some()
             || self.show_trim_commit_panel
+            || self.show_delete_folder_confirm.is_some()
     }
 
     fn render_modal_backdrop(&self, ctx: &Context) {
@@ -9685,6 +9688,106 @@ impl SoundFxApp {
         }
     }
 
+    fn render_delete_folder_confirm_panel(&mut self, ctx: &Context) {
+        let Some(folder_id) = self.show_delete_folder_confirm else {
+            return;
+        };
+
+        let mut open_panel = true;
+        let mut close_request = false;
+        let mut delete_confirmed = false;
+        let (_panel_bounds, panel_size, panel_pos) =
+            self.centered_modal_placement(ctx, vec2(380.0, 180.0), vec2(300.0, 160.0), 0.0);
+
+        egui::Window::new("")
+            .id(egui::Id::new("delete-folder-confirm-panel"))
+            .order(egui::Order::Foreground)
+            .title_bar(false)
+            .resizable(false)
+            .collapsible(false)
+            .pivot(egui::Align2::CENTER_CENTER)
+            .fixed_size(panel_size)
+            .fixed_pos(panel_pos)
+            .open(&mut open_panel)
+            .frame(
+                Frame::new()
+                    .fill(Self::overlay_panel_fill())
+                    .stroke(Stroke::new(1.0, Self::border_color()))
+                    .shadow(Shadow {
+                        offset: [0, 14],
+                        blur: 32,
+                        spread: 0,
+                        color: Color32::from_rgba_premultiplied(78, 40, 63, 24),
+                    })
+                    .corner_radius(28.0)
+                    .inner_margin(Margin::same(20)),
+            )
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(Self::icon(0xe002, 20.0, Color32::from_rgb(220, 53, 69)).strong());
+                    ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                        if Self::icon_titlebar(ui, [34.0, 28.0], 0xe5cd, false, true).clicked() {
+                            close_request = true;
+                        }
+                    });
+                });
+
+                ui.add_space(14.0);
+                ui.label(
+                    RichText::new(self.t("library.delete_confirm_title"))
+                        .size(15.0)
+                        .color(Self::strong_text_color())
+                        .strong(),
+                );
+
+                ui.add_space(8.0);
+                ui.label(
+                    RichText::new(self.t("library.delete_confirm_warning"))
+                        .size(12.0)
+                        .color(Self::muted_text_color()),
+                );
+
+                ui.add_space(14.0);
+                ui.horizontal_centered(|ui| {
+                    let yes_response = ui.add_sized(
+                        [130.0, 38.0],
+                        Self::action_button(
+                            RichText::new(self.t("library.delete_confirm_yes")).size(13.0),
+                            false,
+                            true,
+                        ),
+                    );
+                    Self::decorate_button_response(ui, &yes_response);
+                    if yes_response.clicked() {
+                        delete_confirmed = true;
+                    }
+
+                    let no_response = ui.add_sized(
+                        [130.0, 38.0],
+                        Self::action_button(
+                            RichText::new(self.t("library.delete_confirm_no")).size(13.0),
+                            false,
+                            false,
+                        ),
+                    );
+                    Self::decorate_button_response(ui, &no_response);
+                    if no_response.clicked() {
+                        close_request = true;
+                    }
+                });
+            });
+
+        if close_request || !open_panel {
+            self.show_delete_folder_confirm = None;
+        }
+
+        if delete_confirmed {
+            self.show_delete_folder_confirm = None;
+            self.delete_folder_branch(folder_id);
+        }
+    }
+
+
     fn transition_progress(&mut self, ctx: &Context) -> Option<(TransitionPhase, f32)> {
         let phase = self.startup.phase;
         if phase == TransitionPhase::Live {
@@ -11364,6 +11467,7 @@ impl eframe::App for SoundFxApp {
         self.render_video_viewer_panel(ctx);
         self.render_pitch_monitor(ctx);
         self.render_trim_commit_panel(ctx);
+        self.render_delete_folder_confirm_panel(ctx);
         self.render_pitch_overlay_viewport(ctx);
         self.render_custom_window_resize_handles(ctx);
         self.maybe_start_pending_processed_export();

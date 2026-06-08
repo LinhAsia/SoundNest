@@ -1392,7 +1392,11 @@ impl SoundFxApp {
             }
         }
         if let Some(folder_id) = delete_folder_id {
-            self.delete_folder_branch(folder_id);
+            if self.total_sound_count_for_folder(folder_id) > 0 {
+                self.show_delete_folder_confirm = Some(folder_id);
+            } else {
+                self.delete_folder_branch(folder_id);
+            }
         }
         if let Some(folder_id) = rename_folder_id {
             self.editing_folder_id = Some(folder_id);

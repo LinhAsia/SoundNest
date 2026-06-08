@@ -130,7 +130,11 @@
       "library.import_select_title": "Select sounds to add",
       "editor.folder": "Folder",
       "editor.no_folder": "None",
-      "library.empty_folder": "Empty folder"
+      "library.empty_folder": "Empty folder",
+      "library.delete_confirm_title": "Delete folder?",
+      "library.delete_confirm_warning": "This folder contains sounds. Deleting it will move all its sounds to Root. Are you sure you want to delete this folder?",
+      "library.delete_confirm_yes": "Yes, Delete",
+      "library.delete_confirm_no": "Cancel"
     },
     "vi": {
       "name": "Tiếng Việt",
@@ -262,7 +266,11 @@
       "library.import_select_title": "Chon sound de them",
       "editor.folder": "Thu muc",
       "editor.no_folder": "Khong",
-      "library.empty_folder": "Thu muc trong"
+      "library.empty_folder": "Thu muc trong",
+      "library.delete_confirm_title": "Xoa thu muc?",
+      "library.delete_confirm_warning": "Thu muc nay co chua sound. Xoa thu muc se chuyen toan bo sound ben trong ve Thu muc goc. Ban co chac chan muon xoa thu muc nay?",
+      "library.delete_confirm_yes": "Co, xoa",
+      "library.delete_confirm_no": "Huy bo"
     }
   }
 }
