@@ -466,6 +466,8 @@ pub struct SoundFxApp {
     pub(super) editor_drop_rect: Option<Rect>,
     pub(super) pending_sound_drag: Option<Uuid>,
     pub(super) pending_folder_drag: Option<Uuid>,
+    pub(super) library_drop_target_folder: Option<Uuid>,
+    pub(super) library_drop_target_root: bool,
     pub(super) ignored_drop_path: Option<PathBuf>,
     pub(super) download_panel_tab: DownloadPanelTab,
     pub(super) tts_text: String,
@@ -797,6 +799,8 @@ impl SoundFxApp {
             editor_drop_rect: None,
             pending_sound_drag: None,
             pending_folder_drag: None,
+            library_drop_target_folder: None,
+            library_drop_target_root: false,
             ignored_drop_path: None,
             download_panel_tab: DownloadPanelTab::Download,
             tts_text: String::new(),
@@ -5254,6 +5258,13 @@ impl SoundFxApp {
     }
 
     fn draw_library_grid(&mut self, ui: &mut Ui) {
+        if !(self.app_view == AppView::Library
+            && self.library_tab == LibraryTab::Sounds
+            && ui.ctx().input(|input| !input.raw.hovered_files.is_empty()))
+        {
+            self.library_drop_target_folder = None;
+            self.library_drop_target_root = false;
+        }
         let modal_open = self.has_modal_panel();
         let titlebar_drag_active = self.titlebar_drag_active(ui.ctx());
         let mut columns_changed = false;
@@ -11561,17 +11572,17 @@ impl eframe::App for SoundFxApp {
         self.render_custom_window_resize_handles(ctx);
         self.maybe_start_pending_processed_export();
 
-        let is_folder_open = self.app_view == AppView::Library
-            && self.library_tab != LibraryTab::Videos
-            && self.library_current_folder.is_some();
-
-        let external_file_hover = (self.app_view == AppView::Editor || is_folder_open)
+        let is_library_sound_drop =
+            self.app_view == AppView::Library && self.library_tab == LibraryTab::Sounds;
+        let external_file_hover = (self.app_view == AppView::Editor || is_library_sound_drop)
             && !self.has_modal_panel()
             && ctx.input(|input| !input.raw.hovered_files.is_empty());
         if external_file_hover {
             ctx.request_repaint_after(Duration::from_millis(16));
-            let pointer_over_drop = if is_folder_open {
-                true
+            let pointer_over_drop = if is_library_sound_drop {
+                self.library_drop_target_root
+                    || self.library_drop_target_folder.is_some()
+                    || self.library_current_folder.is_some()
             } else {
                 self.external_drop_pointer_pos(ctx)
                     .zip(self.editor_drop_rect)

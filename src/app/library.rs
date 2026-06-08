@@ -242,6 +242,21 @@ impl SoundFxApp {
         waveform
     }
 
+    pub(super) fn external_library_drop_active(&self, ctx: &Context) -> bool {
+        self.app_view == AppView::Library
+            && self.library_tab == LibraryTab::Sounds
+            && !self.has_modal_panel()
+            && ctx.input(|input| !input.raw.hovered_files.is_empty())
+    }
+
+    pub(super) fn current_library_drop_target_label(&self) -> String {
+        if let Some(folder_id) = self.library_drop_target_folder {
+            self.folder_path_label(folder_id)
+        } else {
+            "Root".to_owned()
+        }
+    }
+
     pub(super) fn create_folder(&mut self, name: String, parent_id: Option<Uuid>) {
         let new_folder_id = self.create_folder_record(name, parent_id);
         let _ = self.storage.save_folders(&self.folders);
@@ -1067,6 +1082,11 @@ impl SoundFxApp {
 
     pub(super) fn draw_folders_list_view(&mut self, ui: &mut egui::Ui) {
         self.ensure_current_folder_exists();
+        let external_drop_active = self.external_library_drop_active(ui.ctx());
+        if external_drop_active {
+            self.library_drop_target_folder = self.library_current_folder;
+            self.library_drop_target_root = self.library_current_folder.is_none();
+        }
         let selected_parent_label = self
             .library_current_folder
             .map(|folder_id| self.folder_path_label(folder_id))
@@ -1156,6 +1176,36 @@ impl SoundFxApp {
                 }
             });
         });
+
+        if external_drop_active {
+            ui.add_space(10.0);
+            let target_label = self.current_library_drop_target_label();
+            let drop_banner = Frame::new()
+                .fill(Color32::from_rgba_premultiplied(242, 140, 56, 34))
+                .stroke(Stroke::new(1.5, Color32::from_rgb(242, 140, 56)))
+                .corner_radius(16.0)
+                .inner_margin(Margin::symmetric(14, 10))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(Self::icon(0xe2c7, 16.0, Color32::from_rgb(242, 140, 56)));
+                        ui.add_space(8.0);
+                        ui.label(
+                            RichText::new(format!("Drop into {target_label}"))
+                                .size(12.5)
+                                .color(Self::strong_text_color())
+                                .strong(),
+                        );
+                    });
+                });
+            let pointer_over_banner = self
+                .external_drop_pointer_pos(ui.ctx())
+                .is_some_and(|pos| drop_banner.response.rect.contains(pos));
+            if pointer_over_banner {
+                self.library_drop_target_folder = None;
+                self.library_drop_target_root = true;
+            }
+            ui.add_space(10.0);
+        }
 
         if self.library_folder_create_open {
             ui.add_space(10.0);
@@ -1462,6 +1512,7 @@ impl SoundFxApp {
         clear_selected_folder: &mut bool,
         clipboard_paste_ready: bool,
     ) {
+        let external_drop_active = self.external_library_drop_active(ui.ctx());
         let is_selected = self.library_current_folder == Some(folder.id);
         let is_editing = self.editing_folder_id == Some(folder.id);
         let total_count = self.total_sound_count_for_folder(folder.id);
@@ -1716,6 +1767,25 @@ impl SoundFxApp {
             if response.hovered() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             }
+            let pointer_over_drop_target = external_drop_active
+                && self
+                    .external_drop_pointer_pos(ui.ctx())
+                    .is_some_and(|pos| row.response.rect.contains(pos));
+            if pointer_over_drop_target {
+                self.library_drop_target_folder = Some(folder.id);
+                self.library_drop_target_root = false;
+                ui.painter().rect_stroke(
+                    row.response.rect.expand(2.0),
+                    18.0,
+                    Stroke::new(2.0, Color32::from_rgb(255, 186, 86)),
+                    StrokeKind::Outside,
+                );
+                ui.painter().rect_filled(
+                    row.response.rect,
+                    16.0,
+                    Color32::from_rgba_premultiplied(242, 140, 56, 20),
+                );
+            }
             let titlebar_drag_active = self.titlebar_drag_active(ui.ctx());
             if titlebar_drag_active {
                 self.pending_folder_drag = None;
@@ -1806,6 +1876,7 @@ impl SoundFxApp {
         _clear_selected_folder: &mut bool,
         clipboard_paste_ready: bool,
     ) {
+        let external_drop_active = self.external_library_drop_active(ui.ctx());
         let folder_accent = Color32::from_rgb(242, 140, 56);
         let is_selected = self.library_current_folder == Some(folder.id);
         let is_editing = self.editing_folder_id == Some(folder.id);
@@ -2035,6 +2106,25 @@ impl SoundFxApp {
             );
             if response.hovered() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+            let pointer_over_drop_target = external_drop_active
+                && self
+                    .external_drop_pointer_pos(ui.ctx())
+                    .is_some_and(|pos| row.response.rect.contains(pos));
+            if pointer_over_drop_target {
+                self.library_drop_target_folder = Some(folder.id);
+                self.library_drop_target_root = false;
+                ui.painter().rect_stroke(
+                    row.response.rect.expand(2.0),
+                    18.0,
+                    Stroke::new(2.0, Color32::from_rgb(255, 186, 86)),
+                    StrokeKind::Outside,
+                );
+                ui.painter().rect_filled(
+                    row.response.rect,
+                    16.0,
+                    Color32::from_rgba_premultiplied(242, 140, 56, 22),
+                );
             }
             let titlebar_drag_active = self.titlebar_drag_active(ui.ctx());
             if titlebar_drag_active {

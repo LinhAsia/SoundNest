@@ -665,11 +665,9 @@ impl SoundFxApp {
     }
 
     pub(super) fn handle_dropped_files(&mut self, ctx: &Context) {
-        let is_folder_open = self.app_view == AppView::Library
-            && self.library_tab == LibraryTab::Sounds
-            && self.library_current_folder.is_some();
-
-        if (self.app_view != AppView::Editor && !is_folder_open) || self.has_modal_panel() {
+        let is_library_sounds =
+            self.app_view == AppView::Library && self.library_tab == LibraryTab::Sounds;
+        if (self.app_view != AppView::Editor && !is_library_sounds) || self.has_modal_panel() {
             self.editor_drop_armed = false;
             self.editor_drop_rect = None;
             return;
@@ -680,10 +678,14 @@ impl SoundFxApp {
             return;
         }
         let pointer_pos = self.external_drop_pointer_pos(ctx);
-        let dropped_in_rect = is_folder_open
-            || self
-                .editor_drop_rect
-                .is_some_and(|rect| pointer_pos.is_some_and(|pos| rect.contains(pos)));
+        let dropped_in_rect = if is_library_sounds {
+            self.library_drop_target_root
+                || self.library_drop_target_folder.is_some()
+                || self.library_current_folder.is_some()
+        } else {
+            self.editor_drop_rect
+                .is_some_and(|rect| pointer_pos.is_some_and(|pos| rect.contains(pos)))
+        };
         if !self.editor_drop_armed && !dropped_in_rect {
             return;
         }
@@ -699,14 +701,21 @@ impl SoundFxApp {
             paths.push(path);
         }
         if !paths.is_empty() {
-            let target_folder_id = if is_folder_open {
-                self.library_current_folder
+            let target_folder_id = if is_library_sounds {
+                if self.library_drop_target_root {
+                    None
+                } else {
+                    self.library_drop_target_folder
+                        .or(self.library_current_folder)
+                }
             } else {
                 None
             };
             if let Err(error) = self.import_paths_to_folder(paths, target_folder_id) {
                 self.set_error_status(error);
             }
+            self.library_drop_target_folder = None;
+            self.library_drop_target_root = false;
         }
     }
 
