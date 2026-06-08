@@ -5303,22 +5303,6 @@ impl SoundFxApp {
                         library_slider_active,
                         titlebar_drag_active,
                     );
-                } else if self.library_sound_view == LibrarySoundView::Grid
-                    && self.library_current_folder.is_some()
-                {
-                    let folder_sounds =
-                        self.filtered_library_sounds_for_folder(self.library_current_folder, false);
-                    if !folder_sounds.is_empty() {
-                        let layout_width = ui.clip_rect().width().min(ui.available_width());
-                        self.draw_library_sound_grid_content(
-                            ui,
-                            &folder_sounds,
-                            layout_width,
-                            modal_open,
-                            library_slider_active,
-                            titlebar_drag_active,
-                        );
-                    }
                 }
             });
     }
@@ -8352,6 +8336,7 @@ impl SoundFxApp {
     fn draw_full_width_wave_strip(
         ui: &mut Ui,
         waveform: &[f32],
+        progress: Option<f32>,
         active_color: Color32,
         idle_color: Color32,
         background_color: Color32,
@@ -8395,6 +8380,17 @@ impl SoundFxApp {
                 idle_color
             };
             painter.rect_filled(bar, 2.5, color);
+        }
+
+        if let Some(progress) = progress {
+            let play_x = egui::lerp(inner.left()..=inner.right(), progress.clamp(0.0, 1.0));
+            painter.line_segment(
+                [
+                    Pos2::new(play_x, inner.top()),
+                    Pos2::new(play_x, inner.bottom()),
+                ],
+                Stroke::new(2.0, active_color.linear_multiply(0.95)),
+            );
         }
     }
 

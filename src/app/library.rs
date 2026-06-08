@@ -136,6 +136,29 @@ impl SoundFxApp {
             .count()
     }
 
+    pub(super) fn stop_library_preview_if_hidden_by_folder(&mut self, folder_id: Uuid) {
+        let Some(current_sound_id) = self
+            .audio
+            .as_ref()
+            .and_then(|audio| audio.current_sound_id())
+        else {
+            return;
+        };
+        let hidden_branch_ids = self.folder_branch_ids(folder_id);
+        let should_stop = self
+            .sounds
+            .iter()
+            .find(|sound| sound.id == current_sound_id)
+            .is_some_and(|sound| {
+                sound
+                    .folder_id
+                    .is_some_and(|sound_folder_id| hidden_branch_ids.contains(&sound_folder_id))
+            });
+        if should_stop {
+            self.stop_preview();
+        }
+    }
+
     pub(super) fn total_sound_count_for_folder(&self, folder_id: Uuid) -> usize {
         let ids = self.folder_branch_ids(folder_id);
         self.sounds
@@ -1110,6 +1133,9 @@ impl SoundFxApp {
         }
 
         if clear_selected_folder {
+            if let Some(folder_id) = self.library_current_folder {
+                self.stop_library_preview_if_hidden_by_folder(folder_id);
+            }
             self.library_current_folder = None;
             self.editing_folder_id = None;
         } else if let Some(folder_id) = select_folder_id {
@@ -1119,6 +1145,8 @@ impl SoundFxApp {
         if let Some(folder_id) = toggle_folder_id {
             if !self.library_collapsed_folders.insert(folder_id) {
                 self.library_collapsed_folders.remove(&folder_id);
+            } else {
+                self.stop_library_preview_if_hidden_by_folder(folder_id);
             }
         }
         if let Some(folder_id) = delete_folder_id {
@@ -1293,13 +1321,13 @@ impl SoundFxApp {
             }
         }
 
-        if is_selected
-            && self.library_tab == LibraryTab::Sounds
-            && self.library_sound_view == LibrarySoundView::Rows
-            && !is_collapsed
-        {
+        if is_selected && self.library_tab == LibraryTab::Sounds && !is_collapsed {
             ui.add_space(8.0);
-            self.draw_inline_folder_sounds(ui, folder, 8.0);
+            if self.library_sound_view == LibrarySoundView::Grid {
+                self.draw_inline_folder_sound_grid(ui, folder, 8.0);
+            } else {
+                self.draw_inline_folder_sounds(ui, folder, 8.0);
+            }
         }
 
         if !is_collapsed {
@@ -1382,6 +1410,71 @@ impl SoundFxApp {
         });
     }
 
+    fn draw_inline_folder_sound_grid(
+        &mut self,
+        ui: &mut Ui,
+        folder: &crate::storage::Folder,
+        left_indent: f32,
+    ) {
+        ui.add_space(6.0);
+        let content_width = (ui.available_width() - left_indent).max(180.0);
+        ui.horizontal(|ui| {
+            ui.add_space(left_indent);
+            ui.allocate_ui_with_layout(
+                vec2(content_width, 0.0),
+                egui::Layout::top_down(Align::Min),
+                |ui| {
+                    ui.set_width(content_width.max(ui.available_width()));
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new(self.folder_path_label(folder.id))
+                                .size(12.5)
+                                .color(Self::strong_text_color())
+                                .strong(),
+                        );
+                        if self.folder_import_select_mode.is_none() {
+                            ui.add_space(10.0);
+                            let import_btn = ui.add(
+                                Button::new(format!(
+                                    "+ {}",
+                                    self.t("library.import_sound_to_folder")
+                                ))
+                                .fill(Color32::from_rgb(227, 82, 149))
+                                .corner_radius(10.0),
+                            );
+                            Self::decorate_button_response(ui, &import_btn);
+                            if import_btn.clicked() {
+                                self.folder_import_select_mode = Some(folder.id);
+                            }
+                        }
+                    });
+                    ui.add_space(10.0);
+
+                    let sounds = self.filtered_library_sounds_for_folder(Some(folder.id), false);
+                    if sounds.is_empty() {
+                        ui.label(
+                            RichText::new("No sounds in this folder yet.")
+                                .size(11.5)
+                                .color(Self::muted_text_color()),
+                        );
+                        return;
+                    }
+
+                    let modal_open = self.has_modal_panel();
+                    let titlebar_drag_active = self.titlebar_drag_active(ui.ctx());
+                    self.draw_library_sound_grid_content(
+                        ui,
+                        &sounds,
+                        content_width,
+                        modal_open,
+                        false,
+                        titlebar_drag_active,
+                    );
+                },
+            );
+        });
+    }
+
     fn draw_inline_folder_sound_row(&mut self, ui: &mut Ui, sound: &SoundEffect) {
         let mut preview_sound = None;
         let mut copy_sound = None;
@@ -1396,6 +1489,15 @@ impl SoundFxApp {
         let mut copy_clicked = false;
         let mut favorite_clicked = false;
         let mut remove_clicked = false;
+        let playback_progress = self
+            .audio
+            .as_ref()
+            .and_then(|audio| audio.playback_progress(sound.id));
+        let is_previewing = playback_progress.is_some();
+        if is_previewing {
+            ui.ctx()
+                .request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
+        }
 
         let row = Frame::new()
             .fill(Self::surface_fill())
@@ -1426,6 +1528,7 @@ impl SoundFxApp {
                         Self::draw_full_width_wave_strip(
                             ui,
                             &waveform_preview,
+                            playback_progress,
                             Color32::from_rgb(214, 51, 132),
                             Color32::from_rgb(238, 213, 227),
                             Self::panel_fill(),
@@ -1466,12 +1569,16 @@ impl SoundFxApp {
                         let play_btn = Self::icon_action(
                             ui,
                             [36.0, 30.0],
-                            if is_loading { 0xe5d5 } else { 0xe037 },
-                            is_loading,
+                            if is_loading || is_previewing {
+                                0xe5d5
+                            } else {
+                                0xe037
+                            },
+                            is_loading || is_previewing,
                             false,
                         );
                         if play_btn.clicked() {
-                            if is_loading {
+                            if is_loading || is_previewing {
                                 self.stop_preview();
                             } else {
                                 preview_sound = Some(sound.id);
