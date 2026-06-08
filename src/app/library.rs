@@ -1432,27 +1432,69 @@ impl SoundFxApp {
         toggle_folder_id: &mut Option<Uuid>,
         clear_selected_folder: &mut bool,
     ) {
-        let folder_accent = Color32::from_rgb(242, 140, 56);
-        let folder_accent_soft = Color32::from_rgb(255, 202, 145);
         let is_selected = self.library_current_folder == Some(folder.id);
         let is_editing = self.editing_folder_id == Some(folder.id);
         let total_count = self.total_sound_count_for_folder(folder.id);
         let direct_count = self.direct_sound_count_for_folder(folder.id);
         let children = self.sorted_child_folders(Some(folder.id));
+        let subfolders_count = children.len();
         let has_children = !children.is_empty();
         let is_collapsed = has_children && self.library_collapsed_folders.contains(&folder.id);
+
+        let (folder_accent, folder_accent_soft, folder_icon_code) = if subfolders_count > 0 && direct_count > 0 {
+            (Color32::from_rgb(33, 150, 243), Color32::from_rgb(179, 219, 255), if is_collapsed { 0xe2c7 } else { 0xe2c8 })
+        } else if subfolders_count > 0 {
+            (Color32::from_rgb(242, 140, 56), Color32::from_rgb(255, 202, 145), if is_collapsed { 0xe2c7 } else { 0xe2c8 })
+        } else if direct_count > 0 {
+            (Color32::from_rgb(227, 82, 149), Color32::from_rgb(255, 182, 219), 0xe061)
+        } else {
+            (Self::muted_text_color(), Self::muted_text_color().linear_multiply(0.5), if is_collapsed { 0xe2c7 } else { 0xe2c8 })
+        };
+
         let indent = 18.0 * depth as f32;
         let show_folder_actions = is_selected || (has_children && !is_collapsed);
         let fill = if Self::dark_theme_enabled() {
             if is_selected || (has_children && !is_collapsed) {
-                Color32::from_rgb(63, 39, 24)
+                if subfolders_count > 0 && direct_count > 0 {
+                    Color32::from_rgb(10, 39, 63)
+                } else if subfolders_count > 0 {
+                    Color32::from_rgb(63, 39, 24)
+                } else if direct_count > 0 {
+                    Color32::from_rgb(58, 23, 41)
+                } else {
+                    Color32::from_rgb(30, 30, 30)
+                }
             } else {
-                Color32::from_rgb(33, 24, 18)
+                if subfolders_count > 0 && direct_count > 0 {
+                    Color32::from_rgb(8, 24, 39)
+                } else if subfolders_count > 0 {
+                    Color32::from_rgb(33, 24, 18)
+                } else if direct_count > 0 {
+                    Color32::from_rgb(30, 15, 23)
+                } else {
+                    Color32::from_rgb(22, 22, 22)
+                }
             }
         } else if is_selected || (has_children && !is_collapsed) {
-            Color32::from_rgb(255, 245, 234)
+            if subfolders_count > 0 && direct_count > 0 {
+                Color32::from_rgb(235, 245, 255)
+            } else if subfolders_count > 0 {
+                Color32::from_rgb(255, 245, 234)
+            } else if direct_count > 0 {
+                Color32::from_rgb(255, 235, 245)
+            } else {
+                Color32::from_rgb(245, 245, 245)
+            }
         } else {
-            Color32::from_rgb(255, 250, 245)
+            if subfolders_count > 0 && direct_count > 0 {
+                Color32::from_rgb(245, 250, 255)
+            } else if subfolders_count > 0 {
+                Color32::from_rgb(255, 250, 245)
+            } else if direct_count > 0 {
+                Color32::from_rgb(255, 245, 250)
+            } else {
+                Color32::from_rgb(250, 250, 250)
+            }
         };
         let stroke = if is_selected || (has_children && !is_collapsed) {
             folder_accent
@@ -1486,7 +1528,7 @@ impl SoundFxApp {
                             }
                             ui.add_space(8.0);
                             ui.label(Self::icon(
-                                if is_collapsed { 0xe2c7 } else { 0xe2c8 },
+                                folder_icon_code,
                                 18.0,
                                 folder_accent,
                             ));
@@ -1509,24 +1551,38 @@ impl SoundFxApp {
                                         *finish_editing = true;
                                     }
                                 } else {
-                                    ui.add(
-                                        egui::Label::new(
-                                            RichText::new(&folder.name)
-                                                .size(13.2)
-                                                .color(Self::strong_text_color())
-                                                .strong(),
-                                        )
-                                        .truncate(),
-                                    );
+                                    ui.horizontal(|ui| {
+                                        ui.spacing_mut().item_spacing = vec2(6.0, 0.0);
+                                        ui.add(
+                                            egui::Label::new(
+                                                RichText::new(&folder.name)
+                                                    .size(13.2)
+                                                    .color(Self::strong_text_color())
+                                                    .strong(),
+                                            )
+                                            .truncate(),
+                                        );
+                                        self.draw_folder_type_badge(ui, subfolders_count, direct_count);
+                                    });
                                 }
+                                let desc = if subfolders_count > 0 && direct_count > 0 {
+                                    self.t("library.folder_info_mixed")
+                                        .replace("{folders}", &subfolders_count.to_string())
+                                        .replace("{direct}", &direct_count.to_string())
+                                        .replace("{total}", &total_count.to_string())
+                                } else if subfolders_count > 0 {
+                                    self.t("library.folder_info_folders_only")
+                                        .replace("{folders}", &subfolders_count.to_string())
+                                } else if direct_count > 0 {
+                                    self.t("library.folder_info_sounds")
+                                        .replace("{count}", &total_count.to_string())
+                                } else {
+                                    self.t("library.empty_folder")
+                                };
                                 ui.label(
-                                    RichText::new(if direct_count == total_count {
-                                        format!("{total_count} sounds")
-                                    } else {
-                                        format!("{direct_count} direct / {total_count} total")
-                                    })
-                                    .size(11.0)
-                                    .color(Self::muted_text_color()),
+                                    RichText::new(desc)
+                                        .size(11.0)
+                                        .color(Self::muted_text_color()),
                                 );
                             });
                             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
@@ -1685,7 +1741,7 @@ impl SoundFxApp {
         &mut self,
         ui: &mut egui::Ui,
         folder: &crate::storage::Folder,
-        depth: usize,
+        _depth: usize,
         card_width: f32,
         select_folder_id: &mut Option<Uuid>,
         delete_folder_id: &mut Option<Uuid>,
@@ -1700,32 +1756,72 @@ impl SoundFxApp {
         let is_editing = self.editing_folder_id == Some(folder.id);
         let total_count = self.total_sound_count_for_folder(folder.id);
         let direct_count = self.direct_sound_count_for_folder(folder.id);
-        let has_children = self
+        let subfolders_count = self
             .folders
             .iter()
-            .any(|value| value.parent_id == Some(folder.id));
+            .filter(|value| value.parent_id == Some(folder.id))
+            .count();
+        let has_children = subfolders_count > 0;
         let is_collapsed = has_children && self.library_collapsed_folders.contains(&folder.id);
         let show_folder_actions = is_selected || (has_children && !is_collapsed);
+
+        let (card_accent, folder_icon_code, label_key) = if subfolders_count > 0 && direct_count > 0 {
+            (Color32::from_rgb(33, 150, 243), if is_collapsed { 0xe2c7 } else { 0xe2c8 }, "library.folder_type_both")
+        } else if subfolders_count > 0 {
+            (folder_accent, if is_collapsed { 0xe2c7 } else { 0xe2c8 }, "library.folder_type_folders")
+        } else if direct_count > 0 {
+            (Color32::from_rgb(227, 82, 149), 0xe061, "library.folder_type_sounds")
+        } else {
+            (Self::muted_text_color(), if is_collapsed { 0xe2c7 } else { 0xe2c8 }, "library.folder_type_empty")
+        };
+
         let fill = if Self::dark_theme_enabled() {
             if is_selected || (has_children && !is_collapsed) {
-                Color32::from_rgb(63, 39, 24)
+                if subfolders_count > 0 && direct_count > 0 {
+                    Color32::from_rgb(10, 39, 63)
+                } else if subfolders_count > 0 {
+                    Color32::from_rgb(63, 39, 24)
+                } else if direct_count > 0 {
+                    Color32::from_rgb(58, 23, 41)
+                } else {
+                    Color32::from_rgb(30, 30, 30)
+                }
             } else {
-                Color32::from_rgb(33, 24, 18)
+                if subfolders_count > 0 && direct_count > 0 {
+                    Color32::from_rgb(8, 24, 39)
+                } else if subfolders_count > 0 {
+                    Color32::from_rgb(33, 24, 18)
+                } else if direct_count > 0 {
+                    Color32::from_rgb(30, 15, 23)
+                } else {
+                    Color32::from_rgb(22, 22, 22)
+                }
             }
         } else if is_selected || (has_children && !is_collapsed) {
-            Color32::from_rgb(255, 245, 234)
+            if subfolders_count > 0 && direct_count > 0 {
+                Color32::from_rgb(235, 245, 255)
+            } else if subfolders_count > 0 {
+                Color32::from_rgb(255, 245, 234)
+            } else if direct_count > 0 {
+                Color32::from_rgb(255, 235, 245)
+            } else {
+                Color32::from_rgb(245, 245, 245)
+            }
         } else {
-            Color32::from_rgb(255, 250, 245)
+            if subfolders_count > 0 && direct_count > 0 {
+                Color32::from_rgb(245, 250, 255)
+            } else if subfolders_count > 0 {
+                Color32::from_rgb(255, 250, 245)
+            } else if direct_count > 0 {
+                Color32::from_rgb(255, 245, 250)
+            } else {
+                Color32::from_rgb(250, 250, 250)
+            }
         };
         let stroke = if is_selected || (has_children && !is_collapsed) {
-            folder_accent
+            card_accent
         } else {
-            folder_accent.linear_multiply(0.42)
-        };
-        let indent_label = if depth == 0 {
-            "Root".to_owned()
-        } else {
-            format!("Level {depth}")
+            card_accent.linear_multiply(0.42)
         };
 
         let row = Frame::new()
@@ -1745,21 +1841,22 @@ impl SoundFxApp {
                             ui.label(Self::icon(
                                 if is_collapsed { 0xe5cc } else { 0xe5cf },
                                 16.0,
-                                folder_accent,
+                                card_accent,
                             ));
                         } else {
                             ui.add_space(16.0);
                         }
                         ui.label(Self::icon(
-                            if is_collapsed { 0xe2c7 } else { 0xe2c8 },
+                            folder_icon_code,
                             16.0,
-                            folder_accent,
+                            card_accent,
                         ));
                         ui.add_space(4.0);
                         ui.label(
-                            RichText::new(indent_label)
+                            RichText::new(self.t(label_key))
                                 .size(10.5)
-                                .color(Self::muted_text_color()),
+                                .color(card_accent)
+                                .strong(),
                         );
                     });
                     ui.add_space(6.0);
@@ -1789,14 +1886,24 @@ impl SoundFxApp {
                             .truncate(),
                         );
                     }
+                    let desc = if subfolders_count > 0 && direct_count > 0 {
+                        self.t("library.folder_info_mixed")
+                            .replace("{folders}", &subfolders_count.to_string())
+                            .replace("{direct}", &direct_count.to_string())
+                            .replace("{total}", &total_count.to_string())
+                    } else if subfolders_count > 0 {
+                        self.t("library.folder_info_folders_only")
+                            .replace("{folders}", &subfolders_count.to_string())
+                    } else if direct_count > 0 {
+                        self.t("library.folder_info_sounds")
+                            .replace("{count}", &total_count.to_string())
+                    } else {
+                        self.t("library.empty_folder")
+                    };
                     ui.label(
-                        RichText::new(if direct_count == total_count {
-                            format!("{total_count} sounds")
-                        } else {
-                            format!("{direct_count} direct / {total_count} total")
-                        })
-                        .size(11.0)
-                        .color(Self::muted_text_color()),
+                        RichText::new(desc)
+                            .size(11.0)
+                            .color(Self::muted_text_color()),
                     );
                     ui.add_space(8.0);
                     ui.horizontal_wrapped(|ui| {
@@ -1894,6 +2001,62 @@ impl SoundFxApp {
                 *select_folder_id = Some(folder.id);
             }
         }
+    }
+
+    fn draw_folder_type_badge(
+        &self,
+        ui: &mut egui::Ui,
+        subfolders_count: usize,
+        direct_count: usize,
+    ) {
+        let (bg_color, text_color, label_key, icon_code) = if subfolders_count > 0 && direct_count > 0 {
+            (
+                Color32::from_rgba_premultiplied(33, 150, 243, 25),
+                Color32::from_rgb(33, 150, 243),
+                "library.folder_type_both",
+                0xe2c7,
+            )
+        } else if subfolders_count > 0 {
+            (
+                Color32::from_rgba_premultiplied(242, 140, 56, 25),
+                Color32::from_rgb(242, 140, 56),
+                "library.folder_type_folders",
+                0xe2c7,
+            )
+        } else if direct_count > 0 {
+            (
+                Color32::from_rgba_premultiplied(227, 82, 149, 25),
+                Color32::from_rgb(227, 82, 149),
+                "library.folder_type_sounds",
+                0xe061,
+            )
+        } else {
+            (
+                Color32::from_rgba_premultiplied(128, 128, 128, 25),
+                Color32::from_rgb(128, 128, 128),
+                "library.folder_type_empty",
+                0xe2c7,
+            )
+        };
+
+        let label = self.t(label_key);
+
+        Frame::new()
+            .fill(bg_color)
+            .corner_radius(6.0)
+            .inner_margin(Margin::symmetric(6, 2))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing = vec2(3.0, 0.0);
+                    ui.label(Self::icon(icon_code, 10.0, text_color));
+                    ui.label(
+                        RichText::new(label)
+                            .size(9.5)
+                            .color(text_color)
+                            .strong(),
+                    );
+                });
+            });
     }
 
     fn draw_inline_folder_sounds(

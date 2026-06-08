@@ -134,7 +134,14 @@
       "library.delete_confirm_title": "Delete folder?",
       "library.delete_confirm_warning": "This folder contains sounds. Deleting it will move all its sounds to Root. Are you sure you want to delete this folder?",
       "library.delete_confirm_yes": "Yes, Delete",
-      "library.delete_confirm_no": "Cancel"
+      "library.delete_confirm_no": "Cancel",
+      "library.folder_type_both": "Folders & Sounds",
+      "library.folder_type_folders": "Folders Only",
+      "library.folder_type_sounds": "Sounds Only",
+      "library.folder_type_empty": "Empty",
+      "library.folder_info_sounds": "{count} sound(s)",
+      "library.folder_info_mixed": "{folders} folder(s) • {direct} direct / {total} total",
+      "library.folder_info_folders_only": "{folders} folder(s)"
     },
     "vi": {
       "name": "Tiếng Việt",
@@ -270,7 +277,14 @@
       "library.delete_confirm_title": "Xoa thu muc?",
       "library.delete_confirm_warning": "Thu muc nay co chua sound. Xoa thu muc se chuyen toan bo sound ben trong ve Thu muc goc. Ban co chac chan muon xoa thu muc nay?",
       "library.delete_confirm_yes": "Co, xoa",
-      "library.delete_confirm_no": "Huy bo"
+      "library.delete_confirm_no": "Huy bo",
+      "library.folder_type_both": "Thu muc & Sound",
+      "library.folder_type_folders": "Chi co thu muc",
+      "library.folder_type_sounds": "Chi co sound",
+      "library.folder_type_empty": "Trong",
+      "library.folder_info_sounds": "{count} sound",
+      "library.folder_info_mixed": "{folders} thu muc • {direct} truc tiep / {total} tong cong",
+      "library.folder_info_folders_only": "{folders} thu muc"
     }
   }
 }
