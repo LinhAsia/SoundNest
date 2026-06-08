@@ -16,7 +16,7 @@ use crate::storage::{GeminiTtsPromptPreset, SoundEffect, Storage, VideoAsset, fo
 use crate::stream_input::{StreamInputConfig, StreamInputRouter};
 use anyhow::{Context as _, Result};
 #[cfg(windows)]
-use clipboard_win::{Clipboard, Setter, formats::FileList};
+use clipboard_win::{Clipboard, Getter, Setter, formats::FileList};
 use eframe::egui::{
     self, Align, Align2, Button, CentralPanel, Checkbox, Color32, ComboBox, Context, CornerRadius,
     DragValue, FontFamily, FontId, Frame, Margin, Pos2, ProgressBar, Rect, RichText, ScrollArea,
@@ -233,6 +233,64 @@ impl SoundFxApp {
         {
             let _ = file_path;
             anyhow::bail!("Clipboard file copy is only available on Windows");
+        }
+    }
+
+    pub(super) fn paste_clipboard_sounds_to_folder(
+        &mut self,
+        folder_id: Uuid,
+        ctx: &Context,
+    ) -> Result<usize> {
+        #[cfg(windows)]
+        {
+            let _clipboard =
+                Clipboard::new_attempts(10).context("unable to open system clipboard")?;
+            let mut clipboard_paths = Vec::<PathBuf>::new();
+            FileList
+                .read_clipboard(&mut clipboard_paths)
+                .context("unable to read files from clipboard")?;
+
+            let mut imported = Vec::new();
+            let mut ignored = 0usize;
+            for path in clipboard_paths {
+                if !path.exists() || !super::is_supported_audio(&path) {
+                    ignored += 1;
+                    continue;
+                }
+
+                match self.storage.import_sound(&path) {
+                    Ok(mut sound) => {
+                        sound.folder_id = Some(folder_id);
+                        imported.push(sound);
+                    }
+                    Err(error) => self.set_error_status(error),
+                }
+            }
+
+            if imported.is_empty() {
+                if ignored > 0 {
+                    anyhow::bail!("Clipboard has no supported audio files");
+                }
+                anyhow::bail!("Clipboard does not contain any files");
+            }
+
+            imported.reverse();
+            let imported_count = imported.len();
+            for sound in imported {
+                self.selected = Some(sound.id);
+                self.sounds.insert(0, sound);
+            }
+            self.library_audio_tag_filter = None;
+            self.mark_dirty(ctx);
+            self.clear_status();
+            return Ok(imported_count);
+        }
+
+        #[cfg(not(windows))]
+        {
+            let _ = folder_id;
+            let _ = ctx;
+            anyhow::bail!("Clipboard paste is only available on Windows");
         }
     }
 

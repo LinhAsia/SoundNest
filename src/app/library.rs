@@ -1186,6 +1186,8 @@ impl SoundFxApp {
         toggle_folder_id: &mut Option<Uuid>,
         clear_selected_folder: &mut bool,
     ) {
+        let folder_accent = Color32::from_rgb(242, 140, 56);
+        let folder_accent_soft = Color32::from_rgb(255, 202, 145);
         let is_selected = self.library_current_folder == Some(folder.id);
         let is_editing = self.editing_folder_id == Some(folder.id);
         let total_count = self.total_sound_count_for_folder(folder.id);
@@ -1196,15 +1198,15 @@ impl SoundFxApp {
         let indent = 18.0 * depth as f32;
         let fill = if is_selected {
             if Self::dark_theme_enabled() {
-                Color32::from_rgb(58, 29, 50)
+                Color32::from_rgb(63, 39, 24)
             } else {
-                Color32::from_rgb(255, 239, 247)
+                Color32::from_rgb(255, 245, 234)
             }
         } else {
             Self::surface_fill()
         };
         let stroke = if is_selected {
-            Color32::from_rgb(227, 82, 149)
+            folder_accent
         } else {
             Self::border_color()
         };
@@ -1218,16 +1220,23 @@ impl SoundFxApp {
                 let mut delete_btn_response = None;
                 let mut rename_btn_response = None;
                 let mut import_btn_response = None;
+                let mut paste_btn_response = None;
                 ui.horizontal(|ui| {
                     ui.add_space(indent);
+                    if has_children {
+                        ui.label(Self::icon(
+                            if is_collapsed { 0xe5cc } else { 0xe5cf },
+                            18.0,
+                            folder_accent,
+                        ));
+                    } else {
+                        ui.add_space(18.0);
+                    }
+                    ui.add_space(8.0);
                     ui.label(Self::icon(
-                        if has_children {
-                            if is_collapsed { 0xe5cc } else { 0xe5cf }
-                        } else {
-                            0xe2c8
-                        },
+                        if is_collapsed { 0xe2c7 } else { 0xe2c8 },
                         18.0,
-                        Color32::from_rgb(227, 82, 149),
+                        folder_accent,
                     ));
                     ui.add_space(8.0);
                     ui.vertical(|ui| {
@@ -1311,6 +1320,24 @@ impl SoundFxApp {
                                 self.folder_import_select_mode = Some(folder.id);
                             }
                             import_btn_response = Some(import_btn);
+                            ui.add_space(6.0);
+                            let paste_btn = ui.add(
+                                Button::new(RichText::new("Paste").size(11.5))
+                                    .fill(folder_accent)
+                                    .stroke(Stroke::new(1.0, folder_accent_soft))
+                                    .corner_radius(10.0),
+                            );
+                            Self::decorate_button_response(ui, &paste_btn);
+                            if paste_btn.clicked() {
+                                match self.paste_clipboard_sounds_to_folder(folder.id, ui.ctx()) {
+                                    Ok(imported) => {
+                                        self.status =
+                                            Some(format!("Pasted {imported} sound(s) into folder"));
+                                    }
+                                    Err(error) => self.set_error_status(error),
+                                }
+                            }
+                            paste_btn_response = Some(paste_btn);
                         }
                     });
                 });
@@ -1319,6 +1346,7 @@ impl SoundFxApp {
                     delete_btn_response,
                     rename_btn_response,
                     import_btn_response,
+                    paste_btn_response,
                 )
             });
 
@@ -1326,7 +1354,7 @@ impl SoundFxApp {
             let open_rect = Rect::from_min_max(
                 row.response.rect.min,
                 Pos2::new(
-                    (row.response.rect.max.x - if is_selected { 206.0 } else { 84.0 })
+                    (row.response.rect.max.x - if is_selected { 278.0 } else { 84.0 })
                         .max(row.response.rect.min.x),
                     row.response.rect.max.y,
                 ),
@@ -1338,7 +1366,13 @@ impl SoundFxApp {
             let delete_hovered = row.inner.0.as_ref().is_some_and(|value| value.hovered());
             let rename_hovered = row.inner.1.as_ref().is_some_and(|value| value.hovered());
             let import_hovered = row.inner.2.as_ref().is_some_and(|value| value.hovered());
-            if response.clicked() && !delete_hovered && !rename_hovered && !import_hovered {
+            let paste_hovered = row.inner.3.as_ref().is_some_and(|value| value.hovered());
+            if response.clicked()
+                && !delete_hovered
+                && !rename_hovered
+                && !import_hovered
+                && !paste_hovered
+            {
                 if is_selected {
                     *clear_selected_folder = true;
                 } else {
