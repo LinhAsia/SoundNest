@@ -595,7 +595,7 @@ impl SoundFxApp {
 
     pub(super) fn handle_dropped_files(&mut self, ctx: &Context) {
         let is_folder_open = self.app_view == AppView::Library
-            && self.library_tab == LibraryTab::Folders
+            && self.library_tab == LibraryTab::Sounds
             && self.library_current_folder.is_some();
 
         if (self.app_view != AppView::Editor && !is_folder_open) || self.has_modal_panel() {

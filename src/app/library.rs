@@ -1293,7 +1293,11 @@ impl SoundFxApp {
             }
         }
 
-        if is_selected && self.library_tab == LibraryTab::Sounds && !is_collapsed {
+        if is_selected
+            && self.library_tab == LibraryTab::Sounds
+            && self.library_sound_view == LibrarySoundView::Rows
+            && !is_collapsed
+        {
             ui.add_space(8.0);
             self.draw_inline_folder_sounds(ui, folder, 8.0);
         }
@@ -1417,16 +1421,15 @@ impl SoundFxApp {
                         let waveform_preview = Self::library_sound_waveform_preview_from_samples(
                             sound,
                             &waveform_samples,
-                            48,
+                            72,
                         );
-                        Self::draw_wave_strip(
+                        Self::draw_full_width_wave_strip(
                             ui,
                             &waveform_preview,
-                            None,
                             Color32::from_rgb(214, 51, 132),
                             Color32::from_rgb(238, 213, 227),
                             Self::panel_fill(),
-                            34.0,
+                            40.0,
                         );
                     });
 

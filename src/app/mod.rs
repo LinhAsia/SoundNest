@@ -71,8 +71,13 @@ pub(crate) enum AppView {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LibraryTab {
     Sounds,
-    Folders,
     Videos,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LibrarySoundView {
+    Rows,
+    Grid,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -339,6 +344,7 @@ pub struct SoundFxApp {
     pub(super) record_overlay_native_visuals_applied: bool,
     pub(super) record_overlay_pos: Option<Pos2>,
     pub(super) library_grid_columns: usize,
+    pub(super) library_sound_view: LibrarySoundView,
     pub(super) video_assets: Vec<VideoAsset>,
     pub(super) recording_draft: Option<RecordingDraft>,
     pub(super) active_record_video_export: Option<RecordVideoExportState>,
@@ -637,6 +643,7 @@ impl SoundFxApp {
             record_overlay_native_visuals_applied: false,
             record_overlay_pos: None,
             library_grid_columns,
+            library_sound_view: LibrarySoundView::Rows,
             video_assets,
             recording_draft: None,
             active_record_video_export: None,
@@ -5047,9 +5054,9 @@ impl SoundFxApp {
                 );
             } else {
                 let sounds_tab = ui.add_sized(
-                    [84.0, 30.0],
+                    [92.0, 30.0],
                     Self::action_button(
-                        RichText::new(self.t("library.audio")).size(12.5),
+                        RichText::new("Library").size(12.5),
                         self.library_tab == LibraryTab::Sounds,
                         false,
                     ),
@@ -5057,21 +5064,6 @@ impl SoundFxApp {
                 Self::decorate_button_response(ui, &sounds_tab);
                 if sounds_tab.clicked() {
                     self.library_tab = LibraryTab::Sounds;
-                }
-
-                ui.add_space(8.0);
-                let folders_tab = ui.add_sized(
-                    [84.0, 30.0],
-                    Self::action_button(
-                        RichText::new(self.t("library.folders")).size(12.5),
-                        self.library_tab == LibraryTab::Folders,
-                        false,
-                    ),
-                );
-                Self::decorate_button_response(ui, &folders_tab);
-                if folders_tab.clicked() {
-                    self.library_tab = LibraryTab::Folders;
-                    self.library_current_folder = None;
                 }
 
                 ui.add_space(8.0);
@@ -5089,7 +5081,7 @@ impl SoundFxApp {
                 }
             }
 
-            if self.library_tab != LibraryTab::Folders {
+            if self.library_tab == LibraryTab::Sounds || self.library_tab == LibraryTab::Videos {
                 ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                     let favorites_active = if self.library_tab == LibraryTab::Videos {
                         self.library_favorites_only_video
@@ -5135,50 +5127,83 @@ impl SoundFxApp {
                         }
                     }
                     ui.add_space(8.0);
-                    Self::with_slider_visuals(ui, |ui| {
-                        let mut slider_value = (LIBRARY_GRID_MIN_COLUMNS + LIBRARY_GRID_MAX_COLUMNS)
-                            as f32
-                            - self.library_grid_columns as f32;
-                        let (slider_response, slider_changed) = Self::click_slider(
-                            ui,
-                            &mut slider_value,
-                            LIBRARY_GRID_MIN_COLUMNS as f32..=LIBRARY_GRID_MAX_COLUMNS as f32,
-                            1.0,
-                            vec2(132.0, 28.0),
+                    if self.library_tab == LibraryTab::Sounds {
+                        let grid_btn = ui.add_sized(
+                            [58.0, 30.0],
+                            Self::action_button(
+                                RichText::new("Grid").size(11.5),
+                                self.library_sound_view == LibrarySoundView::Grid,
+                                false,
+                            ),
                         );
-                        library_slider_active = slider_response.hovered()
-                            || slider_response.dragged()
-                            || slider_response.is_pointer_button_down_on();
-                        if slider_response.changed() || slider_changed {
-                            let reversed = slider_value.round().clamp(
-                                LIBRARY_GRID_MIN_COLUMNS as f32,
-                                LIBRARY_GRID_MAX_COLUMNS as f32,
-                            ) as usize;
-                            self.library_grid_columns =
-                                (LIBRARY_GRID_MIN_COLUMNS + LIBRARY_GRID_MAX_COLUMNS) - reversed;
-                            self.library_grid_columns = self
-                                .library_grid_columns
-                                .clamp(LIBRARY_GRID_MIN_COLUMNS, LIBRARY_GRID_MAX_COLUMNS);
-                            columns_changed = true;
+                        Self::decorate_button_response(ui, &grid_btn);
+                        if grid_btn.clicked() {
+                            self.library_sound_view = LibrarySoundView::Grid;
+                        }
+                        ui.add_space(6.0);
+                        let rows_btn = ui.add_sized(
+                            [58.0, 30.0],
+                            Self::action_button(
+                                RichText::new("Rows").size(11.5),
+                                self.library_sound_view == LibrarySoundView::Rows,
+                                false,
+                            ),
+                        );
+                        Self::decorate_button_response(ui, &rows_btn);
+                        if rows_btn.clicked() {
+                            self.library_sound_view = LibrarySoundView::Rows;
                         }
                         ui.add_space(8.0);
-                        ui.label(
-                            RichText::new(format!(
-                                "{} {}",
-                                self.library_grid_columns,
-                                self.t("library.columns")
-                            ))
-                            .size(11.5)
-                            .color(Self::muted_text_color()),
-                        );
-                    });
-                    if library_slider_active {
-                        self.pending_sound_drag = None;
+                    }
+                    if self.library_tab == LibraryTab::Sounds
+                        && self.library_sound_view == LibrarySoundView::Grid
+                    {
+                        Self::with_slider_visuals(ui, |ui| {
+                            let mut slider_value =
+                                (LIBRARY_GRID_MIN_COLUMNS + LIBRARY_GRID_MAX_COLUMNS) as f32
+                                    - self.library_grid_columns as f32;
+                            let (slider_response, slider_changed) = Self::click_slider(
+                                ui,
+                                &mut slider_value,
+                                LIBRARY_GRID_MIN_COLUMNS as f32..=LIBRARY_GRID_MAX_COLUMNS as f32,
+                                1.0,
+                                vec2(132.0, 28.0),
+                            );
+                            library_slider_active = slider_response.hovered()
+                                || slider_response.dragged()
+                                || slider_response.is_pointer_button_down_on();
+                            if slider_response.changed() || slider_changed {
+                                let reversed = slider_value.round().clamp(
+                                    LIBRARY_GRID_MIN_COLUMNS as f32,
+                                    LIBRARY_GRID_MAX_COLUMNS as f32,
+                                ) as usize;
+                                self.library_grid_columns = (LIBRARY_GRID_MIN_COLUMNS
+                                    + LIBRARY_GRID_MAX_COLUMNS)
+                                    - reversed;
+                                self.library_grid_columns = self
+                                    .library_grid_columns
+                                    .clamp(LIBRARY_GRID_MIN_COLUMNS, LIBRARY_GRID_MAX_COLUMNS);
+                                columns_changed = true;
+                            }
+                            ui.add_space(8.0);
+                            ui.label(
+                                RichText::new(format!(
+                                    "{} {}",
+                                    self.library_grid_columns,
+                                    self.t("library.columns")
+                                ))
+                                .size(11.5)
+                                .color(Self::muted_text_color()),
+                            );
+                        });
+                        if library_slider_active {
+                            self.pending_sound_drag = None;
+                        }
                     }
                 });
             }
         });
-        if self.library_tab != LibraryTab::Folders {
+        if self.library_tab == LibraryTab::Sounds || self.library_tab == LibraryTab::Videos {
             Frame::new()
                 .fill(Self::surface_fill())
                 .stroke(Stroke::new(1.0, Self::border_color()))
@@ -5222,11 +5247,6 @@ impl SoundFxApp {
                 let viewport_width = ui.clip_rect().width().min(ui.available_width());
                 ui.set_width(viewport_width);
                 ui.set_max_width(viewport_width);
-
-                if self.library_tab == LibraryTab::Folders {
-                    self.draw_folders_list_view(ui);
-                    return;
-                }
 
                 if self.library_tab == LibraryTab::Videos {
                     self.draw_video_library_grid(ui);
@@ -5283,34 +5303,22 @@ impl SoundFxApp {
                         library_slider_active,
                         titlebar_drag_active,
                     );
-                } else if self.library_current_folder.is_none() {
-                    Frame::new()
-                        .fill(Self::surface_fill())
-                        .stroke(Stroke::new(1.0, Self::border_color()))
-                        .corner_radius(20.0)
-                        .inner_margin(Margin::same(18))
-                        .show(ui, |ui| {
-                            ui.vertical_centered(|ui| {
-                                ui.add_space(28.0);
-                                ui.label(Self::icon(0xe2c7, 28.0, Color32::from_rgb(214, 51, 132)));
-                                ui.add_space(10.0);
-                                ui.label(
-                                    RichText::new("Select a folder to browse sounds")
-                                        .size(14.0)
-                                        .color(Self::strong_text_color())
-                                        .strong(),
-                                );
-                                ui.add_space(6.0);
-                                ui.label(
-                                    RichText::new(
-                                        "The library stays lightweight until you open a folder.",
-                                    )
-                                    .size(11.5)
-                                    .color(Self::muted_text_color()),
-                                );
-                                ui.add_space(24.0);
-                            });
-                        });
+                } else if self.library_sound_view == LibrarySoundView::Grid
+                    && self.library_current_folder.is_some()
+                {
+                    let folder_sounds =
+                        self.filtered_library_sounds_for_folder(self.library_current_folder, false);
+                    if !folder_sounds.is_empty() {
+                        let layout_width = ui.clip_rect().width().min(ui.available_width());
+                        self.draw_library_sound_grid_content(
+                            ui,
+                            &folder_sounds,
+                            layout_width,
+                            modal_open,
+                            library_slider_active,
+                            titlebar_drag_active,
+                        );
+                    }
                 }
             });
     }
@@ -8338,6 +8346,55 @@ impl SoundFxApp {
                 ],
                 Stroke::new(2.0, active_color),
             );
+        }
+    }
+
+    fn draw_full_width_wave_strip(
+        ui: &mut Ui,
+        waveform: &[f32],
+        active_color: Color32,
+        idle_color: Color32,
+        background_color: Color32,
+        height: f32,
+    ) {
+        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
+        let painter = ui.painter_at(rect);
+        painter.rect_filled(rect, 14.0, background_color);
+
+        let inner = rect.shrink2(vec2(10.0, 7.0));
+        painter.line_segment(
+            [
+                Pos2::new(inner.left(), inner.center().y),
+                Pos2::new(inner.right(), inner.center().y),
+            ],
+            Stroke::new(1.0, idle_color.linear_multiply(0.2)),
+        );
+
+        if waveform.is_empty() {
+            return;
+        }
+
+        let bar_width = inner.width() / waveform.len().max(1) as f32;
+        for (index, level) in waveform.iter().enumerate() {
+            let amplitude = Self::wave_strip_level(*level).clamp(0.08, 1.0);
+            let center_x = inner.left() + (index as f32 + 0.5) * bar_width;
+            let half = amplitude * inner.height() * 0.42;
+            let bar = Rect::from_min_max(
+                Pos2::new(
+                    center_x - (bar_width * 0.22).max(0.9),
+                    inner.center().y - half,
+                ),
+                Pos2::new(
+                    center_x + (bar_width * 0.22).max(0.9),
+                    inner.center().y + half,
+                ),
+            );
+            let color = if amplitude > 0.32 {
+                active_color
+            } else {
+                idle_color
+            };
+            painter.rect_filled(bar, 2.5, color);
         }
     }
 
