@@ -1242,144 +1242,157 @@ impl SoundFxApp {
             folder_accent.linear_multiply(0.42)
         };
 
-        let row = Frame::new()
-            .fill(fill)
-            .stroke(Stroke::new(1.0, stroke))
-            .corner_radius(16.0)
-            .inner_margin(Margin::symmetric(12, 10))
-            .show(ui, |ui| {
-                let mut delete_btn_response = None;
-                let mut rename_btn_response = None;
-                let mut import_btn_response = None;
-                let mut paste_btn_response = None;
-                ui.horizontal(|ui| {
-                    ui.add_space(indent);
-                    if has_children {
-                        ui.label(Self::icon(
-                            if is_collapsed { 0xe5cc } else { 0xe5cf },
-                            18.0,
-                            folder_accent,
-                        ));
-                    } else {
-                        ui.add_space(18.0);
-                    }
-                    ui.add_space(8.0);
-                    ui.label(Self::icon(
-                        if is_collapsed { 0xe2c7 } else { 0xe2c8 },
-                        18.0,
-                        folder_accent,
-                    ));
-                    ui.add_space(8.0);
-                    ui.vertical(|ui| {
-                        if is_editing {
-                            let response = ui.add_sized(
-                                [ui.available_width().max(120.0), 20.0],
-                                egui::TextEdit::singleline(&mut self.folder_rename_name),
-                            );
-                            if response.lost_focus()
-                                || (response.has_focus()
-                                    && ui.input(|input| input.key_pressed(egui::Key::Enter)))
-                            {
-                                let new_name = self.folder_rename_name.trim().to_owned();
-                                if !new_name.is_empty() {
-                                    *rename_commit = Some((folder.id, new_name));
-                                }
-                                *finish_editing = true;
-                            }
-                        } else {
-                            ui.add(
-                                egui::Label::new(
-                                    RichText::new(&folder.name)
-                                        .size(13.2)
-                                        .color(Self::strong_text_color())
-                                        .strong(),
-                                )
-                                .truncate(),
-                            );
-                        }
-                        ui.label(
-                            RichText::new(if direct_count == total_count {
-                                format!("{total_count} sounds")
+        let row = ui
+            .horizontal(|ui| {
+                ui.add_space(indent);
+                Frame::new()
+                    .fill(fill)
+                    .stroke(Stroke::new(1.0, stroke))
+                    .corner_radius(16.0)
+                    .inner_margin(Margin::symmetric(12, 10))
+                    .show(ui, |ui| {
+                        let mut delete_btn_response = None;
+                        let mut rename_btn_response = None;
+                        let mut import_btn_response = None;
+                        let mut paste_btn_response = None;
+                        ui.horizontal(|ui| {
+                            let icon_gap = 18.0;
+                            if has_children {
+                                ui.label(Self::icon(
+                                    if is_collapsed { 0xe5cc } else { 0xe5cf },
+                                    18.0,
+                                    folder_accent,
+                                ));
                             } else {
-                                format!("{direct_count} direct / {total_count} total")
-                            })
-                            .size(11.0)
-                            .color(Self::muted_text_color()),
-                        );
-                    });
-                    ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                        let delete_btn = ui.add(
-                            Button::new(Self::icon(0xe872, 12.0, Self::muted_text_color()))
-                                .fill(Color32::TRANSPARENT)
-                                .frame(false),
-                        );
-                        Self::decorate_button_response(ui, &delete_btn);
-                        if delete_btn.clicked() {
-                            *delete_folder_id = Some(folder.id);
-                        }
-                        delete_btn_response = Some(delete_btn);
-                        if !is_editing {
-                            let rename_btn = ui.add(
-                                Button::new(Self::icon(0xe254, 12.0, Self::muted_text_color()))
-                                    .fill(Color32::TRANSPARENT)
-                                    .frame(false),
-                            );
-                            Self::decorate_button_response(ui, &rename_btn);
-                            if rename_btn.clicked() {
-                                *rename_folder_id = Some(folder.id);
+                                ui.add_space(icon_gap);
                             }
-                            rename_btn_response = Some(rename_btn);
-                        }
-                        if show_folder_actions
-                            && self.library_tab == LibraryTab::Sounds
-                            && self.folder_import_select_mode.is_none()
-                        {
-                            ui.add_space(6.0);
-                            let import_btn = ui.add(
-                                Button::new(
-                                    RichText::new(format!(
-                                        "+ {}",
-                                        self.t("library.import_sound_to_folder")
-                                    ))
-                                    .size(11.5),
-                                )
-                                .fill(Color32::from_rgb(227, 82, 149))
-                                .corner_radius(10.0),
-                            );
-                            Self::decorate_button_response(ui, &import_btn);
-                            if import_btn.clicked() {
-                                self.folder_import_select_mode = Some(folder.id);
-                            }
-                            import_btn_response = Some(import_btn);
-                            ui.add_space(6.0);
-                            let paste_btn = ui.add(
-                                Button::new(RichText::new("Paste").size(11.5))
-                                    .fill(folder_accent)
-                                    .stroke(Stroke::new(1.0, folder_accent_soft))
-                                    .corner_radius(10.0),
-                            );
-                            Self::decorate_button_response(ui, &paste_btn);
-                            if paste_btn.clicked() {
-                                match self.paste_clipboard_sounds_to_folder(folder.id, ui.ctx()) {
-                                    Ok(imported) => {
-                                        self.status =
-                                            Some(format!("Pasted {imported} sound(s) into folder"));
+                            ui.add_space(8.0);
+                            ui.label(Self::icon(
+                                if is_collapsed { 0xe2c7 } else { 0xe2c8 },
+                                18.0,
+                                folder_accent,
+                            ));
+                            ui.add_space(8.0);
+                            ui.vertical(|ui| {
+                                if is_editing {
+                                    let response = ui.add_sized(
+                                        [ui.available_width().max(120.0), 20.0],
+                                        egui::TextEdit::singleline(&mut self.folder_rename_name),
+                                    );
+                                    if response.lost_focus()
+                                        || (response.has_focus()
+                                            && ui
+                                                .input(|input| input.key_pressed(egui::Key::Enter)))
+                                    {
+                                        let new_name = self.folder_rename_name.trim().to_owned();
+                                        if !new_name.is_empty() {
+                                            *rename_commit = Some((folder.id, new_name));
+                                        }
+                                        *finish_editing = true;
                                     }
-                                    Err(error) => self.set_error_status(error),
+                                } else {
+                                    ui.add(
+                                        egui::Label::new(
+                                            RichText::new(&folder.name)
+                                                .size(13.2)
+                                                .color(Self::strong_text_color())
+                                                .strong(),
+                                        )
+                                        .truncate(),
+                                    );
                                 }
-                            }
-                            paste_btn_response = Some(paste_btn);
-                        }
-                    });
-                });
+                                ui.label(
+                                    RichText::new(if direct_count == total_count {
+                                        format!("{total_count} sounds")
+                                    } else {
+                                        format!("{direct_count} direct / {total_count} total")
+                                    })
+                                    .size(11.0)
+                                    .color(Self::muted_text_color()),
+                                );
+                            });
+                            ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                                let delete_btn = ui.add(
+                                    Button::new(Self::icon(0xe872, 12.0, Self::muted_text_color()))
+                                        .fill(Color32::TRANSPARENT)
+                                        .frame(false),
+                                );
+                                Self::decorate_button_response(ui, &delete_btn);
+                                if delete_btn.clicked() {
+                                    *delete_folder_id = Some(folder.id);
+                                }
+                                delete_btn_response = Some(delete_btn);
+                                if !is_editing {
+                                    let rename_btn = ui.add(
+                                        Button::new(Self::icon(
+                                            0xe254,
+                                            12.0,
+                                            Self::muted_text_color(),
+                                        ))
+                                        .fill(Color32::TRANSPARENT)
+                                        .frame(false),
+                                    );
+                                    Self::decorate_button_response(ui, &rename_btn);
+                                    if rename_btn.clicked() {
+                                        *rename_folder_id = Some(folder.id);
+                                    }
+                                    rename_btn_response = Some(rename_btn);
+                                }
+                                if show_folder_actions
+                                    && self.library_tab == LibraryTab::Sounds
+                                    && self.folder_import_select_mode.is_none()
+                                {
+                                    ui.add_space(6.0);
+                                    let import_btn = ui.add(
+                                        Button::new(
+                                            RichText::new(format!(
+                                                "+ {}",
+                                                self.t("library.import_sound_to_folder")
+                                            ))
+                                            .size(11.5),
+                                        )
+                                        .fill(Color32::from_rgb(227, 82, 149))
+                                        .corner_radius(10.0),
+                                    );
+                                    Self::decorate_button_response(ui, &import_btn);
+                                    if import_btn.clicked() {
+                                        self.folder_import_select_mode = Some(folder.id);
+                                    }
+                                    import_btn_response = Some(import_btn);
+                                    ui.add_space(6.0);
+                                    let paste_btn = ui.add(
+                                        Button::new(RichText::new("Paste").size(11.5))
+                                            .fill(folder_accent)
+                                            .stroke(Stroke::new(1.0, folder_accent_soft))
+                                            .corner_radius(10.0),
+                                    );
+                                    Self::decorate_button_response(ui, &paste_btn);
+                                    if paste_btn.clicked() {
+                                        match self
+                                            .paste_clipboard_sounds_to_folder(folder.id, ui.ctx())
+                                        {
+                                            Ok(imported) => {
+                                                self.status = Some(format!(
+                                                    "Pasted {imported} sound(s) into folder"
+                                                ));
+                                            }
+                                            Err(error) => self.set_error_status(error),
+                                        }
+                                    }
+                                    paste_btn_response = Some(paste_btn);
+                                }
+                            });
+                        });
 
-                (
-                    delete_btn_response,
-                    rename_btn_response,
-                    import_btn_response,
-                    paste_btn_response,
-                )
-            });
+                        (
+                            delete_btn_response,
+                            rename_btn_response,
+                            import_btn_response,
+                            paste_btn_response,
+                        )
+                    })
+            })
+            .inner;
 
         if !is_editing {
             let open_rect = Rect::from_min_max(
