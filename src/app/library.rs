@@ -1267,7 +1267,14 @@ impl SoundFxApp {
             });
 
         if !is_editing {
-            let response = ui.interact(row.response.rect, ui.id().with(folder.id), Sense::click());
+            let open_rect = Rect::from_min_max(
+                row.response.rect.min,
+                Pos2::new(
+                    (row.response.rect.max.x - 84.0).max(row.response.rect.min.x),
+                    row.response.rect.max.y,
+                ),
+            );
+            let response = ui.interact(open_rect, ui.id().with(folder.id), Sense::click());
             if response.hovered() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             }
@@ -1485,8 +1492,15 @@ impl SoundFxApp {
                 });
             });
 
+        let open_rect = Rect::from_min_max(
+            row.response.rect.min,
+            Pos2::new(
+                (row.response.rect.max.x - 176.0).max(row.response.rect.min.x),
+                row.response.rect.max.y,
+            ),
+        );
         let response = ui.interact(
-            row.response.rect,
+            open_rect,
             ui.id().with(("folder-sound-row", sound.id)),
             Sense::click(),
         );
