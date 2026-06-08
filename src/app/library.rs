@@ -1616,7 +1616,8 @@ impl SoundFxApp {
                                     && self.folder_import_select_mode.is_none()
                                 {
                                     ui.add_space(6.0);
-                                    let import_btn = ui.add(
+                                    let import_btn = ui.add_sized(
+                                        [102.0, 30.0],
                                         Button::new(
                                             RichText::new(format!(
                                                 "+ {}",
@@ -1633,7 +1634,8 @@ impl SoundFxApp {
                                     }
                                     import_btn_response = Some(import_btn);
                                     ui.add_space(6.0);
-                                    let paste_btn = ui.add(
+                                    let paste_btn = ui.add_sized(
+                                        [58.0, 30.0],
                                         Button::new(RichText::new("Paste").size(11.5))
                                             .fill(folder_accent)
                                             .stroke(Stroke::new(1.0, folder_accent_soft))
@@ -1908,7 +1910,8 @@ impl SoundFxApp {
                             && self.library_tab == LibraryTab::Sounds
                             && self.folder_import_select_mode.is_none()
                         {
-                            let paste_btn = ui.add(
+                            let paste_btn = ui.add_sized(
+                                [58.0, 30.0],
                                 Button::new(RichText::new("Paste").size(10.8))
                                     .fill(folder_accent)
                                     .corner_radius(10.0),
@@ -1925,7 +1928,8 @@ impl SoundFxApp {
                             }
                             paste_btn_response = Some(paste_btn);
 
-                            let import_btn = ui.add(
+                            let import_btn = ui.add_sized(
+                                [102.0, 30.0],
                                 Button::new(
                                     RichText::new(format!(
                                         "+ {}",
