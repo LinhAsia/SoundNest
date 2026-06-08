@@ -4187,7 +4187,7 @@ impl SoundFxApp {
         let refresh_inputs = false;
         let mut close_request = false;
         let (_panel_bounds, panel_size, panel_pos) =
-            self.centered_modal_placement(ctx, vec2(296.0, 250.0), vec2(248.0, 220.0), 0.0);
+            self.centered_modal_placement(ctx, vec2(332.0, 312.0), vec2(292.0, 268.0), 0.0);
         egui::Window::new("")
             .id(egui::Id::new("pitch-monitor-panel"))
             .order(egui::Order::Foreground)
@@ -4208,17 +4208,24 @@ impl SoundFxApp {
                         color: Color32::from_rgba_premultiplied(78, 40, 63, 24),
                     })
                     .corner_radius(28.0)
-                    .inner_margin(Margin::same(18)),
+                    .inner_margin(Margin::same(20)),
             )
             .show(ctx, |ui| {
-                ui.set_width(260.0);
+                ui.set_width(292.0);
                 ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new("SPN")
-                            .size(13.0)
-                            .color(Color32::from_rgb(58, 48, 58))
-                            .strong(),
-                    );
+                    ui.vertical(|ui| {
+                        ui.label(
+                            RichText::new("Pitch Detect")
+                                .size(15.0)
+                                .color(Self::strong_text_color())
+                                .strong(),
+                        );
+                        ui.label(
+                            RichText::new("SPN")
+                                .size(11.0)
+                                .color(Self::muted_text_color()),
+                        );
+                    });
                     ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                         if Self::icon_titlebar(ui, [34.0, 28.0], 0xe5cd, false, true).clicked() {
                             close_request = true;
@@ -4238,242 +4245,273 @@ impl SoundFxApp {
                     });
                 });
 
-                ui.add_space(8.0);
-                ui.add_enabled_ui(!snapshot.running, |ui| {
-                    ui.horizontal(|ui| {
-                        let keyboard_response = Self::icon_action(
-                            ui,
-                            [42.0, 34.0],
-                            0xe312,
-                            self.capture_pitch_hotkey,
-                            self.capture_pitch_hotkey,
-                        );
-                        if keyboard_response.clicked() {
-                            if self.capture_pitch_hotkey {
-                                self.capture_pitch_hotkey = false;
-                                self.preview_pitch_hotkey = None;
-                            } else {
-                                self.capture_pitch_hotkey = true;
-                                self.capture_record_hotkey = false;
-                                self.preview_pitch_hotkey = None;
-                            }
-                        }
-
-                        if self.capture_pitch_hotkey {
-                            if let Some(preview_key) = self.preview_pitch_hotkey {
-                                ui.add_space(6.0);
-                                Frame::new()
-                                    .fill(Color32::from_rgba_premultiplied(80, 70, 30, 255))
-                                    .stroke(Stroke::new(1.0, Color32::from_rgb(255, 220, 80)))
-                                    .corner_radius(12.0)
-                                    .inner_margin(Margin::symmetric(10, 5))
-                                    .show(ui, |ui| {
-                                        ui.label(
-                                            RichText::new(format!(
-                                                "Pressing: {}",
-                                                preview_key.to_string()
-                                            ))
-                                            .size(11.5)
-                                            .color(Color32::from_rgb(255, 232, 96))
-                                            .strong(),
-                                        );
-                                    });
-                            } else {
-                                ui.add_space(6.0);
-                                ui.label(
-                                    RichText::new("Press key...")
-                                        .size(12.5)
-                                        .color(Self::muted_text_color()),
-                                );
-                            }
-                        }
-
-                        let mut key_to_remove = None;
-                        for &key in &self.pitch_hotkeys {
-                            ui.add_space(4.0);
-                            let key_text = key.to_string();
-                            let chip_btn = Button::new(
-                                RichText::new(key_text)
-                                    .size(11.5)
-                                    .color(Self::strong_text_color())
-                                    .strong(),
-                            )
-                            .fill(Self::surface_fill())
-                            .stroke(Stroke::new(1.0, Self::subtle_border_color()))
-                            .corner_radius(12.0);
-
-                            let response = ui.add(chip_btn);
-                            Self::decorate_button_response(ui, &response);
-                            if response.clicked() {
-                                key_to_remove = Some(key);
-                            }
-                            if response.hovered() {
-                                response.on_hover_text("Click to remove this hotkey");
-                            }
-                        }
-
-                        if let Some(key) = key_to_remove {
-                            self.pitch_hotkeys.retain(|&k| k != key);
-                            let names: Vec<String> =
-                                self.pitch_hotkeys.iter().map(|&k| k.to_string()).collect();
-                            let _ = self.storage.save_pitch_hotkeys(&names);
-                            if let Err(error) = self
-                                .record_hotkey_manager
-                                .set_secondary_hotkeys(&self.pitch_hotkeys)
-                            {
-                                self.set_error_status(error);
-                            }
-                        }
-                    });
-                });
-
-                ui.add_space(8.0);
-                ui.add_enabled_ui(!snapshot.running, |ui| {
-                    ui.horizontal(|ui| {
-                        if Self::icon_action(
-                            ui,
-                            [48.0, 34.0],
-                            0xe30a,
-                            self.pitch_input_source == PitchInputSource::System,
-                            self.pitch_input_source == PitchInputSource::System,
-                        )
-                        .clicked()
-                        {
-                            self.pitch_input_source = PitchInputSource::System;
-                        }
-
-                        if Self::icon_action(
-                            ui,
-                            [48.0, 34.0],
-                            0xe029,
-                            self.pitch_input_source == PitchInputSource::Microphone,
-                            self.pitch_input_source == PitchInputSource::Microphone,
-                        )
-                        .clicked()
-                        {
-                            self.pitch_input_source = PitchInputSource::Microphone;
-                        }
-                    });
-                });
-
-                ui.add_space(8.0);
+                ui.add_space(14.0);
                 ui.add_enabled_ui(!snapshot.running, |ui| {
                     Frame::new()
                         .fill(Self::surface_fill())
                         .stroke(Stroke::new(1.0, Self::border_color()))
                         .corner_radius(18.0)
-                        .inner_margin(Margin::symmetric(12, 8))
-                        .show(ui, |ui| {
-                            ui.set_width(ui.available_width());
-                            if self.pitch_input_source == PitchInputSource::Microphone {
-                                Self::with_dark_combo_visuals(ui, |ui| {
-                                    ComboBox::from_id_salt("pitch-input-device")
-                                        .width(ui.available_width() - 4.0)
-                                        .selected_text(
-                                            RichText::new(
-                                                self.selected_pitch_input_device
-                                                    .as_deref()
-                                                    .map(|name| {
-                                                        Self::truncate_middle_ascii(name, 28)
-                                                    })
-                                                    .unwrap_or_else(|| "No mic".to_owned()),
-                                            )
-                                            .color(Self::strong_text_color()),
-                                        )
-                                        .show_ui(ui, |ui| {
-                                            for name in &self.pitch_capture_devices {
-                                                ui.selectable_value(
-                                                    &mut self.selected_pitch_input_device,
-                                                    Some(name.clone()),
-                                                    Self::truncate_middle_ascii(name, 38),
-                                                );
-                                            }
-                                        });
-                                });
-                            } else {
-                                ui.add_sized(
-                                    [ui.available_width(), 20.0],
-                                    egui::Label::new(
-                                        RichText::new("System output")
-                                            .size(13.0)
-                                            .color(Self::muted_text_color()),
-                                    ),
-                                );
-                            }
-                        });
-                });
-
-                ui.add_space(8.0);
-                ui.add_enabled_ui(!snapshot.running, |ui| {
-                    Self::with_slider_visuals(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(Self::icon(0xe8b5, 16.0, Self::muted_text_color()));
-                            let (speed_response, _) = Self::click_slider(
-                                ui,
-                                &mut self.pitch_update_hz,
-                                1.0..=12.0,
-                                0.5,
-                                vec2(164.0, 24.0),
-                            );
-                            ui.label(
-                                RichText::new(format!("{:.1}/s", self.pitch_update_hz))
-                                    .size(13.0)
-                                    .color(Self::strong_text_color()),
-                            );
-                            if speed_response.changed() {
-                                let _ = self.storage.save_pitch_update_hz(self.pitch_update_hz);
-                            }
-                        });
-                    });
-                });
-
-                ui.add_space(8.0);
-                ui.add_enabled_ui(!snapshot.running, |ui| {
-                    Frame::new()
-                        .fill(Color32::from_rgb(255, 248, 252))
-                        .stroke(Stroke::new(1.0, Color32::from_rgb(236, 224, 232)))
-                        .corner_radius(18.0)
                         .inner_margin(Margin::symmetric(12, 10))
                         .show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                let animation_label = self.t("settings.animation");
-                                let sharp_label = self.t("pitch.sharp");
-                                let animation_changed = ui
-                                    .checkbox(
-                                        &mut self.pitch_overlay_animation,
-                                        RichText::new(animation_label)
-                                            .size(13.0)
-                                            .color(Color32::from_rgb(58, 48, 58)),
-                                    )
-                                    .changed();
-                                ui.add_space(10.0);
-                                let sharp_changed = ui
-                                    .checkbox(
-                                        &mut self.pitch_show_sharps,
-                                        RichText::new(sharp_label)
-                                            .size(13.0)
-                                            .color(Color32::from_rgb(58, 48, 58)),
-                                    )
-                                    .changed();
-                                if animation_changed {
-                                    let _ = self
-                                        .storage
-                                        .save_overlay_animation(self.pitch_overlay_animation);
-                                    self.center_pitch_overlay_next_frame = snapshot.running;
-                                    self.pitch_overlay_native_visuals_applied = false;
-                                    ctx.request_repaint();
+                            ui.label(
+                                RichText::new("Hotkey")
+                                    .size(11.5)
+                                    .color(Self::muted_text_color()),
+                            );
+                            ui.add_space(8.0);
+                            ui.horizontal_wrapped(|ui| {
+                                ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
+                                let keyboard_response = Self::icon_action(
+                                    ui,
+                                    [42.0, 34.0],
+                                    0xe312,
+                                    self.capture_pitch_hotkey,
+                                    self.capture_pitch_hotkey,
+                                );
+                                if keyboard_response.clicked() {
+                                    if self.capture_pitch_hotkey {
+                                        self.capture_pitch_hotkey = false;
+                                        self.preview_pitch_hotkey = None;
+                                    } else {
+                                        self.capture_pitch_hotkey = true;
+                                        self.capture_record_hotkey = false;
+                                        self.preview_pitch_hotkey = None;
+                                    }
                                 }
-                                if sharp_changed {
-                                    let _ =
-                                        self.storage.save_pitch_show_sharps(self.pitch_show_sharps);
-                                    ctx.request_repaint();
+
+                                if self.capture_pitch_hotkey {
+                                    let capture_text =
+                                        if let Some(preview_key) = self.preview_pitch_hotkey {
+                                            format!("Pressing: {}", preview_key.to_string())
+                                        } else {
+                                            "Press key...".to_owned()
+                                        };
+                                    Frame::new()
+                                        .fill(Color32::from_rgba_premultiplied(80, 70, 30, 255))
+                                        .stroke(Stroke::new(1.0, Color32::from_rgb(255, 220, 80)))
+                                        .corner_radius(12.0)
+                                        .inner_margin(Margin::symmetric(10, 5))
+                                        .show(ui, |ui| {
+                                            ui.label(
+                                                RichText::new(capture_text)
+                                                    .size(11.5)
+                                                    .color(Color32::from_rgb(255, 232, 96))
+                                                    .strong(),
+                                            );
+                                        });
+                                }
+
+                                let mut key_to_remove = None;
+                                for &key in &self.pitch_hotkeys {
+                                    let chip_btn = Button::new(
+                                        RichText::new(key.to_string())
+                                            .size(11.5)
+                                            .color(Self::strong_text_color())
+                                            .strong(),
+                                    )
+                                    .fill(Self::surface_fill())
+                                    .stroke(Stroke::new(1.0, Self::subtle_border_color()))
+                                    .corner_radius(12.0);
+
+                                    let response = ui.add(chip_btn);
+                                    Self::decorate_button_response(ui, &response);
+                                    if response.clicked() {
+                                        key_to_remove = Some(key);
+                                    }
+                                    if response.hovered() {
+                                        response.on_hover_text("Click to remove this hotkey");
+                                    }
+                                }
+
+                                if let Some(key) = key_to_remove {
+                                    self.pitch_hotkeys.retain(|&k| k != key);
+                                    let names: Vec<String> =
+                                        self.pitch_hotkeys.iter().map(|&k| k.to_string()).collect();
+                                    let _ = self.storage.save_pitch_hotkeys(&names);
+                                    if let Err(error) = self
+                                        .record_hotkey_manager
+                                        .set_secondary_hotkeys(&self.pitch_hotkeys)
+                                    {
+                                        self.set_error_status(error);
+                                    }
                                 }
                             });
                         });
                 });
 
+                ui.add_space(10.0);
+                ui.add_enabled_ui(!snapshot.running, |ui| {
+                    Frame::new()
+                        .fill(Self::surface_fill())
+                        .stroke(Stroke::new(1.0, Self::border_color()))
+                        .corner_radius(18.0)
+                        .inner_margin(Margin::symmetric(12, 10))
+                        .show(ui, |ui| {
+                            ui.label(
+                                RichText::new("Input")
+                                    .size(11.5)
+                                    .color(Self::muted_text_color()),
+                            );
+                            ui.add_space(8.0);
+                            ui.horizontal(|ui| {
+                                if Self::icon_action(
+                                    ui,
+                                    [48.0, 34.0],
+                                    0xe30a,
+                                    self.pitch_input_source == PitchInputSource::System,
+                                    self.pitch_input_source == PitchInputSource::System,
+                                )
+                                .clicked()
+                                {
+                                    self.pitch_input_source = PitchInputSource::System;
+                                }
+
+                                if Self::icon_action(
+                                    ui,
+                                    [48.0, 34.0],
+                                    0xe029,
+                                    self.pitch_input_source == PitchInputSource::Microphone,
+                                    self.pitch_input_source == PitchInputSource::Microphone,
+                                )
+                                .clicked()
+                                {
+                                    self.pitch_input_source = PitchInputSource::Microphone;
+                                }
+                            });
+
+                            ui.add_space(8.0);
+                            Frame::new()
+                                .fill(Self::input_fill())
+                                .stroke(Stroke::new(1.0, Self::border_color()))
+                                .corner_radius(16.0)
+                                .inner_margin(Margin::symmetric(12, 8))
+                                .show(ui, |ui| {
+                                    ui.set_width(ui.available_width());
+                                    if self.pitch_input_source == PitchInputSource::Microphone {
+                                        Self::with_dark_combo_visuals(ui, |ui| {
+                                            ComboBox::from_id_salt("pitch-input-device")
+                                                .width(ui.available_width() - 4.0)
+                                                .selected_text(
+                                                    RichText::new(
+                                                        self.selected_pitch_input_device
+                                                            .as_deref()
+                                                            .map(|name| {
+                                                                Self::truncate_middle_ascii(
+                                                                    name, 28,
+                                                                )
+                                                            })
+                                                            .unwrap_or_else(|| "No mic".to_owned()),
+                                                    )
+                                                    .color(Self::strong_text_color()),
+                                                )
+                                                .show_ui(ui, |ui| {
+                                                    for name in &self.pitch_capture_devices {
+                                                        ui.selectable_value(
+                                                            &mut self.selected_pitch_input_device,
+                                                            Some(name.clone()),
+                                                            Self::truncate_middle_ascii(name, 38),
+                                                        );
+                                                    }
+                                                });
+                                        });
+                                    } else {
+                                        ui.add_sized(
+                                            [ui.available_width(), 20.0],
+                                            egui::Label::new(
+                                                RichText::new("System output")
+                                                    .size(13.0)
+                                                    .color(Self::muted_text_color()),
+                                            ),
+                                        );
+                                    }
+                                });
+                        });
+                });
+
+                ui.add_space(10.0);
+                ui.add_enabled_ui(!snapshot.running, |ui| {
+                    Frame::new()
+                        .fill(Self::surface_fill())
+                        .stroke(Stroke::new(1.0, Self::border_color()))
+                        .corner_radius(18.0)
+                        .inner_margin(Margin::symmetric(12, 10))
+                        .show(ui, |ui| {
+                            ui.label(
+                                RichText::new("Display")
+                                    .size(11.5)
+                                    .color(Self::muted_text_color()),
+                            );
+                            ui.add_space(8.0);
+                            Self::with_slider_visuals(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label(Self::icon(0xe8b5, 16.0, Self::muted_text_color()));
+                                    let (speed_response, _) = Self::click_slider(
+                                        ui,
+                                        &mut self.pitch_update_hz,
+                                        1.0..=12.0,
+                                        0.5,
+                                        vec2(164.0, 24.0),
+                                    );
+                                    ui.label(
+                                        RichText::new(format!("{:.1}/s", self.pitch_update_hz))
+                                            .size(13.0)
+                                            .color(Self::strong_text_color()),
+                                    );
+                                    if speed_response.changed() {
+                                        let _ =
+                                            self.storage.save_pitch_update_hz(self.pitch_update_hz);
+                                    }
+                                });
+                            });
+
+                            ui.add_space(10.0);
+                            Frame::new()
+                                .fill(Color32::from_rgb(255, 248, 252))
+                                .stroke(Stroke::new(1.0, Color32::from_rgb(236, 224, 232)))
+                                .corner_radius(16.0)
+                                .inner_margin(Margin::symmetric(12, 10))
+                                .show(ui, |ui| {
+                                    ui.horizontal_wrapped(|ui| {
+                                        ui.spacing_mut().item_spacing = vec2(12.0, 8.0);
+                                        let animation_label = self.t("settings.animation");
+                                        let sharp_label = self.t("pitch.sharp");
+                                        let animation_changed = ui
+                                            .checkbox(
+                                                &mut self.pitch_overlay_animation,
+                                                RichText::new(animation_label)
+                                                    .size(13.0)
+                                                    .color(Color32::from_rgb(58, 48, 58)),
+                                            )
+                                            .changed();
+                                        let sharp_changed = ui
+                                            .checkbox(
+                                                &mut self.pitch_show_sharps,
+                                                RichText::new(sharp_label)
+                                                    .size(13.0)
+                                                    .color(Color32::from_rgb(58, 48, 58)),
+                                            )
+                                            .changed();
+                                        if animation_changed {
+                                            let _ = self.storage.save_overlay_animation(
+                                                self.pitch_overlay_animation,
+                                            );
+                                            self.center_pitch_overlay_next_frame = snapshot.running;
+                                            self.pitch_overlay_native_visuals_applied = false;
+                                            ctx.request_repaint();
+                                        }
+                                        if sharp_changed {
+                                            let _ = self
+                                                .storage
+                                                .save_pitch_show_sharps(self.pitch_show_sharps);
+                                            ctx.request_repaint();
+                                        }
+                                    });
+                                });
+                        });
+                });
+
                 if let Some(error) = snapshot.error.as_deref() {
-                    ui.add_space(6.0);
+                    ui.add_space(10.0);
                     ui.add_sized(
                         [ui.available_width(), 16.0],
                         egui::Label::new(
