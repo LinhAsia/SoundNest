@@ -98,6 +98,28 @@ impl LibrarySoundView {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LibraryFolderView {
+    Rows,
+    Grid,
+}
+
+impl LibraryFolderView {
+    fn from_preference(value: Option<&str>) -> Self {
+        match value.map(|value| value.trim().to_ascii_lowercase()) {
+            Some(value) if value == "grid" => Self::Grid,
+            _ => Self::Rows,
+        }
+    }
+
+    fn preference_value(self) -> &'static str {
+        match self {
+            Self::Rows => "rows",
+            Self::Grid => "grid",
+        }
+    }
+}
+
 impl SoundFxApp {
     fn library_row_wave_height(&self) -> f32 {
         match self
@@ -392,6 +414,7 @@ pub struct SoundFxApp {
     pub(super) library_grid_columns: usize,
     pub(super) library_row_thickness: usize,
     pub(super) library_sound_view: LibrarySoundView,
+    pub(super) library_folder_view: LibraryFolderView,
     pub(super) video_assets: Vec<VideoAsset>,
     pub(super) recording_draft: Option<RecordingDraft>,
     pub(super) active_record_video_export: Option<RecordVideoExportState>,
@@ -622,6 +645,9 @@ impl SoundFxApp {
         let library_sound_view = LibrarySoundView::from_preference(
             storage.load_library_sound_view().ok().flatten().as_deref(),
         );
+        let library_folder_view = LibraryFolderView::from_preference(
+            storage.load_library_folder_view().ok().flatten().as_deref(),
+        );
         let mut localization = Localization::load();
         if let Ok(Some(language_code)) = storage.load_language_code() {
             localization.set_current_code(&language_code);
@@ -701,6 +727,7 @@ impl SoundFxApp {
             library_grid_columns,
             library_row_thickness,
             library_sound_view,
+            library_folder_view,
             video_assets,
             recording_draft: None,
             active_record_video_export: None,
@@ -5138,6 +5165,35 @@ impl SoundFxApp {
                 if videos_tab.clicked() {
                     self.library_tab = LibraryTab::Videos;
                 }
+                ui.add_space(12.0);
+                Frame::new()
+                    .fill(Self::surface_fill())
+                    .stroke(Stroke::new(1.0, Self::border_color()))
+                    .corner_radius(18.0)
+                    .inner_margin(Margin::symmetric(12, 8))
+                    .show(ui, |ui| {
+                        ui.set_min_width(300.0);
+                        ui.horizontal(|ui| {
+                            if self.library_tab == LibraryTab::Sounds {
+                                self.draw_library_tag_toggle(ui);
+                                ui.add_space(8.0);
+                            }
+                            ui.label(Self::icon(0xe8b6, 16.0, Self::muted_text_color()));
+                            let search_hint = self.t("library.search");
+                            let query = if self.library_tab == LibraryTab::Videos {
+                                &mut self.library_video_query
+                            } else {
+                                &mut self.library_audio_query
+                            };
+                            ui.add_sized(
+                                [ui.available_width(), 24.0],
+                                TextEdit::singleline(query)
+                                    .frame(false)
+                                    .hint_text(search_hint)
+                                    .desired_width(f32::INFINITY),
+                            );
+                        });
+                    });
             }
 
             if self.library_tab == LibraryTab::Sounds || self.library_tab == LibraryTab::Videos {
@@ -5308,34 +5364,15 @@ impl SoundFxApp {
                 });
             }
         });
-        if self.library_tab == LibraryTab::Sounds || self.library_tab == LibraryTab::Videos {
+        if self.library_tab == LibraryTab::Sounds && self.library_audio_tags_expanded {
+            ui.add_space(10.0);
             Frame::new()
                 .fill(Self::surface_fill())
                 .stroke(Stroke::new(1.0, Self::border_color()))
                 .corner_radius(18.0)
-                .inner_margin(Margin::symmetric(12, 8))
+                .inner_margin(Margin::symmetric(12, 10))
                 .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        if self.library_tab == LibraryTab::Sounds {
-                            self.draw_library_tag_filter_row(ui);
-                            ui.add_space(12.0);
-                        }
-                        ui.add_space(4.0);
-                        ui.label(Self::icon(0xe8b6, 16.0, Self::muted_text_color()));
-                        let search_hint = self.t("library.search");
-                        let query = if self.library_tab == LibraryTab::Videos {
-                            &mut self.library_video_query
-                        } else {
-                            &mut self.library_audio_query
-                        };
-                        ui.add_sized(
-                            [ui.available_width(), 24.0],
-                            TextEdit::singleline(query)
-                                .frame(false)
-                                .hint_text(search_hint)
-                                .desired_width(f32::INFINITY),
-                        );
-                    });
+                    self.draw_library_tag_filter_row(ui);
                 });
         }
         if columns_changed {
@@ -5369,24 +5406,6 @@ impl SoundFxApp {
                     .corner_radius(22.0)
                     .inner_margin(Margin::same(14))
                     .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(Self::icon(0xe2c7, 16.0, Color32::from_rgb(227, 82, 149)));
-                            ui.label(
-                                RichText::new(self.t("library.folders"))
-                                    .size(13.0)
-                                    .color(Self::strong_text_color())
-                                    .strong(),
-                            );
-                            if let Some(folder_id) = self.library_current_folder {
-                                ui.add_space(8.0);
-                                ui.label(
-                                    RichText::new(self.folder_path_label(folder_id))
-                                        .size(11.5)
-                                        .color(Self::muted_text_color()),
-                                );
-                            }
-                        });
-                        ui.add_space(10.0);
                         self.draw_folders_list_view(ui);
                     });
                 ui.add_space(12.0);

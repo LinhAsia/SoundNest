@@ -19,8 +19,9 @@ use anyhow::{Context as _, Result};
 use clipboard_win::{Clipboard, Setter, formats::FileList};
 use eframe::egui::{
     self, Align, Align2, Button, CentralPanel, Checkbox, Color32, ComboBox, Context, CornerRadius,
-    DragValue, FontFamily, FontId, Frame, Margin, Pos2, ProgressBar, Rect, RichText, ScrollArea,
-    Sense, Stroke, StrokeKind, TextEdit, TextureHandle, Ui, Vec2, ViewportCommand, vec2,
+    DragValue, FontFamily, FontId, Frame, Grid, Margin, Pos2, ProgressBar, Rect, RichText,
+    ScrollArea, Sense, Stroke, StrokeKind, TextEdit, TextureHandle, Ui, Vec2, ViewportCommand,
+    vec2,
 };
 use eframe::epaint::Shadow;
 use std::cell::RefCell;
@@ -596,12 +597,9 @@ impl SoundFxApp {
         }
     }
 
-    pub(super) fn draw_library_tag_filter_row(&mut self, ui: &mut Ui) {
-        self.reconcile_library_audio_tag_filter();
-        let tags = self.distinct_sound_tags();
-        let active_filter = self.library_audio_tag_filter.clone();
-        let active_tag_count = usize::from(active_filter.is_some());
-        let toggle_label = if self.library_audio_tags_expanded {
+    fn library_tag_toggle_label(&self) -> String {
+        let active_tag_count = usize::from(self.library_audio_tag_filter.is_some());
+        if self.library_audio_tags_expanded {
             format!(
                 "{} Hide Tags",
                 Self::icon(0xe5ce, 13.0, Self::strong_text_color()).text()
@@ -616,11 +614,20 @@ impl SoundFxApp {
                 "{} Tags",
                 Self::icon(0xe5cf, 13.0, Self::strong_text_color()).text()
             )
-        };
+        }
+    }
+
+    pub(super) fn draw_library_tag_toggle(&mut self, ui: &mut Ui) {
+        let toggle_label = self.library_tag_toggle_label();
         if Self::tag_chip_button(ui, &toggle_label, self.library_audio_tags_expanded).clicked() {
             self.library_audio_tags_expanded = !self.library_audio_tags_expanded;
         }
+    }
 
+    pub(super) fn draw_library_tag_filter_row(&mut self, ui: &mut Ui) {
+        self.reconcile_library_audio_tag_filter();
+        let tags = self.distinct_sound_tags();
+        let active_filter = self.library_audio_tag_filter.clone();
         if !self.library_audio_tags_expanded || tags.is_empty() {
             return;
         }
@@ -1018,25 +1025,74 @@ impl SoundFxApp {
             .map(|folder_id| self.folder_path_label(folder_id))
             .unwrap_or_else(|| "Root".to_owned());
 
-        let add_folder_btn = ui.add_sized(
-            [160.0, 32.0],
-            Button::new(
-                RichText::new(if self.library_folder_create_open {
-                    "Hide Add Folder"
-                } else {
-                    "+ Add Folder"
-                })
-                .size(12.5)
-                .color(Color32::WHITE),
-            )
-            .fill(Color32::from_rgb(227, 82, 149))
-            .corner_radius(12.0),
-        );
-        Self::decorate_button_response(ui, &add_folder_btn);
-        if add_folder_btn.clicked() {
-            self.library_folder_create_open = !self.library_folder_create_open;
-            self.folder_name_warning = false;
-        }
+        ui.horizontal(|ui| {
+            ui.label(Self::icon(0xe2c7, 16.0, Color32::from_rgb(242, 140, 56)));
+            ui.label(
+                RichText::new(self.t("library.folders"))
+                    .size(13.0)
+                    .color(Self::strong_text_color())
+                    .strong(),
+            );
+            ui.add_space(8.0);
+            ui.label(
+                RichText::new(selected_parent_label.as_str())
+                    .size(11.5)
+                    .color(Self::muted_text_color()),
+            );
+            ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                let grid_btn = ui.add_sized(
+                    [58.0, 30.0],
+                    Self::action_button(
+                        RichText::new("Grid").size(11.5),
+                        self.library_folder_view == LibraryFolderView::Grid,
+                        false,
+                    ),
+                );
+                Self::decorate_button_response(ui, &grid_btn);
+                if grid_btn.clicked() {
+                    self.library_folder_view = LibraryFolderView::Grid;
+                    let _ = self
+                        .storage
+                        .save_library_folder_view(self.library_folder_view.preference_value());
+                }
+                ui.add_space(6.0);
+                let rows_btn = ui.add_sized(
+                    [58.0, 30.0],
+                    Self::action_button(
+                        RichText::new("Rows").size(11.5),
+                        self.library_folder_view == LibraryFolderView::Rows,
+                        false,
+                    ),
+                );
+                Self::decorate_button_response(ui, &rows_btn);
+                if rows_btn.clicked() {
+                    self.library_folder_view = LibraryFolderView::Rows;
+                    let _ = self
+                        .storage
+                        .save_library_folder_view(self.library_folder_view.preference_value());
+                }
+                ui.add_space(10.0);
+                let add_folder_btn = ui.add_sized(
+                    [160.0, 32.0],
+                    Button::new(
+                        RichText::new(if self.library_folder_create_open {
+                            "Hide Add Folder"
+                        } else {
+                            "+ Add Folder"
+                        })
+                        .size(12.5)
+                        .color(Color32::WHITE),
+                    )
+                    .fill(Color32::from_rgb(227, 82, 149))
+                    .corner_radius(12.0),
+                );
+                Self::decorate_button_response(ui, &add_folder_btn);
+                if add_folder_btn.clicked() {
+                    self.library_folder_create_open = !self.library_folder_create_open;
+                    self.folder_name_warning = false;
+                }
+            });
+        });
 
         if self.library_folder_create_open {
             ui.add_space(10.0);
@@ -1137,6 +1193,14 @@ impl SoundFxApp {
             return;
         }
 
+        if self.library_folder_view == LibraryFolderView::Grid {
+            self.draw_folders_grid_view(ui);
+        } else {
+            self.draw_folders_tree_view(ui);
+        }
+    }
+
+    fn draw_folders_tree_view(&mut self, ui: &mut egui::Ui) {
         let mut select_folder_id = None;
         let mut delete_folder_id = None;
         let mut rename_folder_id = None;
@@ -1160,6 +1224,122 @@ impl SoundFxApp {
             );
         }
 
+        self.apply_folder_tree_actions(
+            select_folder_id,
+            delete_folder_id,
+            rename_folder_id,
+            rename_commit,
+            finish_editing,
+            toggle_folder_id,
+            clear_selected_folder,
+        );
+    }
+
+    fn draw_folders_grid_view(&mut self, ui: &mut egui::Ui) {
+        let mut select_folder_id = None;
+        let mut delete_folder_id = None;
+        let mut rename_folder_id = None;
+        let mut rename_commit = None;
+        let mut finish_editing = false;
+        let mut toggle_folder_id = None;
+        let mut clear_selected_folder = false;
+        let spacing = 12.0;
+        let columns = self.library_grid_columns.clamp(3, 8).min(4);
+        let available_width = ui.available_width().max(360.0);
+        let total_gap_width = spacing * (columns.saturating_sub(1)) as f32;
+        let card_width = ((available_width - total_gap_width) / columns as f32).max(180.0);
+        let visible_folders = self.visible_folder_grid_items();
+
+        Grid::new("library-folder-grid")
+            .num_columns(columns)
+            .spacing(vec2(spacing, spacing))
+            .min_col_width(card_width)
+            .show(ui, |ui| {
+                for (index, (folder, depth)) in visible_folders.iter().enumerate() {
+                    self.draw_folder_grid_card(
+                        ui,
+                        folder,
+                        *depth,
+                        card_width,
+                        &mut select_folder_id,
+                        &mut delete_folder_id,
+                        &mut rename_folder_id,
+                        &mut rename_commit,
+                        &mut finish_editing,
+                        &mut toggle_folder_id,
+                        &mut clear_selected_folder,
+                    );
+                    if (index + 1) % columns == 0 {
+                        ui.end_row();
+                    }
+                }
+            });
+
+        self.apply_folder_tree_actions(
+            select_folder_id,
+            delete_folder_id,
+            rename_folder_id,
+            rename_commit,
+            finish_editing,
+            toggle_folder_id,
+            clear_selected_folder,
+        );
+
+        if self.library_tab == LibraryTab::Sounds
+            && let Some(folder_id) = self.library_current_folder
+            && let Some(folder) = self
+                .folders
+                .iter()
+                .find(|folder| folder.id == folder_id)
+                .cloned()
+        {
+            let has_children = self
+                .folders
+                .iter()
+                .any(|value| value.parent_id == Some(folder.id));
+            let is_collapsed = has_children && self.library_collapsed_folders.contains(&folder.id);
+            if !is_collapsed {
+                ui.add_space(12.0);
+                if self.library_sound_view == LibrarySoundView::Grid {
+                    self.draw_inline_folder_sound_grid(ui, &folder, 0.0);
+                } else {
+                    self.draw_inline_folder_sounds(ui, &folder, 0.0);
+                }
+            }
+        }
+    }
+
+    fn visible_folder_grid_items(&self) -> Vec<(crate::storage::Folder, usize)> {
+        fn visit(
+            app: &super::SoundFxApp,
+            parent_id: Option<Uuid>,
+            depth: usize,
+            output: &mut Vec<(crate::storage::Folder, usize)>,
+        ) {
+            for folder in app.sorted_child_folders(parent_id) {
+                let folder_id = folder.id;
+                output.push((folder, depth));
+                if !app.library_collapsed_folders.contains(&folder_id) {
+                    visit(app, Some(folder_id), depth + 1, output);
+                }
+            }
+        }
+
+        let mut output = Vec::new();
+        visit(self, None, 0, &mut output);
+        output
+    }
+
+    fn apply_folder_tree_actions(
+        &mut self,
+        select_folder_id: Option<Uuid>,
+        delete_folder_id: Option<Uuid>,
+        rename_folder_id: Option<Uuid>,
+        rename_commit: Option<(Uuid, String)>,
+        finish_editing: bool,
+        toggle_folder_id: Option<Uuid>,
+        clear_selected_folder: bool,
+    ) {
         if clear_selected_folder {
             if let Some(folder_id) = self.library_current_folder {
                 self.stop_library_preview_if_hidden_by_folder(folder_id);
@@ -1452,6 +1632,228 @@ impl SoundFxApp {
                     toggle_folder_id,
                     clear_selected_folder,
                 );
+            }
+        }
+    }
+
+    fn draw_folder_grid_card(
+        &mut self,
+        ui: &mut egui::Ui,
+        folder: &crate::storage::Folder,
+        depth: usize,
+        card_width: f32,
+        select_folder_id: &mut Option<Uuid>,
+        delete_folder_id: &mut Option<Uuid>,
+        rename_folder_id: &mut Option<Uuid>,
+        rename_commit: &mut Option<(Uuid, String)>,
+        finish_editing: &mut bool,
+        toggle_folder_id: &mut Option<Uuid>,
+        clear_selected_folder: &mut bool,
+    ) {
+        let folder_accent = Color32::from_rgb(242, 140, 56);
+        let is_selected = self.library_current_folder == Some(folder.id);
+        let is_editing = self.editing_folder_id == Some(folder.id);
+        let total_count = self.total_sound_count_for_folder(folder.id);
+        let direct_count = self.direct_sound_count_for_folder(folder.id);
+        let has_children = self
+            .folders
+            .iter()
+            .any(|value| value.parent_id == Some(folder.id));
+        let is_collapsed = has_children && self.library_collapsed_folders.contains(&folder.id);
+        let show_folder_actions = is_selected || (has_children && !is_collapsed);
+        let fill = if Self::dark_theme_enabled() {
+            if is_selected || (has_children && !is_collapsed) {
+                Color32::from_rgb(63, 39, 24)
+            } else {
+                Color32::from_rgb(33, 24, 18)
+            }
+        } else if is_selected || (has_children && !is_collapsed) {
+            Color32::from_rgb(255, 245, 234)
+        } else {
+            Color32::from_rgb(255, 250, 245)
+        };
+        let stroke = if is_selected || (has_children && !is_collapsed) {
+            folder_accent
+        } else {
+            folder_accent.linear_multiply(0.42)
+        };
+        let indent_label = if depth == 0 {
+            "Root".to_owned()
+        } else {
+            format!("Level {depth}")
+        };
+
+        let row = Frame::new()
+            .fill(fill)
+            .stroke(Stroke::new(1.0, stroke))
+            .corner_radius(16.0)
+            .inner_margin(Margin::symmetric(12, 10))
+            .show(ui, |ui| {
+                ui.set_width(card_width);
+                let mut delete_btn_response = None;
+                let mut rename_btn_response = None;
+                let mut import_btn_response = None;
+                let mut paste_btn_response = None;
+                ui.vertical(|ui| {
+                    ui.horizontal(|ui| {
+                        if has_children {
+                            ui.label(Self::icon(
+                                if is_collapsed { 0xe5cc } else { 0xe5cf },
+                                16.0,
+                                folder_accent,
+                            ));
+                        } else {
+                            ui.add_space(16.0);
+                        }
+                        ui.label(Self::icon(
+                            if is_collapsed { 0xe2c7 } else { 0xe2c8 },
+                            16.0,
+                            folder_accent,
+                        ));
+                        ui.add_space(4.0);
+                        ui.label(
+                            RichText::new(indent_label)
+                                .size(10.5)
+                                .color(Self::muted_text_color()),
+                        );
+                    });
+                    ui.add_space(6.0);
+                    if is_editing {
+                        let response = ui.add_sized(
+                            [card_width - 24.0, 20.0],
+                            egui::TextEdit::singleline(&mut self.folder_rename_name),
+                        );
+                        if response.lost_focus()
+                            || (response.has_focus()
+                                && ui.input(|input| input.key_pressed(egui::Key::Enter)))
+                        {
+                            let new_name = self.folder_rename_name.trim().to_owned();
+                            if !new_name.is_empty() {
+                                *rename_commit = Some((folder.id, new_name));
+                            }
+                            *finish_editing = true;
+                        }
+                    } else {
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(&folder.name)
+                                    .size(13.2)
+                                    .color(Self::strong_text_color())
+                                    .strong(),
+                            )
+                            .truncate(),
+                        );
+                    }
+                    ui.label(
+                        RichText::new(if direct_count == total_count {
+                            format!("{total_count} sounds")
+                        } else {
+                            format!("{direct_count} direct / {total_count} total")
+                        })
+                        .size(11.0)
+                        .color(Self::muted_text_color()),
+                    );
+                    ui.add_space(8.0);
+                    ui.horizontal_wrapped(|ui| {
+                        ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
+                        if show_folder_actions
+                            && self.library_tab == LibraryTab::Sounds
+                            && self.folder_import_select_mode.is_none()
+                        {
+                            let paste_btn = ui.add(
+                                Button::new(RichText::new("Paste").size(10.8))
+                                    .fill(folder_accent)
+                                    .corner_radius(10.0),
+                            );
+                            Self::decorate_button_response(ui, &paste_btn);
+                            if paste_btn.clicked() {
+                                match self.paste_clipboard_sounds_to_folder(folder.id, ui.ctx()) {
+                                    Ok(imported) => {
+                                        self.status =
+                                            Some(format!("Pasted {imported} sound(s) into folder"));
+                                    }
+                                    Err(error) => self.set_error_status(error),
+                                }
+                            }
+                            paste_btn_response = Some(paste_btn);
+
+                            let import_btn = ui.add(
+                                Button::new(
+                                    RichText::new(format!(
+                                        "+ {}",
+                                        self.t("library.import_sound_to_folder")
+                                    ))
+                                    .size(10.8),
+                                )
+                                .fill(Color32::from_rgb(227, 82, 149))
+                                .corner_radius(10.0),
+                            );
+                            Self::decorate_button_response(ui, &import_btn);
+                            if import_btn.clicked() {
+                                self.folder_import_select_mode = Some(folder.id);
+                            }
+                            import_btn_response = Some(import_btn);
+                        }
+
+                        let rename_btn = ui.add(
+                            Button::new(Self::icon(0xe254, 12.0, Self::muted_text_color()))
+                                .fill(Color32::TRANSPARENT)
+                                .frame(false),
+                        );
+                        Self::decorate_button_response(ui, &rename_btn);
+                        if rename_btn.clicked() {
+                            *rename_folder_id = Some(folder.id);
+                        }
+                        rename_btn_response = Some(rename_btn);
+
+                        let delete_btn = ui.add(
+                            Button::new(Self::icon(0xe872, 12.0, Self::muted_text_color()))
+                                .fill(Color32::TRANSPARENT)
+                                .frame(false),
+                        );
+                        Self::decorate_button_response(ui, &delete_btn);
+                        if delete_btn.clicked() {
+                            *delete_folder_id = Some(folder.id);
+                        }
+                        delete_btn_response = Some(delete_btn);
+                    });
+                });
+
+                (
+                    delete_btn_response,
+                    rename_btn_response,
+                    import_btn_response,
+                    paste_btn_response,
+                )
+            });
+
+        if !is_editing {
+            let response = ui.interact(
+                row.response.rect,
+                ui.id().with(("grid", folder.id)),
+                Sense::click(),
+            );
+            if response.hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+            let delete_hovered = row.inner.0.as_ref().is_some_and(|value| value.hovered());
+            let rename_hovered = row.inner.1.as_ref().is_some_and(|value| value.hovered());
+            let import_hovered = row.inner.2.as_ref().is_some_and(|value| value.hovered());
+            let paste_hovered = row.inner.3.as_ref().is_some_and(|value| value.hovered());
+            if response.clicked()
+                && !delete_hovered
+                && !rename_hovered
+                && !import_hovered
+                && !paste_hovered
+            {
+                if is_selected {
+                    *clear_selected_folder = true;
+                } else {
+                    *select_folder_id = Some(folder.id);
+                }
+                if has_children {
+                    *toggle_folder_id = Some(folder.id);
+                }
             }
         }
     }
