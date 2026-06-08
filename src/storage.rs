@@ -223,6 +223,7 @@ struct PreferencesFile {
     library_grid_columns: Option<usize>,
     library_grid_scale: Option<f32>,
     library_sound_view: Option<String>,
+    library_row_thickness: Option<usize>,
     dark_theme: Option<bool>,
     record_hotkey: Option<String>,
     pitch_hotkey: Option<String>,
@@ -508,6 +509,19 @@ impl Storage {
             _ => None,
         };
         preferences.library_sound_view = normalized;
+        self.save_preferences(&preferences)
+    }
+
+    pub fn load_library_row_thickness(&self) -> Result<Option<usize>> {
+        let preferences = self.load_preferences()?;
+        Ok(preferences
+            .library_row_thickness
+            .map(|value| value.clamp(1, 5)))
+    }
+
+    pub fn save_library_row_thickness(&self, thickness: usize) -> Result<()> {
+        let mut preferences = self.load_preferences()?;
+        preferences.library_row_thickness = Some(thickness.clamp(1, 5));
         self.save_preferences(&preferences)
     }
 

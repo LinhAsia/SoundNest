@@ -53,6 +53,8 @@ const DEFAULT_OUTRO_FADE_START_RATIO: f32 = 0.0;
 const TRANSITION_WAVE_BUCKETS: usize = 160;
 const LIBRARY_GRID_MIN_COLUMNS: usize = 3;
 const LIBRARY_GRID_MAX_COLUMNS: usize = 8;
+const LIBRARY_ROW_MIN_THICKNESS: usize = 1;
+const LIBRARY_ROW_MAX_THICKNESS: usize = 5;
 const LIBRARY_TAG_COLLAPSED_COUNT: usize = 12;
 const LIBRARY_LIST_ROW_HEIGHT: f32 = 146.0;
 const RECORD_EXPORT_VIDEO_FPS_OPTIONS: [u32; 3] = [
@@ -92,6 +94,34 @@ impl LibrarySoundView {
         match self {
             Self::Rows => "rows",
             Self::Grid => "grid",
+        }
+    }
+}
+
+impl SoundFxApp {
+    fn library_row_wave_height(&self) -> f32 {
+        match self
+            .library_row_thickness
+            .clamp(LIBRARY_ROW_MIN_THICKNESS, LIBRARY_ROW_MAX_THICKNESS)
+        {
+            1 => 28.0,
+            2 => 34.0,
+            3 => 40.0,
+            4 => 48.0,
+            _ => 56.0,
+        }
+    }
+
+    fn library_row_vertical_padding(&self) -> i8 {
+        match self
+            .library_row_thickness
+            .clamp(LIBRARY_ROW_MIN_THICKNESS, LIBRARY_ROW_MAX_THICKNESS)
+        {
+            1 => 6,
+            2 => 8,
+            3 => 10,
+            4 => 12,
+            _ => 14,
         }
     }
 }
@@ -360,6 +390,7 @@ pub struct SoundFxApp {
     pub(super) record_overlay_native_visuals_applied: bool,
     pub(super) record_overlay_pos: Option<Pos2>,
     pub(super) library_grid_columns: usize,
+    pub(super) library_row_thickness: usize,
     pub(super) library_sound_view: LibrarySoundView,
     pub(super) video_assets: Vec<VideoAsset>,
     pub(super) recording_draft: Option<RecordingDraft>,
@@ -553,6 +584,12 @@ impl SoundFxApp {
             .ok()
             .flatten()
             .unwrap_or(6);
+        let library_row_thickness = storage
+            .load_library_row_thickness()
+            .ok()
+            .flatten()
+            .unwrap_or(3)
+            .clamp(LIBRARY_ROW_MIN_THICKNESS, LIBRARY_ROW_MAX_THICKNESS);
         let dark_theme = storage.load_dark_theme().ok().flatten().unwrap_or(false);
         let pitch_show_sharps = storage
             .load_pitch_show_sharps()
@@ -662,6 +699,7 @@ impl SoundFxApp {
             record_overlay_native_visuals_applied: false,
             record_overlay_pos: None,
             library_grid_columns,
+            library_row_thickness,
             library_sound_view,
             video_assets,
             recording_draft: None,
@@ -5040,6 +5078,7 @@ impl SoundFxApp {
         let modal_open = self.has_modal_panel();
         let titlebar_drag_active = self.titlebar_drag_active(ui.ctx());
         let mut columns_changed = false;
+        let mut row_thickness_changed = false;
         let mut library_slider_active = false;
         ui.horizontal(|ui| {
             if let Some(_import_folder_id) = self.folder_import_select_mode {
@@ -5224,6 +5263,46 @@ impl SoundFxApp {
                         if library_slider_active {
                             self.pending_sound_drag = None;
                         }
+                    } else if self.library_tab == LibraryTab::Sounds
+                        && self.library_sound_view == LibrarySoundView::Rows
+                    {
+                        Self::with_slider_visuals(ui, |ui| {
+                            let mut slider_value =
+                                (LIBRARY_ROW_MIN_THICKNESS + LIBRARY_ROW_MAX_THICKNESS) as f32
+                                    - self.library_row_thickness as f32;
+                            let (slider_response, slider_changed) = Self::click_slider(
+                                ui,
+                                &mut slider_value,
+                                LIBRARY_ROW_MIN_THICKNESS as f32..=LIBRARY_ROW_MAX_THICKNESS as f32,
+                                1.0,
+                                vec2(132.0, 28.0),
+                            );
+                            library_slider_active = slider_response.hovered()
+                                || slider_response.dragged()
+                                || slider_response.is_pointer_button_down_on();
+                            if slider_response.changed() || slider_changed {
+                                let reversed = slider_value.round().clamp(
+                                    LIBRARY_ROW_MIN_THICKNESS as f32,
+                                    LIBRARY_ROW_MAX_THICKNESS as f32,
+                                ) as usize;
+                                self.library_row_thickness = (LIBRARY_ROW_MIN_THICKNESS
+                                    + LIBRARY_ROW_MAX_THICKNESS)
+                                    - reversed;
+                                self.library_row_thickness = self
+                                    .library_row_thickness
+                                    .clamp(LIBRARY_ROW_MIN_THICKNESS, LIBRARY_ROW_MAX_THICKNESS);
+                                row_thickness_changed = true;
+                            }
+                            ui.add_space(8.0);
+                            ui.label(
+                                RichText::new(format!("Row {}", self.library_row_thickness))
+                                    .size(11.5)
+                                    .color(Self::muted_text_color()),
+                            );
+                        });
+                        if library_slider_active {
+                            self.pending_sound_drag = None;
+                        }
                     }
                 });
             }
@@ -5262,6 +5341,11 @@ impl SoundFxApp {
             let _ = self
                 .storage
                 .save_library_grid_columns(self.library_grid_columns);
+        }
+        if row_thickness_changed {
+            let _ = self
+                .storage
+                .save_library_row_thickness(self.library_row_thickness);
         }
         ui.add_space(10.0);
 
@@ -11300,6 +11384,7 @@ impl eframe::App for SoundFxApp {
         self.library_collapsed_folders.clear();
         self.folder_import_select_mode = None;
         self.editing_folder_id = None;
+        self.editing_from_folder = None;
         self.library_folder_create_open = false;
         if self.pending_save {
             let _ = self.storage.save_library(&self.sounds);

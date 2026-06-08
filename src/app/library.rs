@@ -1217,6 +1217,7 @@ impl SoundFxApp {
             .show(ui, |ui| {
                 let mut delete_btn_response = None;
                 let mut rename_btn_response = None;
+                let mut import_btn_response = None;
                 ui.horizontal(|ui| {
                     ui.add_space(indent);
                     ui.label(Self::icon(
@@ -1289,17 +1290,44 @@ impl SoundFxApp {
                             }
                             rename_btn_response = Some(rename_btn);
                         }
+                        if is_selected
+                            && self.library_tab == LibraryTab::Sounds
+                            && self.folder_import_select_mode.is_none()
+                        {
+                            ui.add_space(6.0);
+                            let import_btn = ui.add(
+                                Button::new(
+                                    RichText::new(format!(
+                                        "+ {}",
+                                        self.t("library.import_sound_to_folder")
+                                    ))
+                                    .size(11.5),
+                                )
+                                .fill(Color32::from_rgb(227, 82, 149))
+                                .corner_radius(10.0),
+                            );
+                            Self::decorate_button_response(ui, &import_btn);
+                            if import_btn.clicked() {
+                                self.folder_import_select_mode = Some(folder.id);
+                            }
+                            import_btn_response = Some(import_btn);
+                        }
                     });
                 });
 
-                (delete_btn_response, rename_btn_response)
+                (
+                    delete_btn_response,
+                    rename_btn_response,
+                    import_btn_response,
+                )
             });
 
         if !is_editing {
             let open_rect = Rect::from_min_max(
                 row.response.rect.min,
                 Pos2::new(
-                    (row.response.rect.max.x - 84.0).max(row.response.rect.min.x),
+                    (row.response.rect.max.x - if is_selected { 206.0 } else { 84.0 })
+                        .max(row.response.rect.min.x),
                     row.response.rect.max.y,
                 ),
             );
@@ -1309,7 +1337,8 @@ impl SoundFxApp {
             }
             let delete_hovered = row.inner.0.as_ref().is_some_and(|value| value.hovered());
             let rename_hovered = row.inner.1.as_ref().is_some_and(|value| value.hovered());
-            if response.clicked() && !delete_hovered && !rename_hovered {
+            let import_hovered = row.inner.2.as_ref().is_some_and(|value| value.hovered());
+            if response.clicked() && !delete_hovered && !rename_hovered && !import_hovered {
                 if is_selected {
                     *clear_selected_folder = true;
                 } else {
@@ -1364,31 +1393,6 @@ impl SoundFxApp {
                 egui::Layout::top_down(Align::Min),
                 |ui| {
                     ui.set_width(content_width.max(ui.available_width()));
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new(self.folder_path_label(folder.id))
-                                .size(12.5)
-                                .color(Self::strong_text_color())
-                                .strong(),
-                        );
-                        if self.folder_import_select_mode.is_none() {
-                            ui.add_space(10.0);
-                            let import_btn = ui.add(
-                                Button::new(format!(
-                                    "+ {}",
-                                    self.t("library.import_sound_to_folder")
-                                ))
-                                .fill(Color32::from_rgb(227, 82, 149))
-                                .corner_radius(10.0),
-                            );
-                            Self::decorate_button_response(ui, &import_btn);
-                            if import_btn.clicked() {
-                                self.folder_import_select_mode = Some(folder.id);
-                            }
-                        }
-                    });
-                    ui.add_space(10.0);
-
                     let sounds = self.filtered_library_sounds_for_folder(Some(folder.id), false);
                     if sounds.is_empty() {
                         ui.label(
@@ -1425,31 +1429,6 @@ impl SoundFxApp {
                 egui::Layout::top_down(Align::Min),
                 |ui| {
                     ui.set_width(content_width.max(ui.available_width()));
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new(self.folder_path_label(folder.id))
-                                .size(12.5)
-                                .color(Self::strong_text_color())
-                                .strong(),
-                        );
-                        if self.folder_import_select_mode.is_none() {
-                            ui.add_space(10.0);
-                            let import_btn = ui.add(
-                                Button::new(format!(
-                                    "+ {}",
-                                    self.t("library.import_sound_to_folder")
-                                ))
-                                .fill(Color32::from_rgb(227, 82, 149))
-                                .corner_radius(10.0),
-                            );
-                            Self::decorate_button_response(ui, &import_btn);
-                            if import_btn.clicked() {
-                                self.folder_import_select_mode = Some(folder.id);
-                            }
-                        }
-                    });
-                    ui.add_space(10.0);
-
                     let sounds = self.filtered_library_sounds_for_folder(Some(folder.id), false);
                     if sounds.is_empty() {
                         ui.label(
@@ -1498,12 +1477,14 @@ impl SoundFxApp {
             ui.ctx()
                 .request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
         }
+        let row_padding_y = self.library_row_vertical_padding();
+        let waveform_height = self.library_row_wave_height();
 
         let row = Frame::new()
             .fill(Self::surface_fill())
             .stroke(Stroke::new(1.0, Self::border_color()))
             .corner_radius(16.0)
-            .inner_margin(Margin::symmetric(12, 10))
+            .inner_margin(Margin::symmetric(12, row_padding_y))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.set_width(ui.available_width());
@@ -1532,7 +1513,7 @@ impl SoundFxApp {
                             Color32::from_rgb(214, 51, 132),
                             Color32::from_rgb(238, 213, 227),
                             Self::panel_fill(),
-                            40.0,
+                            waveform_height,
                         );
                     });
 
