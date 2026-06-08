@@ -1225,19 +1225,21 @@ impl SoundFxApp {
         let is_collapsed = has_children && self.library_collapsed_folders.contains(&folder.id);
         let indent = 18.0 * depth as f32;
         let show_folder_actions = is_selected || (has_children && !is_collapsed);
-        let fill = if is_selected || (has_children && !is_collapsed) {
-            if Self::dark_theme_enabled() {
+        let fill = if Self::dark_theme_enabled() {
+            if is_selected || (has_children && !is_collapsed) {
                 Color32::from_rgb(63, 39, 24)
             } else {
-                Color32::from_rgb(255, 245, 234)
+                Color32::from_rgb(33, 24, 18)
             }
+        } else if is_selected || (has_children && !is_collapsed) {
+            Color32::from_rgb(255, 245, 234)
         } else {
-            Self::surface_fill()
+            Color32::from_rgb(255, 250, 245)
         };
         let stroke = if is_selected || (has_children && !is_collapsed) {
             folder_accent
         } else {
-            Self::border_color()
+            folder_accent.linear_multiply(0.42)
         };
 
         let row = Frame::new()
@@ -1458,11 +1460,6 @@ impl SoundFxApp {
                     ui.set_width(content_width.max(ui.available_width()));
                     let sounds = self.filtered_library_sounds_for_folder(Some(folder.id), false);
                     if sounds.is_empty() {
-                        ui.label(
-                            RichText::new("No sounds in this folder yet.")
-                                .size(11.5)
-                                .color(Self::muted_text_color()),
-                        );
                         return;
                     }
 
@@ -1494,11 +1491,6 @@ impl SoundFxApp {
                     ui.set_width(content_width.max(ui.available_width()));
                     let sounds = self.filtered_library_sounds_for_folder(Some(folder.id), false);
                     if sounds.is_empty() {
-                        ui.label(
-                            RichText::new("No sounds in this folder yet.")
-                                .size(11.5)
-                                .color(Self::muted_text_color()),
-                        );
                         return;
                     }
 
