@@ -487,54 +487,78 @@ mod windows_platform {
             5.0,
             [stroke[0], stroke[1], stroke[2], 232],
         );
-        fill_round_rect(
-            buffer, width, height, 14.0, 48.0, 136.0, 62.0, 18.0, panel_fill,
-        );
         match spec.kind {
-            DragGhostKind::Sound => draw_wave_bars(
-                buffer,
-                width,
-                height,
-                22.0,
-                58.0,
-                120.0,
-                42.0,
-                &spec.waveform,
-                wave,
-            ),
+            DragGhostKind::Sound => {
+                fill_round_rect(
+                    buffer, width, height, 14.0, 48.0, 136.0, 62.0, 18.0, panel_fill,
+                );
+                draw_wave_bars(
+                    buffer,
+                    width,
+                    height,
+                    22.0,
+                    58.0,
+                    120.0,
+                    42.0,
+                    &spec.waveform,
+                    wave,
+                );
+            }
             DragGhostKind::Folder => {
+                fill_round_rect(
+                    buffer,
+                    width,
+                    height,
+                    14.0,
+                    48.0,
+                    136.0,
+                    62.0,
+                    18.0,
+                    [29, 20, 14, 252],
+                );
+                fill_round_rect(
+                    buffer,
+                    width,
+                    height,
+                    16.0,
+                    50.0,
+                    132.0,
+                    58.0,
+                    16.0,
+                    [68, 37, 16, 236],
+                );
                 draw_folder_icon(
                     buffer,
                     width,
                     height,
                     24.0,
-                    56.0,
-                    40.0,
-                    30.0,
-                    [242, 140, 56, 240],
-                    [255, 196, 123, 240],
+                    54.0,
+                    46.0,
+                    34.0,
+                    [255, 156, 58, 248],
+                    [255, 210, 118, 248],
                 );
                 draw_wave_bars(
                     buffer,
                     width,
                     height,
-                    76.0,
+                    78.0,
                     58.0,
-                    58.0,
-                    22.0,
+                    54.0,
+                    20.0,
                     &spec.waveform,
-                    wave,
+                    [255, 230, 202, 245],
                 );
                 draw_wave_bars(
                     buffer,
                     width,
                     height,
-                    76.0,
-                    80.0,
-                    44.0,
-                    14.0,
+                    78.0,
+                    82.0,
+                    42.0,
+                    10.0,
                     &spec.waveform,
-                    [stroke[0], stroke[1], stroke[2], 190],
+                    [255, 156, 58, 225],
                 );
             }
         }
