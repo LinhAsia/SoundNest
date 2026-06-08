@@ -1595,26 +1595,16 @@ impl SoundFxApp {
                                 );
                             });
                             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                                let delete_btn = ui.add(
-                                    Button::new(Self::icon(0xe872, 12.0, Self::muted_text_color()))
-                                        .fill(Color32::TRANSPARENT)
-                                        .frame(false),
-                                );
+                                let delete_btn =
+                                    Self::icon_action(ui, [36.0, 30.0], 0xe872, false, false);
                                 Self::decorate_button_response(ui, &delete_btn);
                                 if delete_btn.clicked() {
                                     *delete_folder_id = Some(folder.id);
                                 }
                                 delete_btn_response = Some(delete_btn);
                                 if !is_editing {
-                                    let rename_btn = ui.add(
-                                        Button::new(Self::icon(
-                                            0xe254,
-                                            12.0,
-                                            Self::muted_text_color(),
-                                        ))
-                                        .fill(Color32::TRANSPARENT)
-                                        .frame(false),
-                                    );
+                                    let rename_btn =
+                                        Self::icon_action(ui, [36.0, 30.0], 0xe254, false, false);
                                     Self::decorate_button_response(ui, &rename_btn);
                                     if rename_btn.clicked() {
                                         *rename_folder_id = Some(folder.id);
@@ -1953,22 +1943,14 @@ impl SoundFxApp {
                             import_btn_response = Some(import_btn);
                         }
 
-                        let rename_btn = ui.add(
-                            Button::new(Self::icon(0xe254, 12.0, Self::muted_text_color()))
-                                .fill(Color32::TRANSPARENT)
-                                .frame(false),
-                        );
+                        let rename_btn = Self::icon_action(ui, [36.0, 30.0], 0xe254, false, false);
                         Self::decorate_button_response(ui, &rename_btn);
                         if rename_btn.clicked() {
                             *rename_folder_id = Some(folder.id);
                         }
                         rename_btn_response = Some(rename_btn);
 
-                        let delete_btn = ui.add(
-                            Button::new(Self::icon(0xe872, 12.0, Self::muted_text_color()))
-                                .fill(Color32::TRANSPARENT)
-                                .frame(false),
-                        );
+                        let delete_btn = Self::icon_action(ui, [36.0, 30.0], 0xe872, false, false);
                         Self::decorate_button_response(ui, &delete_btn);
                         if delete_btn.clicked() {
                             *delete_folder_id = Some(folder.id);
@@ -2143,11 +2125,8 @@ impl SoundFxApp {
                     ui.add_space(12.0);
                     ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                         if self.folder_import_select_mode.is_none() {
-                            let remove_btn = ui.add(
-                                Button::new(Self::icon(0xe872, 12.0, Self::muted_text_color()))
-                                    .fill(Color32::TRANSPARENT)
-                                    .frame(false),
-                            );
+                            let remove_btn =
+                                Self::icon_action(ui, [36.0, 30.0], 0xe872, false, false);
                             Self::decorate_button_response(ui, &remove_btn);
                             if remove_btn.clicked() {
                                 remove_sound_from_folder = Some(sound.id);
