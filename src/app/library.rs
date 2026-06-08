@@ -1405,7 +1405,9 @@ impl SoundFxApp {
             .inner_margin(Margin::symmetric(12, 10))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
+                    ui.set_width(ui.available_width());
                     ui.vertical(|ui| {
+                        ui.set_width((ui.available_width() - 170.0).max(120.0));
                         ui.add(
                             egui::Label::new(
                                 RichText::new(&sound.name)
@@ -1433,6 +1435,7 @@ impl SoundFxApp {
                         );
                     });
 
+                    ui.add_space(12.0);
                     ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                         if self.folder_import_select_mode.is_none() {
                             let remove_btn = ui.add(
@@ -1486,10 +1489,13 @@ impl SoundFxApp {
                         }
                         favorite_response = Some(favorite_btn);
                         ui.add_space(10.0);
-                        ui.label(
-                            RichText::new(format_time(sound.trimmed_length()))
-                                .size(11.5)
-                                .color(Self::muted_text_color()),
+                        ui.add_sized(
+                            [62.0, 20.0],
+                            egui::Label::new(
+                                RichText::new(format_time(sound.trimmed_length()))
+                                    .size(11.5)
+                                    .color(Self::muted_text_color()),
+                            ),
                         );
                     });
                 });
