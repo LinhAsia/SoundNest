@@ -222,6 +222,7 @@ struct PreferencesFile {
     language_code: Option<String>,
     library_grid_columns: Option<usize>,
     library_grid_scale: Option<f32>,
+    library_sound_view: Option<String>,
     dark_theme: Option<bool>,
     record_hotkey: Option<String>,
     pitch_hotkey: Option<String>,
@@ -491,6 +492,22 @@ impl Storage {
         let mut preferences = self.load_preferences()?;
         preferences.library_grid_columns = Some(columns.clamp(3, 8));
         preferences.library_grid_scale = None;
+        self.save_preferences(&preferences)
+    }
+
+    pub fn load_library_sound_view(&self) -> Result<Option<String>> {
+        let preferences = self.load_preferences()?;
+        Ok(preferences.library_sound_view)
+    }
+
+    pub fn save_library_sound_view(&self, view: &str) -> Result<()> {
+        let mut preferences = self.load_preferences()?;
+        let normalized = match view.trim().to_ascii_lowercase().as_str() {
+            "grid" => Some("grid".to_owned()),
+            "rows" => Some("rows".to_owned()),
+            _ => None,
+        };
+        preferences.library_sound_view = normalized;
         self.save_preferences(&preferences)
     }
 

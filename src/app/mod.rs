@@ -80,6 +80,22 @@ pub(crate) enum LibrarySoundView {
     Grid,
 }
 
+impl LibrarySoundView {
+    fn from_preference(value: Option<&str>) -> Self {
+        match value.map(|value| value.trim().to_ascii_lowercase()) {
+            Some(value) if value == "grid" => Self::Grid,
+            _ => Self::Rows,
+        }
+    }
+
+    fn preference_value(self) -> &'static str {
+        match self {
+            Self::Rows => "rows",
+            Self::Grid => "grid",
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DownloadPanelTab {
     Download,
@@ -566,6 +582,9 @@ impl SoundFxApp {
             .ok()
             .flatten()
             .unwrap_or(true);
+        let library_sound_view = LibrarySoundView::from_preference(
+            storage.load_library_sound_view().ok().flatten().as_deref(),
+        );
         let mut localization = Localization::load();
         if let Ok(Some(language_code)) = storage.load_language_code() {
             localization.set_current_code(&language_code);
@@ -643,7 +662,7 @@ impl SoundFxApp {
             record_overlay_native_visuals_applied: false,
             record_overlay_pos: None,
             library_grid_columns,
-            library_sound_view: LibrarySoundView::Rows,
+            library_sound_view,
             video_assets,
             recording_draft: None,
             active_record_video_export: None,
@@ -5139,6 +5158,9 @@ impl SoundFxApp {
                         Self::decorate_button_response(ui, &grid_btn);
                         if grid_btn.clicked() {
                             self.library_sound_view = LibrarySoundView::Grid;
+                            let _ = self.storage.save_library_sound_view(
+                                self.library_sound_view.preference_value(),
+                            );
                         }
                         ui.add_space(6.0);
                         let rows_btn = ui.add_sized(
@@ -5152,6 +5174,9 @@ impl SoundFxApp {
                         Self::decorate_button_response(ui, &rows_btn);
                         if rows_btn.clicked() {
                             self.library_sound_view = LibrarySoundView::Rows;
+                            let _ = self.storage.save_library_sound_view(
+                                self.library_sound_view.preference_value(),
+                            );
                         }
                         ui.add_space(8.0);
                     }
@@ -11271,6 +11296,11 @@ impl eframe::App for SoundFxApp {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.recorder.stop();
         self.pitch_monitor.stop();
+        self.library_current_folder = None;
+        self.library_collapsed_folders.clear();
+        self.folder_import_select_mode = None;
+        self.editing_folder_id = None;
+        self.library_folder_create_open = false;
         if self.pending_save {
             let _ = self.storage.save_library(&self.sounds);
             self.pending_save = false;
