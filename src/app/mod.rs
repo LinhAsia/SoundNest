@@ -5268,8 +5268,7 @@ impl SoundFxApp {
                     return;
                 }
 
-                if self.library_current_folder.is_none() || self.folder_import_select_mode.is_some()
-                {
+                if self.folder_import_select_mode.is_some() {
                     let sounds = self.filtered_library_sounds();
                     if sounds.is_empty() {
                         self.draw_empty_editor(ui);
@@ -5284,6 +5283,34 @@ impl SoundFxApp {
                         library_slider_active,
                         titlebar_drag_active,
                     );
+                } else if self.library_current_folder.is_none() {
+                    Frame::new()
+                        .fill(Self::surface_fill())
+                        .stroke(Stroke::new(1.0, Self::border_color()))
+                        .corner_radius(20.0)
+                        .inner_margin(Margin::same(18))
+                        .show(ui, |ui| {
+                            ui.vertical_centered(|ui| {
+                                ui.add_space(28.0);
+                                ui.label(Self::icon(0xe2c7, 28.0, Color32::from_rgb(214, 51, 132)));
+                                ui.add_space(10.0);
+                                ui.label(
+                                    RichText::new("Select a folder to browse sounds")
+                                        .size(14.0)
+                                        .color(Self::strong_text_color())
+                                        .strong(),
+                                );
+                                ui.add_space(6.0);
+                                ui.label(
+                                    RichText::new(
+                                        "The library stays lightweight until you open a folder.",
+                                    )
+                                    .size(11.5)
+                                    .color(Self::muted_text_color()),
+                                );
+                                ui.add_space(24.0);
+                            });
+                        });
                 }
             });
     }

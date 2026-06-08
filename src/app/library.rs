@@ -1310,57 +1310,66 @@ impl SoundFxApp {
         folder: &crate::storage::Folder,
         left_indent: f32,
     ) {
+        ui.add_space(6.0);
+        let panel_width = (ui.available_width() - left_indent).max(180.0);
         ui.horizontal(|ui| {
             ui.add_space(left_indent);
-            ui.vertical(|ui| {
-                Frame::new()
-                    .fill(Self::panel_fill())
-                    .stroke(Stroke::new(1.0, Self::border_color()))
-                    .corner_radius(18.0)
-                    .inner_margin(Margin::same(12))
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                RichText::new(self.folder_path_label(folder.id))
-                                    .size(12.5)
-                                    .color(Self::strong_text_color())
-                                    .strong(),
-                            );
-                            if self.folder_import_select_mode.is_none() {
-                                ui.add_space(10.0);
-                                let import_btn = ui.add(
-                                    Button::new(format!(
-                                        "+ {}",
-                                        self.t("library.import_sound_to_folder")
-                                    ))
-                                    .fill(Color32::from_rgb(227, 82, 149))
-                                    .corner_radius(10.0),
+            ui.allocate_ui_with_layout(
+                vec2(panel_width, 0.0),
+                egui::Layout::top_down(Align::Min),
+                |ui| {
+                    Frame::new()
+                        .fill(Self::panel_fill())
+                        .stroke(Stroke::new(1.0, Self::border_color()))
+                        .corner_radius(18.0)
+                        .inner_margin(Margin::same(12))
+                        .show(ui, |ui| {
+                            ui.set_width(panel_width.max(ui.available_width()));
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new(self.folder_path_label(folder.id))
+                                        .size(12.5)
+                                        .color(Self::strong_text_color())
+                                        .strong(),
                                 );
-                                Self::decorate_button_response(ui, &import_btn);
-                                if import_btn.clicked() {
-                                    self.folder_import_select_mode = Some(folder.id);
+                                if self.folder_import_select_mode.is_none() {
+                                    ui.add_space(10.0);
+                                    let import_btn = ui.add(
+                                        Button::new(format!(
+                                            "+ {}",
+                                            self.t("library.import_sound_to_folder")
+                                        ))
+                                        .fill(Color32::from_rgb(227, 82, 149))
+                                        .corner_radius(10.0),
+                                    );
+                                    Self::decorate_button_response(ui, &import_btn);
+                                    if import_btn.clicked() {
+                                        self.folder_import_select_mode = Some(folder.id);
+                                    }
+                                }
+                            });
+                            ui.add_space(10.0);
+
+                            let sounds =
+                                self.filtered_library_sounds_for_folder(Some(folder.id), false);
+                            if sounds.is_empty() {
+                                ui.label(
+                                    RichText::new("No sounds in this folder yet.")
+                                        .size(11.5)
+                                        .color(Self::muted_text_color()),
+                                );
+                                return;
+                            }
+
+                            for (index, sound) in sounds.iter().enumerate() {
+                                self.draw_inline_folder_sound_row(ui, sound);
+                                if index + 1 < sounds.len() {
+                                    ui.add_space(8.0);
                                 }
                             }
                         });
-                        ui.add_space(10.0);
-
-                        let sounds =
-                            self.filtered_library_sounds_for_folder(Some(folder.id), false);
-                        if sounds.is_empty() {
-                            ui.label(
-                                RichText::new("No sounds in this folder yet.")
-                                    .size(11.5)
-                                    .color(Self::muted_text_color()),
-                            );
-                            return;
-                        }
-
-                        for sound in sounds {
-                            self.draw_inline_folder_sound_row(ui, &sound);
-                            ui.add_space(8.0);
-                        }
-                    });
-            });
+                },
+            );
         });
     }
 
@@ -1374,6 +1383,10 @@ impl SoundFxApp {
         let mut play_response = None;
         let mut copy_response = None;
         let mut remove_response = None;
+        let mut preview_clicked = false;
+        let mut copy_clicked = false;
+        let mut favorite_clicked = false;
+        let mut remove_clicked = false;
 
         let row = Frame::new()
             .fill(Self::surface_fill())
@@ -1420,6 +1433,7 @@ impl SoundFxApp {
                             Self::decorate_button_response(ui, &remove_btn);
                             if remove_btn.clicked() {
                                 remove_sound_from_folder = Some(sound.id);
+                                remove_clicked = true;
                             }
                             remove_response = Some(remove_btn);
                         }
@@ -1432,6 +1446,7 @@ impl SoundFxApp {
                         );
                         if copy_btn.clicked() {
                             copy_sound = Some(sound.id);
+                            copy_clicked = true;
                         }
                         copy_response = Some(copy_btn);
                         let is_loading = self
@@ -1450,12 +1465,14 @@ impl SoundFxApp {
                             } else {
                                 preview_sound = Some(sound.id);
                             }
+                            preview_clicked = true;
                         }
                         play_response = Some(play_btn);
                         let favorite_btn =
                             Self::favorite_button_sized(ui, sound.favorite, [36.0, 30.0], 16.0);
                         if favorite_btn.clicked() {
                             favorite_sound = Some(sound.id);
+                            favorite_clicked = true;
                         }
                         favorite_response = Some(favorite_btn);
                         ui.add_space(10.0);
@@ -1484,7 +1501,8 @@ impl SoundFxApp {
             || remove_response
                 .as_ref()
                 .is_some_and(|value| value.hovered());
-        if response.clicked() && !over_action {
+        let action_clicked = preview_clicked || copy_clicked || favorite_clicked || remove_clicked;
+        if response.clicked() && !over_action && !action_clicked {
             open_sound = true;
         }
 
