@@ -5676,7 +5676,7 @@ impl SoundFxApp {
             self.mark_dirty(ui.ctx());
         }
 
-        ui.add_space(208.0);
+        ui.add_space(16.0);
 
         if let Some(sound_id) = preview_sound {
             self.preview_sound(sound_id);
