@@ -129,7 +129,8 @@
       "library.exit_import_mode": "Done",
       "library.import_select_title": "Select sounds to add",
       "editor.folder": "Folder",
-      "editor.no_folder": "None"
+      "editor.no_folder": "None",
+      "library.empty_folder": "Empty folder"
     },
     "vi": {
       "name": "Tiếng Việt",
@@ -260,7 +261,8 @@
       "library.exit_import_mode": "Hoan thanh",
       "library.import_select_title": "Chon sound de them",
       "editor.folder": "Thu muc",
-      "editor.no_folder": "Khong"
+      "editor.no_folder": "Khong",
+      "library.empty_folder": "Thu muc trong"
     }
   }
 }

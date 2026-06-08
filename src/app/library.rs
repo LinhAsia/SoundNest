@@ -80,6 +80,29 @@ impl SoundFxApp {
         favorites.into_iter().chain(regular).collect()
     }
 
+    pub(super) fn direct_sounds_for_folder(&self, folder_id: Option<Uuid>) -> Vec<SoundEffect> {
+        let active_tag_filter = self.active_audio_tag_filter();
+        let filtered = self
+            .sounds
+            .iter()
+            .filter(|sound| {
+                if let Some(import_folder_id) = self.folder_import_select_mode {
+                    sound.folder_id != Some(import_folder_id)
+                } else {
+                    sound.folder_id == folder_id
+                }
+            })
+            .filter(|sound| Self::library_sound_query_matches(sound, &self.library_audio_query))
+            .filter(|sound| Self::sound_tag_matches_filter(&sound.tags, active_tag_filter))
+            .filter(|sound| !self.library_favorites_only_audio || sound.favorite)
+            .cloned()
+            .collect::<Vec<_>>();
+        let (favorites, regular): (Vec<_>, Vec<_>) =
+            filtered.into_iter().partition(|sound| sound.favorite);
+        favorites.into_iter().chain(regular).collect()
+    }
+
+
     pub(super) fn folder_branch_ids(&self, root_id: Uuid) -> HashSet<Uuid> {
         let mut ids = HashSet::from([root_id]);
         let mut stack = vec![root_id];
@@ -1026,6 +1049,20 @@ impl SoundFxApp {
             .unwrap_or_else(|| "Root".to_owned());
 
         ui.horizontal(|ui| {
+            if self.library_current_folder.is_some() {
+                let back_btn = Self::icon_action(ui, [34.0, 28.0], 0xe5c4, false, false);
+                if back_btn.clicked() {
+                    if let Some(folder_id) = self.library_current_folder {
+                        if let Some(folder) = self.folders.iter().find(|f| f.id == folder_id) {
+                            self.library_current_folder = folder.parent_id;
+                        } else {
+                            self.library_current_folder = None;
+                        }
+                    }
+                }
+                ui.add_space(4.0);
+            }
+
             ui.label(Self::icon(0xe2c7, 16.0, Color32::from_rgb(242, 140, 56)));
             ui.label(
                 RichText::new(self.t("library.folders"))
@@ -1248,32 +1285,49 @@ impl SoundFxApp {
         let available_width = ui.available_width().max(360.0);
         let total_gap_width = spacing * (columns.saturating_sub(1)) as f32;
         let card_width = ((available_width - total_gap_width) / columns as f32).max(180.0);
-        let visible_folders = self.visible_folder_grid_items();
+        let visible_folders = self.sorted_child_folders(self.library_current_folder);
 
-        Grid::new("library-folder-grid")
-            .num_columns(columns)
-            .spacing(vec2(spacing, spacing))
-            .min_col_width(card_width)
-            .show(ui, |ui| {
-                for (index, (folder, depth)) in visible_folders.iter().enumerate() {
-                    self.draw_folder_grid_card(
-                        ui,
-                        folder,
-                        *depth,
-                        card_width,
-                        &mut select_folder_id,
-                        &mut delete_folder_id,
-                        &mut rename_folder_id,
-                        &mut rename_commit,
-                        &mut finish_editing,
-                        &mut toggle_folder_id,
-                        &mut clear_selected_folder,
-                    );
-                    if (index + 1) % columns == 0 {
-                        ui.end_row();
+        if !visible_folders.is_empty() {
+            Grid::new("library-folder-grid")
+                .num_columns(columns)
+                .spacing(vec2(spacing, spacing))
+                .min_col_width(card_width)
+                .show(ui, |ui| {
+                    for (index, folder) in visible_folders.iter().enumerate() {
+                        self.draw_folder_grid_card(
+                            ui,
+                            folder,
+                            0,
+                            card_width,
+                            &mut select_folder_id,
+                            &mut delete_folder_id,
+                            &mut rename_folder_id,
+                            &mut rename_commit,
+                            &mut finish_editing,
+                            &mut toggle_folder_id,
+                            &mut clear_selected_folder,
+                        );
+                        if (index + 1) % columns == 0 {
+                            ui.end_row();
+                        }
                     }
-                }
-            });
+                });
+        }
+
+        let sounds = if self.library_tab == LibraryTab::Sounds {
+            self.direct_sounds_for_folder(self.library_current_folder)
+        } else {
+            Vec::new()
+        };
+
+        if visible_folders.is_empty() && sounds.is_empty() {
+            ui.add_space(8.0);
+            ui.label(
+                RichText::new(self.t("library.empty_folder"))
+                    .size(13.0)
+                    .color(Self::muted_text_color()),
+            );
+        }
 
         self.apply_folder_tree_actions(
             select_folder_id,
@@ -1285,50 +1339,30 @@ impl SoundFxApp {
             clear_selected_folder,
         );
 
-        if self.library_tab == LibraryTab::Sounds
-            && let Some(folder_id) = self.library_current_folder
-            && let Some(folder) = self
-                .folders
-                .iter()
-                .find(|folder| folder.id == folder_id)
-                .cloned()
-        {
-            let has_children = self
-                .folders
-                .iter()
-                .any(|value| value.parent_id == Some(folder.id));
-            let is_collapsed = has_children && self.library_collapsed_folders.contains(&folder.id);
-            if !is_collapsed {
-                ui.add_space(12.0);
-                if self.library_sound_view == LibrarySoundView::Grid {
-                    self.draw_inline_folder_sound_grid(ui, &folder, 0.0);
-                } else {
-                    self.draw_inline_folder_sounds(ui, &folder, 0.0);
+        if self.library_tab == LibraryTab::Sounds && !sounds.is_empty() {
+            ui.add_space(12.0);
+            if self.library_sound_view == LibrarySoundView::Grid {
+                let modal_open = self.has_modal_panel();
+                let titlebar_drag_active = self.titlebar_drag_active(ui.ctx());
+                self.draw_library_sound_grid_content(
+                    ui,
+                    &sounds,
+                    available_width,
+                    modal_open,
+                    false,
+                    titlebar_drag_active,
+                );
+            } else {
+                for (index, sound) in sounds.iter().enumerate() {
+                    self.draw_inline_folder_sound_row(ui, sound);
+                    if index + 1 < sounds.len() {
+                        ui.add_space(8.0);
+                    }
                 }
             }
         }
     }
 
-    fn visible_folder_grid_items(&self) -> Vec<(crate::storage::Folder, usize)> {
-        fn visit(
-            app: &super::SoundFxApp,
-            parent_id: Option<Uuid>,
-            depth: usize,
-            output: &mut Vec<(crate::storage::Folder, usize)>,
-        ) {
-            for folder in app.sorted_child_folders(parent_id) {
-                let folder_id = folder.id;
-                output.push((folder, depth));
-                if !app.library_collapsed_folders.contains(&folder_id) {
-                    visit(app, Some(folder_id), depth + 1, output);
-                }
-            }
-        }
-
-        let mut output = Vec::new();
-        visit(self, None, 0, &mut output);
-        output
-    }
 
     fn apply_folder_tree_actions(
         &mut self,
@@ -1608,7 +1642,12 @@ impl SoundFxApp {
             }
         }
 
-        if is_selected && self.library_tab == LibraryTab::Sounds && !is_collapsed {
+        let has_sounds = is_selected
+            && self.library_tab == LibraryTab::Sounds
+            && !is_collapsed
+            && !self.filtered_library_sounds_for_folder(Some(folder.id), false).is_empty();
+
+        if has_sounds {
             ui.add_space(8.0);
             if self.library_sound_view == LibrarySoundView::Grid {
                 self.draw_inline_folder_sound_grid(ui, folder, 8.0);
@@ -1618,7 +1657,9 @@ impl SoundFxApp {
         }
 
         if !is_collapsed {
-            ui.add_space(8.0);
+            if has_sounds {
+                ui.add_space(8.0);
+            }
             for child in children {
                 self.draw_folder_tree_node(
                     ui,
@@ -1647,8 +1688,8 @@ impl SoundFxApp {
         rename_folder_id: &mut Option<Uuid>,
         rename_commit: &mut Option<(Uuid, String)>,
         finish_editing: &mut bool,
-        toggle_folder_id: &mut Option<Uuid>,
-        clear_selected_folder: &mut bool,
+        _toggle_folder_id: &mut Option<Uuid>,
+        _clear_selected_folder: &mut bool,
     ) {
         let folder_accent = Color32::from_rgb(242, 140, 56);
         let is_selected = self.library_current_folder == Some(folder.id);
@@ -1846,14 +1887,7 @@ impl SoundFxApp {
                 && !import_hovered
                 && !paste_hovered
             {
-                if is_selected {
-                    *clear_selected_folder = true;
-                } else {
-                    *select_folder_id = Some(folder.id);
-                }
-                if has_children {
-                    *toggle_folder_id = Some(folder.id);
-                }
+                *select_folder_id = Some(folder.id);
             }
         }
     }
@@ -1864,6 +1898,10 @@ impl SoundFxApp {
         folder: &crate::storage::Folder,
         left_indent: f32,
     ) {
+        let sounds = self.filtered_library_sounds_for_folder(Some(folder.id), false);
+        if sounds.is_empty() {
+            return;
+        }
         ui.add_space(6.0);
         let content_width = (ui.available_width() - left_indent).max(180.0);
         ui.horizontal(|ui| {
@@ -1873,11 +1911,6 @@ impl SoundFxApp {
                 egui::Layout::top_down(Align::Min),
                 |ui| {
                     ui.set_width(content_width.max(ui.available_width()));
-                    let sounds = self.filtered_library_sounds_for_folder(Some(folder.id), false);
-                    if sounds.is_empty() {
-                        return;
-                    }
-
                     for (index, sound) in sounds.iter().enumerate() {
                         self.draw_inline_folder_sound_row(ui, sound);
                         if index + 1 < sounds.len() {
@@ -1895,6 +1928,10 @@ impl SoundFxApp {
         folder: &crate::storage::Folder,
         left_indent: f32,
     ) {
+        let sounds = self.filtered_library_sounds_for_folder(Some(folder.id), false);
+        if sounds.is_empty() {
+            return;
+        }
         ui.add_space(6.0);
         let content_width = (ui.available_width() - left_indent).max(180.0);
         ui.horizontal(|ui| {
@@ -1904,11 +1941,6 @@ impl SoundFxApp {
                 egui::Layout::top_down(Align::Min),
                 |ui| {
                     ui.set_width(content_width.max(ui.available_width()));
-                    let sounds = self.filtered_library_sounds_for_folder(Some(folder.id), false);
-                    if sounds.is_empty() {
-                        return;
-                    }
-
                     let modal_open = self.has_modal_panel();
                     let titlebar_drag_active = self.titlebar_drag_active(ui.ctx());
                     self.draw_library_sound_grid_content(

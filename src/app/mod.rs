@@ -5172,7 +5172,7 @@ impl SoundFxApp {
                     .corner_radius(18.0)
                     .inner_margin(Margin::symmetric(12, 8))
                     .show(ui, |ui| {
-                        ui.set_min_width(300.0);
+                        ui.set_width(260.0);
                         ui.horizontal(|ui| {
                             if self.library_tab == LibraryTab::Sounds {
                                 self.draw_library_tag_toggle(ui);
