@@ -548,29 +548,46 @@ impl SoundFxApp {
     pub(super) fn draw_library_tag_filter_row(&mut self, ui: &mut Ui) {
         self.reconcile_library_audio_tag_filter();
         let tags = self.distinct_sound_tags();
-        if tags.is_empty() {
+        let active_filter = self.library_audio_tag_filter.clone();
+        let active_tag_count = usize::from(active_filter.is_some());
+        let toggle_label = if self.library_audio_tags_expanded {
+            format!(
+                "{} Hide Tags",
+                Self::icon(0xe5ce, 13.0, Self::strong_text_color()).text()
+            )
+        } else if active_tag_count > 0 {
+            format!(
+                "{} Tags ({active_tag_count})",
+                Self::icon(0xe5cf, 13.0, Self::strong_text_color()).text()
+            )
+        } else {
+            format!(
+                "{} Tags",
+                Self::icon(0xe5cf, 13.0, Self::strong_text_color()).text()
+            )
+        };
+        if Self::tag_chip_button(ui, &toggle_label, self.library_audio_tags_expanded).clicked() {
+            self.library_audio_tags_expanded = !self.library_audio_tags_expanded;
+        }
+
+        if !self.library_audio_tags_expanded || tags.is_empty() {
             return;
         }
 
-        let active_filter = self.library_audio_tag_filter.clone();
         let active_hidden_tag = active_filter
             .as_deref()
             .filter(|tag| {
-                !self.library_audio_tags_expanded
-                    && !tags
-                        .iter()
-                        .take(LIBRARY_TAG_COLLAPSED_COUNT)
-                        .any(|value| value.eq_ignore_ascii_case(tag))
+                !tags
+                    .iter()
+                    .take(LIBRARY_TAG_COLLAPSED_COUNT)
+                    .any(|value| value.eq_ignore_ascii_case(tag))
             })
             .map(str::to_owned);
-        let mut visible_tags = if self.library_audio_tags_expanded {
-            tags.clone()
-        } else {
-            tags.iter()
-                .take(LIBRARY_TAG_COLLAPSED_COUNT)
-                .cloned()
-                .collect::<Vec<_>>()
-        };
+        let mut visible_tags = tags
+            .iter()
+            .take(LIBRARY_TAG_COLLAPSED_COUNT)
+            .cloned()
+            .collect::<Vec<_>>();
         if let Some(tag) = active_hidden_tag
             && !visible_tags
                 .iter()
@@ -578,15 +595,10 @@ impl SoundFxApp {
         {
             visible_tags.push(tag);
         }
-        let has_hidden_tags = tags.len() > visible_tags.len();
 
+        ui.add_space(8.0);
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
-            ui.label(
-                RichText::new(self.t("library.tag_filter"))
-                    .size(12.0)
-                    .color(Self::muted_text_color()),
-            );
             let all_active = active_filter.is_none();
             if Self::tag_chip_button(ui, &self.t("library.tag_all"), all_active).clicked() {
                 self.library_audio_tag_filter = None;
@@ -596,23 +608,6 @@ impl SoundFxApp {
                 let active = active_filter.as_deref().is_some_and(|value| value == tag);
                 if Self::tag_chip_button(ui, &tag, active).clicked() {
                     self.library_audio_tag_filter = if active { None } else { Some(tag) };
-                }
-            }
-
-            if has_hidden_tags || self.library_audio_tags_expanded {
-                let toggle_label = if self.library_audio_tags_expanded {
-                    format!(
-                        "{} Less",
-                        Self::icon(0xe5ce, 13.0, Self::strong_text_color()).text()
-                    )
-                } else {
-                    format!(
-                        "{} More",
-                        Self::icon(0xe5cf, 13.0, Self::strong_text_color()).text()
-                    )
-                };
-                if Self::tag_chip_button(ui, &toggle_label, false).clicked() {
-                    self.library_audio_tags_expanded = !self.library_audio_tags_expanded;
                 }
             }
         });

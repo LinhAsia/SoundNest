@@ -5089,11 +5089,6 @@ impl SoundFxApp {
                 }
             }
 
-            if self.library_tab == LibraryTab::Sounds {
-                ui.add_space(12.0);
-                self.draw_library_tag_filter_row(ui);
-            }
-
             if self.library_tab != LibraryTab::Folders {
                 ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                     let favorites_active = if self.library_tab == LibraryTab::Videos {
@@ -5183,7 +5178,6 @@ impl SoundFxApp {
                 });
             }
         });
-        ui.add_space(10.0);
         if self.library_tab != LibraryTab::Folders {
             Frame::new()
                 .fill(Self::surface_fill())
@@ -5192,6 +5186,11 @@ impl SoundFxApp {
                 .inner_margin(Margin::symmetric(12, 8))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
+                        if self.library_tab == LibraryTab::Sounds {
+                            self.draw_library_tag_filter_row(ui);
+                            ui.add_space(12.0);
+                        }
+                        ui.add_space(4.0);
                         ui.label(Self::icon(0xe8b6, 16.0, Self::muted_text_color()));
                         let search_hint = self.t("library.search");
                         let query = if self.library_tab == LibraryTab::Videos {
@@ -5214,7 +5213,7 @@ impl SoundFxApp {
                 .storage
                 .save_library_grid_columns(self.library_grid_columns);
         }
-        ui.add_space(12.0);
+        ui.add_space(10.0);
 
         ScrollArea::vertical()
             .drag_to_scroll(false)
