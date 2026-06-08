@@ -115,6 +115,34 @@ impl SoundFxApp {
         folders
     }
 
+    pub(super) fn default_library_collapsed_folders(&self) -> HashSet<Uuid> {
+        self.folders
+            .iter()
+            .filter(|folder| {
+                self.folders
+                    .iter()
+                    .any(|candidate| candidate.parent_id == Some(folder.id))
+            })
+            .map(|folder| folder.id)
+            .collect()
+    }
+
+    pub(super) fn default_library_root_folder(&self) -> Option<Uuid> {
+        self.sorted_child_folders(None)
+            .into_iter()
+            .next()
+            .map(|folder| folder.id)
+    }
+
+    pub(super) fn reset_library_tree_state(&mut self) {
+        self.library_current_folder = self.default_library_root_folder();
+        self.library_collapsed_folders = self.default_library_collapsed_folders();
+        self.folder_import_select_mode = None;
+        self.editing_folder_id = None;
+        self.editing_from_folder = None;
+        self.library_folder_create_open = false;
+    }
+
     pub(super) fn folder_path_label(&self, folder_id: Uuid) -> String {
         let mut names = Vec::new();
         let mut current = Some(folder_id);
@@ -1196,7 +1224,8 @@ impl SoundFxApp {
         let has_children = !children.is_empty();
         let is_collapsed = has_children && self.library_collapsed_folders.contains(&folder.id);
         let indent = 18.0 * depth as f32;
-        let fill = if is_selected {
+        let show_folder_actions = is_selected || (has_children && !is_collapsed);
+        let fill = if is_selected || (has_children && !is_collapsed) {
             if Self::dark_theme_enabled() {
                 Color32::from_rgb(63, 39, 24)
             } else {
@@ -1205,7 +1234,7 @@ impl SoundFxApp {
         } else {
             Self::surface_fill()
         };
-        let stroke = if is_selected {
+        let stroke = if is_selected || (has_children && !is_collapsed) {
             folder_accent
         } else {
             Self::border_color()
@@ -1299,7 +1328,7 @@ impl SoundFxApp {
                             }
                             rename_btn_response = Some(rename_btn);
                         }
-                        if is_selected
+                        if show_folder_actions
                             && self.library_tab == LibraryTab::Sounds
                             && self.folder_import_select_mode.is_none()
                         {
@@ -1354,7 +1383,7 @@ impl SoundFxApp {
             let open_rect = Rect::from_min_max(
                 row.response.rect.min,
                 Pos2::new(
-                    (row.response.rect.max.x - if is_selected { 278.0 } else { 84.0 })
+                    (row.response.rect.max.x - if show_folder_actions { 278.0 } else { 84.0 })
                         .max(row.response.rect.min.x),
                     row.response.rect.max.y,
                 ),
@@ -1513,6 +1542,7 @@ impl SoundFxApp {
         }
         let row_padding_y = self.library_row_vertical_padding();
         let waveform_height = self.library_row_wave_height();
+        let ultra_compact_row = self.library_row_thickness == LIBRARY_ROW_MIN_THICKNESS;
 
         let row = Frame::new()
             .fill(Self::surface_fill())
@@ -1533,22 +1563,25 @@ impl SoundFxApp {
                             )
                             .truncate(),
                         );
-                        ui.add_space(6.0);
-                        let waveform_samples = self.sound_waveform_samples(sound);
-                        let waveform_preview = Self::library_sound_waveform_preview_from_samples(
-                            sound,
-                            &waveform_samples,
-                            72,
-                        );
-                        Self::draw_full_width_wave_strip(
-                            ui,
-                            &waveform_preview,
-                            playback_progress,
-                            Color32::from_rgb(214, 51, 132),
-                            Color32::from_rgb(238, 213, 227),
-                            Self::panel_fill(),
-                            waveform_height,
-                        );
+                        if !ultra_compact_row {
+                            ui.add_space(6.0);
+                            let waveform_samples = self.sound_waveform_samples(sound);
+                            let waveform_preview =
+                                Self::library_sound_waveform_preview_from_samples(
+                                    sound,
+                                    &waveform_samples,
+                                    72,
+                                );
+                            Self::draw_full_width_wave_strip(
+                                ui,
+                                &waveform_preview,
+                                playback_progress,
+                                Color32::from_rgb(214, 51, 132),
+                                Color32::from_rgb(238, 213, 227),
+                                Self::panel_fill(),
+                                waveform_height,
+                            );
+                        }
                     });
 
                     ui.add_space(12.0);
@@ -1608,15 +1641,17 @@ impl SoundFxApp {
                             favorite_clicked = true;
                         }
                         favorite_response = Some(favorite_btn);
-                        ui.add_space(10.0);
-                        ui.add_sized(
-                            [62.0, 20.0],
-                            egui::Label::new(
-                                RichText::new(format_time(sound.trimmed_length()))
-                                    .size(11.5)
-                                    .color(Self::muted_text_color()),
-                            ),
-                        );
+                        if !ultra_compact_row {
+                            ui.add_space(10.0);
+                            ui.add_sized(
+                                [62.0, 20.0],
+                                egui::Label::new(
+                                    RichText::new(format_time(sound.trimmed_length()))
+                                        .size(11.5)
+                                        .color(Self::muted_text_color()),
+                                ),
+                            );
+                        }
                     });
                 });
             });

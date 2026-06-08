@@ -838,6 +838,7 @@ impl SoundFxApp {
             folder_import_animating: HashMap::new(),
             editing_from_folder: None,
         };
+        app.reset_library_tree_state();
         app.begin_async_library_hydration();
         app.begin_async_transition_analysis(resolved_startup_sound);
         app.begin_async_stream_driver_probe();
@@ -11380,12 +11381,7 @@ impl eframe::App for SoundFxApp {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.recorder.stop();
         self.pitch_monitor.stop();
-        self.library_current_folder = None;
-        self.library_collapsed_folders.clear();
-        self.folder_import_select_mode = None;
-        self.editing_folder_id = None;
-        self.editing_from_folder = None;
-        self.library_folder_create_open = false;
+        self.reset_library_tree_state();
         if self.pending_save {
             let _ = self.storage.save_library(&self.sounds);
             self.pending_save = false;
