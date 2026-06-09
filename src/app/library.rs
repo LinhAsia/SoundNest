@@ -249,14 +249,6 @@ impl SoundFxApp {
             && ctx.input(|input| !input.raw.hovered_files.is_empty())
     }
 
-    pub(super) fn current_library_drop_target_label(&self) -> String {
-        if let Some(folder_id) = self.library_drop_target_folder {
-            self.folder_path_label(folder_id)
-        } else {
-            "Root".to_owned()
-        }
-    }
-
     pub(super) fn resolve_library_drop_target_at(&self, pos: Pos2) -> Option<Option<Uuid>> {
         for (folder_id, rect) in self.library_drop_target_folder_rects.iter().rev() {
             if rect.contains(pos) {
@@ -272,7 +264,7 @@ impl SoundFxApp {
         None
     }
 
-    fn draw_external_drop_target_row(&mut self, ui: &mut Ui, label: &str) {
+    fn draw_external_drop_target_row(&mut self, ui: &mut Ui) {
         let accent = Color32::from_rgb(242, 140, 56);
         let accent_soft = Color32::from_rgb(255, 202, 145);
         let fill = if Self::dark_theme_enabled() {
@@ -293,7 +285,7 @@ impl SoundFxApp {
                     ui.vertical(|ui| {
                         ui.add(
                             egui::Label::new(
-                                RichText::new(label)
+                                RichText::new("Root")
                                     .size(13.2)
                                     .color(Self::strong_text_color())
                                     .strong(),
@@ -301,7 +293,7 @@ impl SoundFxApp {
                             .truncate(),
                         );
                         ui.label(
-                            RichText::new("Release to import here")
+                            RichText::new("Drop here to import into root")
                                 .size(11.0)
                                 .color(accent_soft),
                         );
@@ -338,14 +330,11 @@ impl SoundFxApp {
         self.library_collapsed_folders
             .retain(|folder_id| !removed_ids.contains(folder_id));
         let _ = self.storage.save_folders(&self.folders);
-        for sound in &mut self.sounds {
-            if sound
+        self.sounds.retain(|sound| {
+            !sound
                 .folder_id
                 .is_some_and(|folder_id| removed_ids.contains(&folder_id))
-            {
-                sound.folder_id = None;
-            }
-        }
+        });
         let _ = self.storage.save_library(&self.sounds);
         if self
             .library_current_folder
@@ -1135,10 +1124,18 @@ impl SoundFxApp {
 
     pub(super) fn draw_folders_list_view(&mut self, ui: &mut egui::Ui) {
         self.ensure_current_folder_exists();
-        self.library_drop_target_root_rect = None;
-        self.library_drop_target_folder_rects.clear();
         let external_drop_active = self.external_library_drop_active(ui.ctx());
+        let drop_session_active =
+            external_drop_active || ui.ctx().input(|input| !input.raw.dropped_files.is_empty());
+        if !drop_session_active {
+            self.library_drop_target_root_rect = None;
+            self.library_drop_target_folder_rects.clear();
+            self.library_drop_target_folder = None;
+            self.library_drop_target_root = false;
+        }
         if external_drop_active {
+            self.library_drop_target_root_rect = None;
+            self.library_drop_target_folder_rects.clear();
             self.library_drop_target_folder = None;
             self.library_drop_target_root = false;
         }
@@ -1234,9 +1231,8 @@ impl SoundFxApp {
 
         if external_drop_active {
             ui.add_space(10.0);
-            let target_label = self.current_library_drop_target_label();
             let drop_banner = Frame::new().show(ui, |ui| {
-                self.draw_external_drop_target_row(ui, &target_label);
+                self.draw_external_drop_target_row(ui);
             });
             self.library_drop_target_root_rect = Some(drop_banner.response.rect);
             let pointer_over_banner = self
