@@ -1867,9 +1867,9 @@ impl SoundFxApp {
                 )
             } else if direct_count > 0 {
                 (
-                    Color32::from_rgb(227, 82, 149),
-                    Color32::from_rgb(255, 182, 219),
-                    0xe061,
+                    Color32::from_rgb(214, 168, 52),
+                    Color32::from_rgb(255, 222, 145),
+                    0xe2c8,
                 )
             } else {
                 (
@@ -1889,7 +1889,7 @@ impl SoundFxApp {
                 } else if subfolders_count > 0 {
                     Color32::from_rgb(63, 39, 24)
                 } else if direct_count > 0 {
-                    Color32::from_rgb(72, 20, 50)
+                    Color32::from_rgb(58, 44, 16)
                 } else {
                     Color32::from_rgb(30, 30, 30)
                 }
@@ -1899,7 +1899,7 @@ impl SoundFxApp {
                 } else if subfolders_count > 0 {
                     Color32::from_rgb(33, 24, 18)
                 } else if direct_count > 0 {
-                    Color32::from_rgb(44, 12, 30)
+                    Color32::from_rgb(38, 30, 12)
                 } else {
                     Color32::from_rgb(22, 22, 22)
                 }
@@ -1910,7 +1910,7 @@ impl SoundFxApp {
             } else if subfolders_count > 0 {
                 Color32::from_rgb(255, 245, 234)
             } else if direct_count > 0 {
-                Color32::from_rgb(255, 205, 230)
+                Color32::from_rgb(255, 246, 210)
             } else {
                 Color32::from_rgb(245, 245, 245)
             }
@@ -1920,7 +1920,7 @@ impl SoundFxApp {
             } else if subfolders_count > 0 {
                 Color32::from_rgb(255, 250, 245)
             } else if direct_count > 0 {
-                Color32::from_rgb(255, 225, 240)
+                Color32::from_rgb(255, 250, 228)
             } else {
                 Color32::from_rgb(250, 250, 250)
             }
@@ -2237,7 +2237,7 @@ impl SoundFxApp {
         } else if subfolders_count > 0 {
             (folder_accent, if is_collapsed { 0xe2c7 } else { 0xe2c8 })
         } else if direct_count > 0 {
-            (Color32::from_rgb(227, 82, 149), 0xe061)
+            (Color32::from_rgb(214, 168, 52), 0xe2c8)
         } else {
             (
                 Self::muted_text_color(),
@@ -2252,7 +2252,7 @@ impl SoundFxApp {
                 } else if subfolders_count > 0 {
                     Color32::from_rgb(63, 39, 24)
                 } else if direct_count > 0 {
-                    Color32::from_rgb(72, 20, 50)
+                    Color32::from_rgb(58, 44, 16)
                 } else {
                     Color32::from_rgb(30, 30, 30)
                 }
@@ -2262,7 +2262,7 @@ impl SoundFxApp {
                 } else if subfolders_count > 0 {
                     Color32::from_rgb(33, 24, 18)
                 } else if direct_count > 0 {
-                    Color32::from_rgb(44, 12, 30)
+                    Color32::from_rgb(38, 30, 12)
                 } else {
                     Color32::from_rgb(22, 22, 22)
                 }
@@ -2273,7 +2273,7 @@ impl SoundFxApp {
             } else if subfolders_count > 0 {
                 Color32::from_rgb(255, 245, 234)
             } else if direct_count > 0 {
-                Color32::from_rgb(255, 205, 230)
+                Color32::from_rgb(255, 246, 210)
             } else {
                 Color32::from_rgb(245, 245, 245)
             }
@@ -2283,7 +2283,7 @@ impl SoundFxApp {
             } else if subfolders_count > 0 {
                 Color32::from_rgb(255, 250, 245)
             } else if direct_count > 0 {
-                Color32::from_rgb(255, 225, 240)
+                Color32::from_rgb(255, 250, 228)
             } else {
                 Color32::from_rgb(250, 250, 250)
             }
