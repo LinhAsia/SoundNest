@@ -541,6 +541,7 @@ pub struct SoundFxApp {
     pub(super) folder_name_warning: bool,
     pub(super) folder_import_select_mode: Option<Uuid>,
     pub(super) folder_import_animating: HashMap<Uuid, Instant>,
+    pub(super) library_folder_visible_sound_counts: HashMap<Option<Uuid>, usize>,
     pub(super) editing_from_folder: Option<Uuid>,
 }
 
@@ -875,6 +876,7 @@ impl SoundFxApp {
             folder_name_warning: false,
             folder_import_select_mode: None,
             folder_import_animating: HashMap::new(),
+            library_folder_visible_sound_counts: HashMap::new(),
             editing_from_folder: None,
         };
         app.reset_library_tree_state();
