@@ -264,44 +264,6 @@ impl SoundFxApp {
         None
     }
 
-    fn draw_external_drop_target_row(&mut self, ui: &mut Ui) {
-        let accent = Color32::from_rgb(242, 140, 56);
-        let accent_soft = Color32::from_rgb(255, 202, 145);
-        let fill = if Self::dark_theme_enabled() {
-            Color32::from_rgb(63, 39, 24)
-        } else {
-            Color32::from_rgb(255, 245, 234)
-        };
-
-        Frame::new()
-            .fill(fill)
-            .stroke(Stroke::new(1.5, accent))
-            .corner_radius(16.0)
-            .inner_margin(Margin::symmetric(12, 10))
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(Self::icon(0xe2c7, 18.0, accent));
-                    ui.add_space(8.0);
-                    ui.vertical(|ui| {
-                        ui.add(
-                            egui::Label::new(
-                                RichText::new("Root")
-                                    .size(13.2)
-                                    .color(Self::strong_text_color())
-                                    .strong(),
-                            )
-                            .truncate(),
-                        );
-                        ui.label(
-                            RichText::new("Drop here to import into root")
-                                .size(11.0)
-                                .color(accent_soft),
-                        );
-                    });
-                });
-            });
-    }
-
     pub(super) fn create_folder(&mut self, name: String, parent_id: Option<Uuid>) {
         let new_folder_id = self.create_folder_record(name, parent_id);
         let _ = self.storage.save_folders(&self.folders);
@@ -1228,22 +1190,6 @@ impl SoundFxApp {
                 }
             });
         });
-
-        if external_drop_active {
-            ui.add_space(10.0);
-            let drop_banner = Frame::new().show(ui, |ui| {
-                self.draw_external_drop_target_row(ui);
-            });
-            self.library_drop_target_root_rect = Some(drop_banner.response.rect);
-            let pointer_over_banner = self
-                .external_drop_pointer_pos(ui.ctx())
-                .is_some_and(|pos| drop_banner.response.rect.contains(pos));
-            if pointer_over_banner {
-                self.library_drop_target_folder = None;
-                self.library_drop_target_root = true;
-            }
-            ui.add_space(10.0);
-        }
 
         if self.library_folder_create_open {
             ui.add_space(10.0);
