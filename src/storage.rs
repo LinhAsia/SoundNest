@@ -7,8 +7,11 @@ use std::collections::HashMap;
 use std::fs;
 use std::fs::File;
 use std::io::BufReader;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use uuid::Uuid;
 
 const WAVEFORM_BUCKETS: usize = 320;
@@ -1312,6 +1315,117 @@ impl Storage {
         Ok(updated)
     }
 
+    pub fn repair_sound_preview_asset_with_ffmpeg_at(
+        root_dir: &Path,
+        sound: &SoundEffect,
+        failing_path: &Path,
+        ffmpeg_path: &Path,
+    ) -> Result<SoundEffect> {
+        let mut updated = sound.clone();
+        let main_path = updated.asset_path(root_dir);
+        let vocal_path = updated.vocal_asset_path(root_dir);
+        let music_path = updated.music_asset_path(root_dir);
+
+        let (target_path, temp_path, repair_target): (PathBuf, PathBuf, SoundAssetRepairTarget) =
+            if failing_path == main_path {
+                let target_file = format!("{}.wav", updated.id);
+                let target_path = root_dir.join("sounds").join(&target_file);
+                let temp_path = root_dir
+                    .join("sounds")
+                    .join(format!("{}.repair.tmp.wav", updated.id));
+                (
+                    target_path,
+                    temp_path,
+                    SoundAssetRepairTarget::Main(target_file),
+                )
+            } else if vocal_path.as_deref() == Some(failing_path) {
+                let target_file = Self::vocal_asset_file_name(updated.id);
+                let target_path = root_dir.join("sound-vocals").join(&target_file);
+                let temp_path = root_dir
+                    .join("sound-vocals")
+                    .join(format!("{}.repair.tmp.wav", updated.id));
+                (
+                    target_path,
+                    temp_path,
+                    SoundAssetRepairTarget::Vocal(target_file),
+                )
+            } else if music_path.as_deref() == Some(failing_path) {
+                let target_file = Self::music_asset_file_name(updated.id);
+                let target_path = root_dir.join("sound-music").join(&target_file);
+                let temp_path = root_dir
+                    .join("sound-music")
+                    .join(format!("{}.repair.tmp.wav", updated.id));
+                (
+                    target_path,
+                    temp_path,
+                    SoundAssetRepairTarget::Music(target_file),
+                )
+            } else {
+                bail!("preview asset is not linked to this sound");
+            };
+
+        if let Some(parent) = target_path.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("unable to create {}", parent.display()))?;
+        }
+        if temp_path.exists() {
+            let _ = fs::remove_file(&temp_path);
+        }
+        if target_path.exists() && target_path != failing_path {
+            let _ = fs::remove_file(&target_path);
+        }
+
+        let args = vec![
+            "-y".to_owned(),
+            "-i".to_owned(),
+            failing_path.to_string_lossy().into_owned(),
+            "-vn".to_owned(),
+            "-acodec".to_owned(),
+            "pcm_s16le".to_owned(),
+            "-ar".to_owned(),
+            "44100".to_owned(),
+            "-ac".to_owned(),
+            "2".to_owned(),
+            temp_path.to_string_lossy().into_owned(),
+        ];
+        let mut cmd = Command::new(ffmpeg_path);
+        for arg in args {
+            cmd.arg(arg);
+        }
+        #[cfg(windows)]
+        cmd.creation_flags(0x08000000);
+        let output = cmd
+            .output()
+            .with_context(|| format!("failed to launch {}", ffmpeg_path.display()))?;
+        if !output.status.success() {
+            bail!("{}", String::from_utf8_lossy(&output.stderr).trim());
+        }
+
+        if target_path.exists() {
+            let _ = fs::remove_file(&target_path);
+        }
+        fs::rename(&temp_path, &target_path)
+            .with_context(|| format!("unable to finalize {}", target_path.display()))?;
+        if failing_path != target_path && failing_path.exists() {
+            let _ = fs::remove_file(failing_path);
+        }
+
+        let analysis = analyze_audio_file(&target_path, WAVEFORM_BUCKETS)?;
+        match repair_target {
+            SoundAssetRepairTarget::Main(target_file) => updated.asset_file = target_file,
+            SoundAssetRepairTarget::Vocal(target_file) => {
+                updated.vocal_asset_file = Some(target_file)
+            }
+            SoundAssetRepairTarget::Music(target_file) => {
+                updated.music_asset_file = Some(target_file)
+            }
+        }
+        updated.duration_secs = analysis.duration_secs;
+        updated.waveform = analysis.waveform;
+        updated.clamp_trim();
+        Ok(updated)
+    }
+
     pub fn analyze_waveform_preview(&self, path: &Path, buckets: usize) -> Result<Vec<f32>> {
         Ok(analyze_audio_file(path, buckets.max(64))?.waveform)
     }
@@ -1496,6 +1610,12 @@ struct DecodedAudio {
     channels: u16,
     sample_rate: u32,
     samples: Vec<f32>,
+}
+
+enum SoundAssetRepairTarget {
+    Main(String),
+    Vocal(String),
+    Music(String),
 }
 
 fn analyze_audio_file(path: &Path, buckets: usize) -> Result<AudioAnalysis> {

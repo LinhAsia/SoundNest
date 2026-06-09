@@ -920,6 +920,18 @@ impl SoundFxApp {
             match message {
                 AudioPreloadMessage::Finished { asset_path, result } => {
                     let asset_path_for_match = asset_path.clone();
+                    let pending_preview_match = self.pending_preview_after_preload.and_then(
+                        |(pending_sound_id, start_position_secs)| {
+                            self.sounds
+                                .iter()
+                                .find(|sound| sound.id == pending_sound_id)
+                                .and_then(|sound| {
+                                    (self.preview_asset_path_for_sound(sound)
+                                        == asset_path_for_match)
+                                        .then_some((pending_sound_id, start_position_secs))
+                                })
+                        },
+                    );
                     self.audio_preload_inflight.remove(&asset_path);
                     match result {
                         Ok((channels, sample_rate, samples)) => {
@@ -935,18 +947,35 @@ impl SoundFxApp {
                             }
                         }
                         Err(error) => {
+                            if let Some((pending_sound_id, start_position_secs)) =
+                                pending_preview_match
+                            {
+                                match self.repair_sound_preview_asset(
+                                    ctx,
+                                    pending_sound_id,
+                                    &asset_path_for_match,
+                                ) {
+                                    Ok(true) => {
+                                        self.pending_preview_after_preload = None;
+                                        pending_preview_to_play =
+                                            Some((pending_sound_id, start_position_secs));
+                                        continue;
+                                    }
+                                    Ok(false) => {}
+                                    Err(repair_error) => {
+                                        self.audio_preload_failures
+                                            .insert(asset_path.clone(), repair_error.to_string());
+                                        self.pending_preview_after_preload = None;
+                                        self.set_error_status(format!(
+                                            "Unable to load audio preview: {repair_error}"
+                                        ));
+                                        continue;
+                                    }
+                                }
+                            }
                             self.audio_preload_failures
                                 .insert(asset_path.clone(), error.clone());
-                            if self.pending_preview_after_preload.is_some()
-                                && self
-                                    .sounds
-                                    .iter()
-                                    .find(|sound| {
-                                        self.preview_asset_path_for_sound(sound)
-                                            == asset_path_for_match
-                                    })
-                                    .is_some()
-                            {
+                            if pending_preview_match.is_some() {
                                 self.pending_preview_after_preload = None;
                                 self.set_error_status(format!(
                                     "Unable to load audio preview: {error}"
@@ -954,16 +983,7 @@ impl SoundFxApp {
                             }
                         }
                     }
-                    if let Some((pending_sound_id, start_position_secs)) =
-                        self.pending_preview_after_preload
-                        && self
-                            .sounds
-                            .iter()
-                            .find(|sound| sound.id == pending_sound_id)
-                            .is_some_and(|sound| {
-                                self.preview_asset_path_for_sound(sound) == asset_path_for_match
-                            })
-                    {
+                    if let Some((pending_sound_id, start_position_secs)) = pending_preview_match {
                         self.pending_preview_after_preload = None;
                         pending_preview_to_play = Some((pending_sound_id, start_position_secs));
                     }

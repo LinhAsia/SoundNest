@@ -2479,6 +2479,31 @@ impl SoundFxApp {
         }
     }
 
+    fn repair_sound_preview_asset(
+        &mut self,
+        ctx: &Context,
+        sound_id: Uuid,
+        failing_path: &Path,
+    ) -> Result<bool> {
+        let Some(index) = self.sounds.iter().position(|sound| sound.id == sound_id) else {
+            return Ok(false);
+        };
+        let ffmpeg_path = self.downloader.ensure_ffmpeg_available()?;
+        let updated = Storage::repair_sound_preview_asset_with_ffmpeg_at(
+            self.storage.root_dir(),
+            &self.sounds[index],
+            failing_path,
+            &ffmpeg_path,
+        )?;
+        self.sounds[index] = updated;
+        self.audio_preload_failures.remove(failing_path);
+        self.mark_dirty(ctx);
+        if !self.save_now() {
+            return Ok(false);
+        }
+        Ok(true)
+    }
+
     fn schedule_processed_export(&mut self, sound_id: Uuid) {
         self.pending_processed_export_sound = Some(sound_id);
     }
