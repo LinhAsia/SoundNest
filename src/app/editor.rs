@@ -679,9 +679,7 @@ impl SoundFxApp {
         }
         let pointer_pos = self.external_drop_pointer_pos(ctx);
         let dropped_in_rect = if is_library_sounds {
-            self.library_drop_target_root
-                || self.library_drop_target_folder.is_some()
-                || self.library_current_folder.is_some()
+            self.library_drop_target_root || self.library_drop_target_folder.is_some()
         } else {
             self.editor_drop_rect
                 .is_some_and(|rect| pointer_pos.is_some_and(|pos| rect.contains(pos)))
@@ -706,7 +704,6 @@ impl SoundFxApp {
                     None
                 } else {
                     self.library_drop_target_folder
-                        .or(self.library_current_folder)
                 }
             } else {
                 None

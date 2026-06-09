@@ -257,6 +257,44 @@ impl SoundFxApp {
         }
     }
 
+    fn draw_external_drop_target_row(&mut self, ui: &mut Ui, label: &str) {
+        let accent = Color32::from_rgb(242, 140, 56);
+        let accent_soft = Color32::from_rgb(255, 202, 145);
+        let fill = if Self::dark_theme_enabled() {
+            Color32::from_rgb(63, 39, 24)
+        } else {
+            Color32::from_rgb(255, 245, 234)
+        };
+
+        Frame::new()
+            .fill(fill)
+            .stroke(Stroke::new(1.5, accent))
+            .corner_radius(16.0)
+            .inner_margin(Margin::symmetric(12, 10))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(Self::icon(0xe2c7, 18.0, accent));
+                    ui.add_space(8.0);
+                    ui.vertical(|ui| {
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(label)
+                                    .size(13.2)
+                                    .color(Self::strong_text_color())
+                                    .strong(),
+                            )
+                            .truncate(),
+                        );
+                        ui.label(
+                            RichText::new("Release to import here")
+                                .size(11.0)
+                                .color(accent_soft),
+                        );
+                    });
+                });
+            });
+    }
+
     pub(super) fn create_folder(&mut self, name: String, parent_id: Option<Uuid>) {
         let new_folder_id = self.create_folder_record(name, parent_id);
         let _ = self.storage.save_folders(&self.folders);
@@ -1084,8 +1122,8 @@ impl SoundFxApp {
         self.ensure_current_folder_exists();
         let external_drop_active = self.external_library_drop_active(ui.ctx());
         if external_drop_active {
-            self.library_drop_target_folder = self.library_current_folder;
-            self.library_drop_target_root = self.library_current_folder.is_none();
+            self.library_drop_target_folder = None;
+            self.library_drop_target_root = false;
         }
         let selected_parent_label = self
             .library_current_folder
@@ -1180,23 +1218,9 @@ impl SoundFxApp {
         if external_drop_active {
             ui.add_space(10.0);
             let target_label = self.current_library_drop_target_label();
-            let drop_banner = Frame::new()
-                .fill(Color32::from_rgba_premultiplied(242, 140, 56, 34))
-                .stroke(Stroke::new(1.5, Color32::from_rgb(242, 140, 56)))
-                .corner_radius(16.0)
-                .inner_margin(Margin::symmetric(14, 10))
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(Self::icon(0xe2c7, 16.0, Color32::from_rgb(242, 140, 56)));
-                        ui.add_space(8.0);
-                        ui.label(
-                            RichText::new(format!("Drop into {target_label}"))
-                                .size(12.5)
-                                .color(Self::strong_text_color())
-                                .strong(),
-                        );
-                    });
-                });
+            let drop_banner = Frame::new().show(ui, |ui| {
+                self.draw_external_drop_target_row(ui, &target_label);
+            });
             let pointer_over_banner = self
                 .external_drop_pointer_pos(ui.ctx())
                 .is_some_and(|pos| drop_banner.response.rect.contains(pos));

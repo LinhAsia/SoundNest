@@ -11580,9 +11580,7 @@ impl eframe::App for SoundFxApp {
         if external_file_hover {
             ctx.request_repaint_after(Duration::from_millis(16));
             let pointer_over_drop = if is_library_sound_drop {
-                self.library_drop_target_root
-                    || self.library_drop_target_folder.is_some()
-                    || self.library_current_folder.is_some()
+                self.library_drop_target_root || self.library_drop_target_folder.is_some()
             } else {
                 self.external_drop_pointer_pos(ctx)
                     .zip(self.editor_drop_rect)
