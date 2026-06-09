@@ -921,11 +921,38 @@ impl SoundFxApp {
                 AudioPreloadMessage::Finished { asset_path, result } => {
                     let asset_path_for_match = asset_path.clone();
                     self.audio_preload_inflight.remove(&asset_path);
-                    if let Ok((channels, sample_rate, samples)) = result
-                        && let Some(audio) = self.audio.as_mut()
-                    {
-                        audio.insert_cached_audio(asset_path, channels, sample_rate, samples);
-                        changed = true;
+                    match result {
+                        Ok((channels, sample_rate, samples)) => {
+                            self.audio_preload_failures.remove(&asset_path);
+                            if let Some(audio) = self.audio.as_mut() {
+                                audio.insert_cached_audio(
+                                    asset_path,
+                                    channels,
+                                    sample_rate,
+                                    samples,
+                                );
+                                changed = true;
+                            }
+                        }
+                        Err(error) => {
+                            self.audio_preload_failures
+                                .insert(asset_path.clone(), error.clone());
+                            if self.pending_preview_after_preload.is_some()
+                                && self
+                                    .sounds
+                                    .iter()
+                                    .find(|sound| {
+                                        self.preview_asset_path_for_sound(sound)
+                                            == asset_path_for_match
+                                    })
+                                    .is_some()
+                            {
+                                self.pending_preview_after_preload = None;
+                                self.set_error_status(format!(
+                                    "Unable to load audio preview: {error}"
+                                ));
+                            }
+                        }
                     }
                     if let Some((pending_sound_id, start_position_secs)) =
                         self.pending_preview_after_preload
@@ -955,6 +982,88 @@ impl SoundFxApp {
             || self.pending_preview_after_preload.is_some()
         {
             ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
+        }
+    }
+
+    pub(super) fn poll_library_import_jobs(&mut self, ctx: &Context) {
+        let mut changed = false;
+        while let Ok(message) = self.library_import_rx.try_recv() {
+            match message {
+                LibraryImportMessage::Progress {
+                    job_id,
+                    completed,
+                    total,
+                    current_label,
+                } => {
+                    if let Some(job) = self.library_import_job.as_mut()
+                        && job.job_id == job_id
+                    {
+                        job.completed = completed;
+                        job.total = total;
+                        job.current_label = current_label;
+                        changed = true;
+                    }
+                }
+                LibraryImportMessage::Finished { job_id, result } => {
+                    let Some(job) = self.library_import_job.take() else {
+                        continue;
+                    };
+                    if job.job_id != job_id {
+                        self.library_import_job = Some(job);
+                        continue;
+                    }
+
+                    match result {
+                        Ok(mut imported) => {
+                            let target_folder_id = imported.target_folder_id.filter(|folder_id| {
+                                self.folders.iter().any(|folder| folder.id == *folder_id)
+                            });
+                            for folder in &mut imported.imported_folders {
+                                if folder.parent_id == imported.target_folder_id {
+                                    folder.parent_id = target_folder_id;
+                                }
+                            }
+                            for sound in &mut imported.imported_sounds {
+                                if sound.folder_id == imported.target_folder_id {
+                                    sound.folder_id = target_folder_id;
+                                }
+                            }
+
+                            if !imported.imported_folders.is_empty() {
+                                self.folders.extend(imported.imported_folders);
+                                let _ = self.storage.save_folders(&self.folders);
+                            }
+                            if imported.imported_sounds.is_empty() {
+                                if imported.ignored_count > 0 {
+                                    self.set_error_status("No supported audio files were found");
+                                } else {
+                                    self.clear_status();
+                                }
+                                continue;
+                            }
+
+                            imported.imported_sounds.reverse();
+                            let imported_count = imported.imported_sounds.len();
+                            for sound in imported.imported_sounds {
+                                self.selected = Some(sound.id);
+                                self.sounds.insert(0, sound);
+                            }
+                            self.library_audio_tag_filter = None;
+                            self.library_current_folder = target_folder_id;
+                            self.save_now();
+                            self.status = Some(format!("Imported {imported_count} sound(s)"));
+                            changed = true;
+                        }
+                        Err(error) => self.set_error_status(error),
+                    }
+                }
+            }
+        }
+
+        if changed {
+            ctx.request_repaint();
+        } else if self.library_import_job.is_some() {
+            ctx.request_repaint_after(Duration::from_millis(JOB_POLL_REPAINT_MS));
         }
     }
 
@@ -1281,6 +1390,55 @@ impl SoundFxApp {
                 }
             });
         });
+
+        if let Some(import_job) = self.library_import_job.as_ref() {
+            ui.add_space(10.0);
+            let target_label = import_job
+                .target_folder_id
+                .and_then(|folder_id| {
+                    self.folders
+                        .iter()
+                        .find(|folder| folder.id == folder_id)
+                        .map(|folder| self.folder_path_label(folder.id))
+                })
+                .unwrap_or_else(|| "Root".to_owned());
+            Frame::new()
+                .fill(Color32::from_rgba_premultiplied(242, 140, 56, 20))
+                .stroke(Stroke::new(1.0, Color32::from_rgb(242, 140, 56)))
+                .corner_radius(16.0)
+                .inner_margin(Margin::same(12))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(Self::icon(0xe2c7, 16.0, Color32::from_rgb(242, 140, 56)));
+                        ui.label(
+                            RichText::new(format!("Importing into {target_label}"))
+                                .size(12.5)
+                                .color(Self::strong_text_color())
+                                .strong(),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                            let total = import_job.total.max(import_job.completed.max(1));
+                            ui.label(
+                                RichText::new(format!(
+                                    "{}/{}",
+                                    import_job.completed.min(total),
+                                    total
+                                ))
+                                .size(11.5)
+                                .color(Self::muted_text_color()),
+                            );
+                        });
+                    });
+                    ui.add_space(6.0);
+                    let denominator = import_job.total.max(1) as f32;
+                    let progress = (import_job.completed as f32 / denominator).clamp(0.0, 1.0);
+                    ui.add(
+                        ProgressBar::new(progress)
+                            .desired_width(ui.available_width())
+                            .text(import_job.current_label.as_str()),
+                    );
+                });
+        }
 
         if self.library_folder_create_open {
             ui.add_space(10.0);

@@ -709,7 +709,9 @@ impl SoundFxApp {
             } else {
                 None
             };
-            if let Err(error) = self.import_paths_to_folder(paths, target_folder_id) {
+            if is_library_sounds {
+                self.begin_import_paths_to_folder(paths, target_folder_id);
+            } else if let Err(error) = self.import_paths_to_folder(paths, target_folder_id) {
                 self.set_error_status(error);
             }
             self.library_drop_target_folder = None;

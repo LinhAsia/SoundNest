@@ -11,7 +11,9 @@ use crate::pitch::{
 use crate::platform;
 use crate::record_video;
 use crate::recorder::{Recorder, RecorderConfig};
-use crate::storage::{GeminiTtsPromptPreset, SoundEffect, Storage, VideoAsset, format_time};
+use crate::storage::{
+    Folder, GeminiTtsPromptPreset, SoundEffect, Storage, VideoAsset, format_time,
+};
 use crate::stream_input::{StreamInputConfig, StreamInputRouter};
 use anyhow::{Context as _, Result};
 #[cfg(windows)]
@@ -211,6 +213,34 @@ pub(crate) enum AudioPreloadMessage {
         asset_path: PathBuf,
         result: Result<(u16, u32, Vec<f32>), String>,
     },
+}
+
+pub(crate) enum LibraryImportMessage {
+    Progress {
+        job_id: Uuid,
+        completed: usize,
+        total: usize,
+        current_label: String,
+    },
+    Finished {
+        job_id: Uuid,
+        result: Result<LibraryImportResult, String>,
+    },
+}
+
+pub(crate) struct LibraryImportResult {
+    pub(crate) target_folder_id: Option<Uuid>,
+    pub(crate) imported_sounds: Vec<SoundEffect>,
+    pub(crate) imported_folders: Vec<Folder>,
+    pub(crate) ignored_count: usize,
+}
+
+pub(crate) struct ActiveLibraryImport {
+    pub(crate) job_id: Uuid,
+    pub(crate) target_folder_id: Option<Uuid>,
+    pub(crate) completed: usize,
+    pub(crate) total: usize,
+    pub(crate) current_label: String,
 }
 
 pub(crate) enum NormalizeMessage {
@@ -509,8 +539,12 @@ pub struct SoundFxApp {
     pub(super) trim_commit_tx: Sender<TrimCommitMessage>,
     pub(super) trim_commit_rx: Receiver<TrimCommitMessage>,
     pub(super) audio_preload_inflight: HashSet<PathBuf>,
+    pub(super) audio_preload_failures: HashMap<PathBuf, String>,
     pub(super) audio_preload_tx: Sender<AudioPreloadMessage>,
     pub(super) audio_preload_rx: Receiver<AudioPreloadMessage>,
+    pub(super) library_import_job: Option<ActiveLibraryImport>,
+    pub(super) library_import_tx: Sender<LibraryImportMessage>,
+    pub(super) library_import_rx: Receiver<LibraryImportMessage>,
     pub(super) normalize_tx: Sender<NormalizeMessage>,
     pub(super) normalize_rx: Receiver<NormalizeMessage>,
     pub(super) demucs_installing: bool,
@@ -597,6 +631,7 @@ impl SoundFxApp {
         let (processed_export_tx, processed_export_rx) = mpsc::channel();
         let (trim_commit_tx, trim_commit_rx) = mpsc::channel();
         let (audio_preload_tx, audio_preload_rx) = mpsc::channel();
+        let (library_import_tx, library_import_rx) = mpsc::channel();
         let (normalize_tx, normalize_rx) = mpsc::channel();
         let video_assets = storage.load_video_library().unwrap_or_else(|error| {
             status = Some(error.to_string());
@@ -844,8 +879,12 @@ impl SoundFxApp {
             trim_commit_tx,
             trim_commit_rx,
             audio_preload_inflight: HashSet::new(),
+            audio_preload_failures: HashMap::new(),
             audio_preload_tx,
             audio_preload_rx,
+            library_import_job: None,
+            library_import_tx,
+            library_import_rx,
             normalize_tx,
             normalize_rx,
             demucs_installing: false,
@@ -1232,6 +1271,47 @@ impl SoundFxApp {
         }
     }
 
+    fn begin_import_paths_to_folder(
+        &mut self,
+        paths: Vec<PathBuf>,
+        target_folder_id: Option<Uuid>,
+    ) {
+        if paths.is_empty() {
+            return;
+        }
+        if self.library_import_job.is_some() {
+            self.set_error_status("Another import is already running");
+            return;
+        }
+
+        let total = paths
+            .iter()
+            .map(|path| Self::count_importable_audio_files(path))
+            .sum::<usize>();
+        let job_id = Uuid::new_v4();
+        self.library_import_job = Some(ActiveLibraryImport {
+            job_id,
+            target_folder_id,
+            completed: 0,
+            total,
+            current_label: "Preparing import...".to_owned(),
+        });
+        self.status = Some(if total > 0 {
+            format!("Importing {total} sound(s)...")
+        } else {
+            "Scanning dropped files...".to_owned()
+        });
+
+        let tx = self.library_import_tx.clone();
+        let root_dir = self.storage.root_dir().to_path_buf();
+        thread::spawn(move || {
+            let result =
+                Self::run_library_import_job(root_dir, paths, target_folder_id, &tx, job_id)
+                    .map_err(|error| error.to_string());
+            let _ = tx.send(LibraryImportMessage::Finished { job_id, result });
+        });
+    }
+
     fn import_paths_to_folder(
         &mut self,
         paths: Vec<PathBuf>,
@@ -1323,6 +1403,149 @@ impl SoundFxApp {
         let mut sound = self.storage.import_sound(path)?;
         sound.folder_id = target_folder_id;
         imported.push(sound);
+        Ok(true)
+    }
+
+    fn count_importable_audio_files(path: &Path) -> usize {
+        if Self::should_skip_import_path(path) {
+            return 0;
+        }
+        if path.is_file() {
+            return usize::from(is_supported_audio(path));
+        }
+        if !path.is_dir() {
+            return 0;
+        }
+
+        let Ok(entries) = fs::read_dir(path) else {
+            return 0;
+        };
+        entries
+            .flatten()
+            .map(|entry| Self::count_importable_audio_files(&entry.path()))
+            .sum()
+    }
+
+    fn run_library_import_job(
+        root_dir: PathBuf,
+        paths: Vec<PathBuf>,
+        target_folder_id: Option<Uuid>,
+        tx: &Sender<LibraryImportMessage>,
+        job_id: Uuid,
+    ) -> Result<LibraryImportResult> {
+        let mut imported_sounds = Vec::new();
+        let mut imported_folders = Vec::new();
+        let mut ignored_count = 0usize;
+        let total = paths
+            .iter()
+            .map(|path| Self::count_importable_audio_files(path))
+            .sum::<usize>();
+        let mut completed = 0usize;
+
+        let _ = tx.send(LibraryImportMessage::Progress {
+            job_id,
+            completed,
+            total,
+            current_label: "Preparing import...".to_owned(),
+        });
+
+        for path in paths {
+            Self::import_path_entry_background(
+                &root_dir,
+                &path,
+                target_folder_id,
+                &mut imported_sounds,
+                &mut imported_folders,
+                &mut ignored_count,
+                &mut completed,
+                total,
+                tx,
+                job_id,
+            )?;
+        }
+
+        Ok(LibraryImportResult {
+            target_folder_id,
+            imported_sounds,
+            imported_folders,
+            ignored_count,
+        })
+    }
+
+    fn import_path_entry_background(
+        root_dir: &Path,
+        path: &Path,
+        target_folder_id: Option<Uuid>,
+        imported_sounds: &mut Vec<SoundEffect>,
+        imported_folders: &mut Vec<Folder>,
+        ignored_count: &mut usize,
+        completed: &mut usize,
+        total: usize,
+        tx: &Sender<LibraryImportMessage>,
+        job_id: Uuid,
+    ) -> Result<bool> {
+        if Self::should_skip_import_path(path) {
+            *ignored_count += 1;
+            return Ok(false);
+        }
+
+        if path.is_dir() {
+            if !Self::path_contains_supported_audio(path) {
+                *ignored_count += 1;
+                return Ok(false);
+            }
+
+            let folder_name = path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("Folder")
+                .to_owned();
+            let folder_id = Uuid::new_v4();
+            imported_folders.push(Folder {
+                id: folder_id,
+                name: folder_name,
+                parent_id: target_folder_id,
+            });
+
+            for child_path in Self::sorted_directory_entries(path)? {
+                let _ = Self::import_path_entry_background(
+                    root_dir,
+                    &child_path,
+                    Some(folder_id),
+                    imported_sounds,
+                    imported_folders,
+                    ignored_count,
+                    completed,
+                    total,
+                    tx,
+                    job_id,
+                )?;
+            }
+            return Ok(true);
+        }
+
+        if !is_supported_audio(path) {
+            *ignored_count += 1;
+            return Ok(false);
+        }
+
+        let mut sound = Storage::import_sound_at(root_dir, path)?;
+        sound.folder_id = target_folder_id;
+        imported_sounds.push(sound);
+        *completed = completed.saturating_add(1);
+        let current_label = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .map(str::to_owned)
+            .unwrap_or_else(|| "sound".to_owned());
+        let _ = tx.send(LibraryImportMessage::Progress {
+            job_id,
+            completed: *completed,
+            total,
+            current_label,
+        });
         Ok(true)
     }
 
@@ -1906,9 +2129,14 @@ impl SoundFxApp {
         self.myinstants_preview_audio_url = None;
 
         if !audio.has_cached_audio(&asset_path) {
+            if let Some(error) = self.audio_preload_failures.get(&asset_path) {
+                self.pending_preview_after_preload = None;
+                self.set_error_status(format!("Unable to load audio preview: {error}"));
+                return;
+            }
             self.schedule_audio_preload(asset_path.clone());
             self.pending_preview_after_preload = Some((sound.id, start_position_secs));
-            self.clear_status();
+            self.status = Some(format!("Loading preview for {}...", sound.name));
             return;
         }
 
@@ -2317,6 +2545,7 @@ impl SoundFxApp {
             .as_ref()
             .is_some_and(|audio| audio.has_cached_audio(&asset_path))
             || self.audio_preload_inflight.contains(&asset_path)
+            || self.audio_preload_failures.contains_key(&asset_path)
         {
             return;
         }
@@ -11325,6 +11554,7 @@ impl eframe::App for SoundFxApp {
         self.poll_processed_export_jobs(ctx);
         self.poll_trim_commit_jobs(ctx);
         self.poll_audio_preload_jobs(ctx);
+        self.poll_library_import_jobs(ctx);
         self.poll_normalize_jobs(ctx);
         self.poll_demucs_install_result(ctx);
         self.poll_demucs_model_result(ctx);
