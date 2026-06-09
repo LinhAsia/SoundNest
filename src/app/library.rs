@@ -1101,6 +1101,7 @@ impl SoundFxApp {
             self.library_drop_target_folder = None;
             self.library_drop_target_root = false;
         }
+        self.library_drop_target_root_rect = Some(ui.max_rect());
         let selected_parent_label = self
             .library_current_folder
             .map(|folder_id| self.folder_path_label(folder_id))
