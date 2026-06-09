@@ -1298,7 +1298,7 @@ impl SoundFxApp {
             self.library_drop_target_root_rect = None;
             self.library_drop_target_folder_rects.clear();
             self.library_drop_target_folder = None;
-            self.library_drop_target_root = false;
+            self.library_drop_target_root = true;
         }
         self.library_drop_target_root_rect = Some(ui.max_rect());
         let selected_parent_label = self
@@ -1556,6 +1556,14 @@ impl SoundFxApp {
         let mut toggle_folder_id = None;
         let mut clear_selected_folder = false;
 
+        if self.external_library_drop_active(ui.ctx())
+            && self.library_drop_target_folder.is_none()
+            && self.library_drop_target_root
+        {
+            self.draw_external_drop_preview_row(ui, 0, None);
+            ui.add_space(8.0);
+        }
+
         for folder in self.visible_child_folders(None) {
             self.draw_folder_tree_node(
                 ui,
@@ -1581,6 +1589,89 @@ impl SoundFxApp {
             toggle_folder_id,
             clear_selected_folder,
         );
+    }
+
+    fn external_drop_preview_details(&self, ctx: &Context) -> Option<(String, bool, usize)> {
+        let hovered_files = ctx.input(|input| input.raw.hovered_files.clone());
+        if hovered_files.is_empty() {
+            return None;
+        }
+
+        let first_path = hovered_files.first().and_then(|file| file.path.as_ref())?;
+        let label = first_path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .map(str::to_owned)
+            .unwrap_or_else(|| "Imported item".to_owned());
+        let is_folder = first_path.is_dir();
+        Some((label, is_folder, hovered_files.len()))
+    }
+
+    fn draw_external_drop_preview_row(
+        &mut self,
+        ui: &mut egui::Ui,
+        depth: usize,
+        parent_folder_id: Option<Uuid>,
+    ) {
+        let Some((label, is_folder, item_count)) = self.external_drop_preview_details(ui.ctx())
+        else {
+            return;
+        };
+
+        let indent = 18.0 * depth as f32;
+        let accent = Color32::from_rgb(242, 140, 56);
+        let accent_soft = Color32::from_rgb(255, 202, 145);
+        let detail = if is_folder {
+            if item_count > 1 {
+                format!("Will be added here with {} dragged items", item_count)
+            } else {
+                "Will be added here as a child folder".to_owned()
+            }
+        } else if item_count > 1 {
+            format!("{} audio items will be imported here", item_count)
+        } else {
+            "Will be imported here".to_owned()
+        };
+        let prefix = parent_folder_id
+            .map(|folder_id| self.folder_path_label(folder_id))
+            .unwrap_or_else(|| "Root".to_owned());
+
+        ui.horizontal(|ui| {
+            ui.add_space(indent);
+            Frame::new()
+                .fill(Color32::from_rgba_premultiplied(242, 140, 56, 28))
+                .stroke(Stroke::new(1.5, accent))
+                .corner_radius(16.0)
+                .inner_margin(Margin::symmetric(12, 10))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(Self::icon(0xe5c8, 18.0, accent));
+                        ui.add_space(8.0);
+                        ui.label(Self::icon(
+                            if is_folder { 0xe2c8 } else { 0xe061 },
+                            18.0,
+                            accent,
+                        ));
+                        ui.add_space(8.0);
+                        ui.vertical(|ui| {
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(label)
+                                        .size(13.2)
+                                        .color(Self::strong_text_color())
+                                        .strong(),
+                                )
+                                .truncate(),
+                            );
+                            ui.label(
+                                RichText::new(format!("{detail} in {prefix}"))
+                                    .size(11.0)
+                                    .color(accent_soft),
+                            );
+                        });
+                    });
+                });
+        });
     }
 
     fn draw_folders_grid_view(&mut self, ui: &mut egui::Ui) {
@@ -1790,6 +1881,7 @@ impl SoundFxApp {
 
         let indent = 18.0 * depth as f32;
         let show_folder_actions = is_selected || (has_children && !is_collapsed);
+        let mut pointer_over_drop_target = false;
         let fill = if Self::dark_theme_enabled() {
             if is_selected || (has_children && !is_collapsed) {
                 if subfolders_count > 0 && direct_count > 0 {
@@ -2006,7 +2098,7 @@ impl SoundFxApp {
             if response.hovered() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             }
-            let pointer_over_drop_target = external_drop_active
+            pointer_over_drop_target = external_drop_active
                 && self
                     .external_drop_pointer_pos(ui.ctx())
                     .is_some_and(|pos| row.response.rect.contains(pos));
@@ -2062,6 +2154,11 @@ impl SoundFxApp {
                     *toggle_folder_id = Some(folder.id);
                 }
             }
+        }
+
+        if pointer_over_drop_target {
+            ui.add_space(8.0);
+            self.draw_external_drop_preview_row(ui, depth + 1, Some(folder.id));
         }
 
         let search_active = self.library_search_active();
