@@ -257,6 +257,21 @@ impl SoundFxApp {
         }
     }
 
+    pub(super) fn resolve_library_drop_target_at(&self, pos: Pos2) -> Option<Option<Uuid>> {
+        for (folder_id, rect) in self.library_drop_target_folder_rects.iter().rev() {
+            if rect.contains(pos) {
+                return Some(Some(*folder_id));
+            }
+        }
+        if self
+            .library_drop_target_root_rect
+            .is_some_and(|rect| rect.contains(pos))
+        {
+            return Some(None);
+        }
+        None
+    }
+
     fn draw_external_drop_target_row(&mut self, ui: &mut Ui, label: &str) {
         let accent = Color32::from_rgb(242, 140, 56);
         let accent_soft = Color32::from_rgb(255, 202, 145);
@@ -1120,6 +1135,8 @@ impl SoundFxApp {
 
     pub(super) fn draw_folders_list_view(&mut self, ui: &mut egui::Ui) {
         self.ensure_current_folder_exists();
+        self.library_drop_target_root_rect = None;
+        self.library_drop_target_folder_rects.clear();
         let external_drop_active = self.external_library_drop_active(ui.ctx());
         if external_drop_active {
             self.library_drop_target_folder = None;
@@ -1221,6 +1238,7 @@ impl SoundFxApp {
             let drop_banner = Frame::new().show(ui, |ui| {
                 self.draw_external_drop_target_row(ui, &target_label);
             });
+            self.library_drop_target_root_rect = Some(drop_banner.response.rect);
             let pointer_over_banner = self
                 .external_drop_pointer_pos(ui.ctx())
                 .is_some_and(|pos| drop_banner.response.rect.contains(pos));
@@ -1795,6 +1813,8 @@ impl SoundFxApp {
                 && self
                     .external_drop_pointer_pos(ui.ctx())
                     .is_some_and(|pos| row.response.rect.contains(pos));
+            self.library_drop_target_folder_rects
+                .push((folder.id, row.response.rect));
             if pointer_over_drop_target {
                 self.library_drop_target_folder = Some(folder.id);
                 self.library_drop_target_root = false;
@@ -2135,6 +2155,8 @@ impl SoundFxApp {
                 && self
                     .external_drop_pointer_pos(ui.ctx())
                     .is_some_and(|pos| row.response.rect.contains(pos));
+            self.library_drop_target_folder_rects
+                .push((folder.id, row.response.rect));
             if pointer_over_drop_target {
                 self.library_drop_target_folder = Some(folder.id);
                 self.library_drop_target_root = false;

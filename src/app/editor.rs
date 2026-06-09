@@ -678,8 +678,13 @@ impl SoundFxApp {
             return;
         }
         let pointer_pos = self.external_drop_pointer_pos(ctx);
+        let library_drop_target = if is_library_sounds {
+            pointer_pos.and_then(|pos| self.resolve_library_drop_target_at(pos))
+        } else {
+            None
+        };
         let dropped_in_rect = if is_library_sounds {
-            self.library_drop_target_root || self.library_drop_target_folder.is_some()
+            library_drop_target.is_some()
         } else {
             self.editor_drop_rect
                 .is_some_and(|rect| pointer_pos.is_some_and(|pos| rect.contains(pos)))
@@ -700,11 +705,7 @@ impl SoundFxApp {
         }
         if !paths.is_empty() {
             let target_folder_id = if is_library_sounds {
-                if self.library_drop_target_root {
-                    None
-                } else {
-                    self.library_drop_target_folder
-                }
+                library_drop_target.flatten()
             } else {
                 None
             };

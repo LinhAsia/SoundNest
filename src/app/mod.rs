@@ -468,6 +468,8 @@ pub struct SoundFxApp {
     pub(super) pending_folder_drag: Option<Uuid>,
     pub(super) library_drop_target_folder: Option<Uuid>,
     pub(super) library_drop_target_root: bool,
+    pub(super) library_drop_target_root_rect: Option<Rect>,
+    pub(super) library_drop_target_folder_rects: Vec<(Uuid, Rect)>,
     pub(super) ignored_drop_path: Option<PathBuf>,
     pub(super) download_panel_tab: DownloadPanelTab,
     pub(super) tts_text: String,
@@ -801,6 +803,8 @@ impl SoundFxApp {
             pending_folder_drag: None,
             library_drop_target_folder: None,
             library_drop_target_root: false,
+            library_drop_target_root_rect: None,
+            library_drop_target_folder_rects: Vec::new(),
             ignored_drop_path: None,
             download_panel_tab: DownloadPanelTab::Download,
             tts_text: String::new(),
@@ -11580,7 +11584,9 @@ impl eframe::App for SoundFxApp {
         if external_file_hover {
             ctx.request_repaint_after(Duration::from_millis(16));
             let pointer_over_drop = if is_library_sound_drop {
-                self.library_drop_target_root || self.library_drop_target_folder.is_some()
+                self.external_drop_pointer_pos(ctx)
+                    .and_then(|pos| self.resolve_library_drop_target_at(pos))
+                    .is_some()
             } else {
                 self.external_drop_pointer_pos(ctx)
                     .zip(self.editor_drop_rect)
