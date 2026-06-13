@@ -1821,6 +1821,9 @@ impl SoundFxApp {
             self.library_current_folder = None;
             self.editing_folder_id = None;
         } else if let Some(folder_id) = select_folder_id {
+            if self.library_search_active() {
+                self.library_audio_query.clear();
+            }
             self.library_current_folder = Some(folder_id);
             self.editing_folder_id = None;
         }
