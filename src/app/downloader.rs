@@ -707,11 +707,6 @@ impl SoundFxApp {
     pub(super) fn render_download_site_badges(ui: &mut Ui) {
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
-            ui.label(
-                RichText::new("Supporting web:")
-                    .size(12.5)
-                    .color(Self::muted_text_color()),
-            );
             for badge in Self::download_site_badges() {
                 let fill = if Self::dark_theme_enabled() {
                     Color32::from_rgb(29, 25, 35)

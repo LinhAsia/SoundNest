@@ -9279,28 +9279,28 @@ impl SoundFxApp {
                         color: Color32::from_rgba_premultiplied(78, 40, 63, 24),
                     })
                     .corner_radius(28.0)
-                    .inner_margin(Margin::same(20)),
+                    .inner_margin(Margin {
+                        left: 20,
+                        right: 12,
+                        top: 12,
+                        bottom: 20,
+                    }),
             )
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
+                    ui.set_height(34.0);
                     ui.label(Self::icon(0xe2c4, 20.0, Self::strong_text_color()).strong());
-                    ui.allocate_ui_with_layout(
-                        vec2(ui.available_width(), 34.0),
-                        egui::Layout::right_to_left(Align::Center),
-                        |ui| {
-                            if Self::icon_titlebar(ui, [34.0, 34.0], 0xe5cd, false, true)
-                                .clicked()
-                            {
-                                clear_result = !snapshot.running;
-                                close_request = true;
-                            }
-                            if Self::icon_titlebar(ui, [34.0, 34.0], 0xe15b, false, false)
-                                .clicked()
-                            {
-                                minimize_request = true;
-                            }
-                        },
-                    );
+                    ui.add_space(8.0);
+                    ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        if Self::icon_titlebar(ui, [34.0, 34.0], 0xe5cd, false, true).clicked() {
+                            clear_result = !snapshot.running;
+                            close_request = true;
+                        }
+                        if Self::icon_titlebar(ui, [34.0, 34.0], 0xe15b, false, false).clicked() {
+                            minimize_request = true;
+                        }
+                    });
                 });
 
                 ui.add_space(12.0);
@@ -9339,6 +9339,39 @@ impl SoundFxApp {
                         ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
                     }
 
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new("Supporting web:")
+                                .size(12.5)
+                                .color(Self::muted_text_color()),
+                        );
+                        let help = ui.add_sized(
+                            [22.0, 22.0],
+                            Button::new(Self::icon(0xe887, 15.0, Color32::from_rgb(214, 51, 132)))
+                                .fill(Self::surface_fill())
+                                .stroke(Stroke::new(1.0, Self::border_color()))
+                                .corner_radius(11.0),
+                        );
+                        if help.hovered() {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::Help);
+                        }
+                        help.on_hover_ui_at_pointer(|ui| {
+                            ui.set_max_width(300.0);
+                            ui.label(
+                                RichText::new("Supported websites")
+                                    .size(13.0)
+                                    .color(Self::strong_text_color())
+                                    .strong(),
+                            );
+                            ui.add_space(4.0);
+                            ui.label("Works through yt-dlp, so it supports many sites.");
+                            ui.label("Common examples: YouTube, SoundCloud, Bandcamp, TikTok, Facebook, Instagram, X/Twitter, Vimeo, Dailymotion, Bilibili, Twitch, Google Drive, direct media links.");
+                            ui.add_space(4.0);
+                            ui.label("Some sites can still fail because of login, region lock, cookies, or DRM.");
+                            ui.label("Spotify album / track links are usually DRM-protected and will not download.");
+                        });
+                    });
+                    ui.add_space(8.0);
                     Self::render_download_site_badges(ui);
 
                     ui.add_space(10.0);
@@ -9367,31 +9400,6 @@ impl SoundFxApp {
                             should_start_download = true;
                         }
 
-                        let help = ui.add_sized(
-                            [24.0, 24.0],
-                            Button::new(Self::icon(0xe887, 16.0, Color32::from_rgb(214, 51, 132)))
-                                .fill(Self::surface_fill())
-                                .stroke(Stroke::new(1.0, Self::border_color()))
-                                .corner_radius(12.0),
-                        );
-                        if help.hovered() {
-                            ui.ctx().set_cursor_icon(egui::CursorIcon::Help);
-                        }
-                        help.on_hover_ui_at_pointer(|ui| {
-                            ui.set_max_width(300.0);
-                            ui.label(
-                                RichText::new("Supported websites")
-                                    .size(13.0)
-                                    .color(Self::strong_text_color())
-                                    .strong(),
-                            );
-                            ui.add_space(4.0);
-                            ui.label("Works through yt-dlp, so it supports many sites.");
-                            ui.label("Common examples: YouTube, SoundCloud, Bandcamp, TikTok, Facebook, Instagram, X/Twitter, Vimeo, Dailymotion, Bilibili, Twitch, Google Drive, direct media links.");
-                            ui.add_space(4.0);
-                            ui.label("Some sites can still fail because of login, region lock, cookies, or DRM.");
-                            ui.label("Spotify album / track links are usually DRM-protected and will not download.");
-                        });
                     });
 
                     ui.add_space(10.0);
