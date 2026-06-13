@@ -8,16 +8,35 @@ use std::sync::{
 use std::thread;
 use std::time::Duration;
 
+fn bundled_demucs_exe_path() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("soundfx_manager")
+        .join("demucs")
+        .join("demucs.exe")
+}
+
 /// Check if demucs-rs CLI is available (either installed or in PATH)
 pub fn is_demucs_available() -> bool {
-    Command::new("demucs")
-        .arg("--help")
-        .output()
-        .is_ok_and(|output| output.status.success())
+    let bundled = bundled_demucs_exe_path();
+    (bundled.exists()
+        && Command::new(&bundled)
+            .arg("--help")
+            .output()
+            .is_ok_and(|output| output.status.success()))
+        || Command::new("demucs")
+            .arg("--help")
+            .output()
+            .is_ok_and(|output| output.status.success())
 }
 
 fn demucs_command() -> Command {
-    let mut cmd = Command::new("demucs");
+    let bundled = bundled_demucs_exe_path();
+    let mut cmd = if bundled.exists() {
+        Command::new(bundled)
+    } else {
+        Command::new("demucs")
+    };
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
