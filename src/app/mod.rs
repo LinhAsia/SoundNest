@@ -997,7 +997,7 @@ impl SoundFxApp {
     }
 
     fn desired_window_size() -> Vec2 {
-        vec2(980.0, 900.0)
+        vec2(1500.0, 920.0)
     }
 
     fn popup_safe_rect(&self, ctx: &Context) -> Rect {
@@ -6817,6 +6817,11 @@ impl SoundFxApp {
                                 .audio
                                 .as_ref()
                                 .and_then(|audio| audio.playback_progress(sound.id));
+                            let row_width = ui.available_width();
+                            let play_column_width = 56.0;
+                            let details_width = (row_width * 0.28).clamp(220.0, 320.0);
+                            let waveform_width =
+                                (row_width - play_column_width - details_width - 48.0).max(220.0);
                             if playing {
                                 ui.ctx().request_repaint_after(Duration::from_millis(
                                     ACTIVE_UI_REPAINT_MS,
@@ -6857,32 +6862,36 @@ impl SoundFxApp {
                                 .show(ui, |ui| {
                                     ui.style_mut().interaction.selectable_labels = false;
                                     ui.horizontal(|ui| {
-                                        ui.vertical_centered(|ui| {
-                                            let play_btn = Self::icon_action(
-                                                ui,
-                                                [44.0, 44.0],
-                                                if is_loading || playing {
-                                                    0xe5d5
-                                                } else {
-                                                    0xe037
-                                                },
-                                                is_loading || playing,
-                                                false,
-                                            );
-                                            if play_btn.clicked() {
-                                                if is_loading || playing {
-                                                    self.stop_preview();
-                                                } else {
-                                                    preview_request = Some(sound.id);
+                                        ui.allocate_ui_with_layout(
+                                            vec2(play_column_width, 0.0),
+                                            egui::Layout::top_down(Align::Center),
+                                            |ui| {
+                                                let play_btn = Self::icon_action(
+                                                    ui,
+                                                    [44.0, 44.0],
+                                                    if is_loading || playing {
+                                                        0xe5d5
+                                                    } else {
+                                                        0xe037
+                                                    },
+                                                    is_loading || playing,
+                                                    false,
+                                                );
+                                                if play_btn.clicked() {
+                                                    if is_loading || playing {
+                                                        self.stop_preview();
+                                                    } else {
+                                                        preview_request = Some(sound.id);
+                                                    }
+                                                    play_clicked = true;
                                                 }
-                                                play_clicked = true;
-                                            }
-                                            play_response = Some(play_btn);
-                                        });
+                                                play_response = Some(play_btn);
+                                            },
+                                        );
 
                                         ui.add_space(12.0);
                                         ui.allocate_ui_with_layout(
-                                            vec2((ui.available_width() * 0.42).max(120.0), 0.0),
+                                            vec2(waveform_width, 0.0),
                                             egui::Layout::top_down(Align::Min),
                                             |ui| {
                                                 let waveform_samples =
@@ -6905,43 +6914,47 @@ impl SoundFxApp {
                                         );
 
                                         ui.add_space(14.0);
-                                        ui.vertical(|ui| {
-                                            ui.add(
-                                                egui::Label::new(
-                                                    RichText::new(&sound.name)
-                                                        .size(18.5)
-                                                        .color(Self::strong_text_color())
-                                                        .strong(),
-                                                )
-                                                .truncate(),
-                                            );
-                                            ui.add_space(6.0);
-                                            ui.horizontal_wrapped(|ui| {
-                                                ui.spacing_mut().item_spacing = vec2(8.0, 4.0);
-                                                ui.label(
-                                                    RichText::new(format_time(
-                                                        sound.trimmed_length(),
-                                                    ))
-                                                    .size(12.0)
-                                                    .color(Self::muted_text_color()),
+                                        ui.allocate_ui_with_layout(
+                                            vec2(details_width, 0.0),
+                                            egui::Layout::top_down(Align::Min),
+                                            |ui| {
+                                                ui.add(
+                                                    egui::Label::new(
+                                                        RichText::new(&sound.name)
+                                                            .size(18.5)
+                                                            .color(Self::strong_text_color())
+                                                            .strong(),
+                                                    )
+                                                    .truncate(),
                                                 );
-                                                ui.label(
-                                                    RichText::new(format!(
-                                                        "{:.0}%",
-                                                        sound.volume * 100.0
-                                                    ))
-                                                    .size(12.0)
-                                                    .color(Self::muted_text_color()),
-                                                );
-                                                if playing {
-                                                    ui.label(Self::icon(
-                                                        0xe050,
-                                                        14.0,
-                                                        Color32::from_rgb(214, 51, 132),
-                                                    ));
-                                                }
-                                            });
-                                        });
+                                                ui.add_space(6.0);
+                                                ui.horizontal_wrapped(|ui| {
+                                                    ui.spacing_mut().item_spacing = vec2(8.0, 4.0);
+                                                    ui.label(
+                                                        RichText::new(format_time(
+                                                            sound.trimmed_length(),
+                                                        ))
+                                                        .size(12.0)
+                                                        .color(Self::muted_text_color()),
+                                                    );
+                                                    ui.label(
+                                                        RichText::new(format!(
+                                                            "{:.0}%",
+                                                            sound.volume * 100.0
+                                                        ))
+                                                        .size(12.0)
+                                                        .color(Self::muted_text_color()),
+                                                    );
+                                                    if playing {
+                                                        ui.label(Self::icon(
+                                                            0xe050,
+                                                            14.0,
+                                                            Color32::from_rgb(214, 51, 132),
+                                                        ));
+                                                    }
+                                                });
+                                            },
+                                        );
                                     });
                                 });
                             let scrollbar_gutter = 18.0;
@@ -11843,7 +11856,7 @@ impl eframe::App for SoundFxApp {
                         } else {
                             ui.horizontal_top(|ui| {
                                 let library_width =
-                                    (ui.available_width() * 0.34).clamp(258.0, 292.0);
+                                    (ui.available_width() * 0.31).clamp(280.0, 360.0);
                                 ui.allocate_ui_with_layout(
                                     vec2(library_width, content_height),
                                     egui::Layout::top_down(Align::Min),

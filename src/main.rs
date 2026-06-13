@@ -76,12 +76,12 @@ fn main() -> eframe::Result<()> {
         viewport: egui::ViewportBuilder::default()
             .with_icon(Arc::new(app_icon))
             .with_title("Sound FX")
-            .with_inner_size([1240.0, 900.0])
-            .with_min_inner_size([1120.0, 820.0])
+            .with_inner_size([1500.0, 920.0])
+            .with_min_inner_size([1320.0, 840.0])
             .with_resizable(true)
             .with_decorations(false)
             .with_transparent(true)
-            .with_position(initial_window_position([1240.0, 900.0])),
+            .with_position(initial_window_position([1500.0, 920.0])),
         ..Default::default()
     };
 

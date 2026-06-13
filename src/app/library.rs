@@ -2656,7 +2656,10 @@ impl SoundFxApp {
         let row_padding_y = self.library_row_vertical_padding();
         let waveform_height = self.library_row_wave_height();
         let ultra_compact_row = self.library_row_thickness == LIBRARY_ROW_MIN_THICKNESS;
-        let side_panel_width = 188.0;
+        let row_width = ui.available_width();
+        let play_column_width = 54.0;
+        let side_panel_width = (row_width * 0.24).clamp(190.0, 280.0);
+        let waveform_width = (row_width - play_column_width - side_panel_width - 42.0).max(180.0);
 
         let row = Frame::new()
             .fill(Self::surface_fill())
@@ -2665,33 +2668,36 @@ impl SoundFxApp {
             .inner_margin(Margin::symmetric(12, row_padding_y))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.set_width(ui.available_width());
-                    ui.vertical_centered(|ui| {
-                        let play_btn = Self::icon_action(
-                            ui,
-                            [42.0, 42.0],
-                            if is_loading || is_previewing {
-                                0xe5d5
-                            } else {
-                                0xe037
-                            },
-                            is_loading || is_previewing,
-                            false,
-                        );
-                        if play_btn.clicked() {
-                            if is_loading || is_previewing {
-                                self.stop_preview();
-                            } else {
-                                preview_sound = Some(sound.id);
+                    ui.allocate_ui_with_layout(
+                        vec2(play_column_width, 0.0),
+                        egui::Layout::top_down(Align::Center),
+                        |ui| {
+                            let play_btn = Self::icon_action(
+                                ui,
+                                [42.0, 42.0],
+                                if is_loading || is_previewing {
+                                    0xe5d5
+                                } else {
+                                    0xe037
+                                },
+                                is_loading || is_previewing,
+                                false,
+                            );
+                            if play_btn.clicked() {
+                                if is_loading || is_previewing {
+                                    self.stop_preview();
+                                } else {
+                                    preview_sound = Some(sound.id);
+                                }
+                                preview_clicked = true;
                             }
-                            preview_clicked = true;
-                        }
-                        play_response = Some(play_btn);
-                    });
+                            play_response = Some(play_btn);
+                        },
+                    );
 
                     ui.add_space(12.0);
                     ui.allocate_ui_with_layout(
-                        vec2((ui.available_width() - side_panel_width).max(140.0), 0.0),
+                        vec2(waveform_width, 0.0),
                         egui::Layout::top_down(Align::Min),
                         |ui| {
                             let waveform_samples = self.sound_waveform_samples(sound);
@@ -2719,7 +2725,7 @@ impl SoundFxApp {
 
                     ui.add_space(14.0);
                     ui.allocate_ui_with_layout(
-                        vec2(side_panel_width.min(ui.available_width()), 0.0),
+                        vec2(side_panel_width, 0.0),
                         egui::Layout::top_down(Align::Min),
                         |ui| {
                             ui.add(
