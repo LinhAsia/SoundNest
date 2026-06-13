@@ -2327,6 +2327,10 @@ impl SoundFxApp {
         } else {
             card_accent.linear_multiply(0.42)
         };
+        let mut delete_btn_response = None;
+        let mut rename_btn_response = None;
+        let mut import_btn_response: Option<egui::Response> = None;
+        let mut paste_btn_response: Option<egui::Response> = None;
 
         let row = Frame::new()
             .fill(fill)
@@ -2335,10 +2339,6 @@ impl SoundFxApp {
             .inner_margin(Margin::symmetric(12, 10))
             .show(ui, |ui| {
                 ui.set_width(card_width - 24.0);
-                let mut delete_btn_response = None;
-                let mut rename_btn_response = None;
-                let mut import_btn_response = None;
-                let mut paste_btn_response = None;
                 ui.vertical(|ui| {
                     ui.horizontal(|ui| {
                         if has_children {
@@ -2399,53 +2399,8 @@ impl SoundFxApp {
                             .color(Self::muted_text_color()),
                     );
                     ui.add_space(8.0);
-                    ui.horizontal_wrapped(|ui| {
+                    ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
-                        if show_folder_actions
-                            && self.library_tab == LibraryTab::Sounds
-                            && self.folder_import_select_mode.is_none()
-                        {
-                            let paste_btn = ui
-                                .add_enabled_ui(clipboard_paste_ready, |ui| {
-                                    ui.add_sized(
-                                        [58.0, 30.0],
-                                        Button::new(RichText::new("Paste").size(10.8))
-                                            .fill(folder_accent)
-                                            .corner_radius(10.0),
-                                    )
-                                })
-                                .inner;
-                            Self::decorate_button_response(ui, &paste_btn);
-                            if paste_btn.clicked() {
-                                match self.paste_clipboard_sounds_to_folder(folder.id, ui.ctx()) {
-                                    Ok(imported) => {
-                                        self.status =
-                                            Some(format!("Pasted {imported} sound(s) into folder"));
-                                    }
-                                    Err(error) => self.set_error_status(error),
-                                }
-                            }
-                            paste_btn_response = Some(paste_btn);
-
-                            let import_btn = ui.add_sized(
-                                [102.0, 30.0],
-                                Button::new(
-                                    RichText::new(format!(
-                                        "+ {}",
-                                        self.t("library.import_sound_to_folder")
-                                    ))
-                                    .size(10.8),
-                                )
-                                .fill(Color32::from_rgb(227, 82, 149))
-                                .corner_radius(10.0),
-                            );
-                            Self::decorate_button_response(ui, &import_btn);
-                            if import_btn.clicked() {
-                                self.folder_import_select_mode = Some(folder.id);
-                            }
-                            import_btn_response = Some(import_btn);
-                        }
-
                         let rename_btn = Self::icon_action(ui, [36.0, 30.0], 0xe254, false, false);
                         Self::decorate_button_response(ui, &rename_btn);
                         if rename_btn.clicked() {
@@ -2463,10 +2418,10 @@ impl SoundFxApp {
                 });
 
                 (
-                    delete_btn_response,
-                    rename_btn_response,
-                    import_btn_response,
-                    paste_btn_response,
+                    delete_btn_response.clone(),
+                    rename_btn_response.clone(),
+                    import_btn_response.clone(),
+                    paste_btn_response.clone(),
                 )
             });
 
@@ -2478,6 +2433,77 @@ impl SoundFxApp {
             );
             if response.hovered() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+            if show_folder_actions
+                && self.library_tab == LibraryTab::Sounds
+                && self.folder_import_select_mode.is_none()
+                && response.hovered()
+            {
+                let overlay_id = ui.id().with(("grid-folder-actions-overlay", folder.id));
+                let overlay_pos = egui::pos2(
+                    row.response.rect.right() - 174.0,
+                    row.response.rect.top() + 10.0,
+                );
+                egui::Area::new(overlay_id)
+                    .order(egui::Order::Foreground)
+                    .fixed_pos(overlay_pos)
+                    .show(ui.ctx(), |ui| {
+                        Frame::new()
+                            .fill(Color32::from_rgba_premultiplied(24, 18, 29, 232))
+                            .stroke(Stroke::new(
+                                1.0,
+                                Color32::from_rgba_premultiplied(255, 255, 255, 18),
+                            ))
+                            .corner_radius(12.0)
+                            .inner_margin(Margin::symmetric(8, 6))
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.spacing_mut().item_spacing = vec2(6.0, 0.0);
+                                    let paste_btn = ui
+                                        .add_enabled_ui(clipboard_paste_ready, |ui| {
+                                            ui.add_sized(
+                                                [58.0, 28.0],
+                                                Button::new(RichText::new("Paste").size(10.8))
+                                                    .fill(folder_accent)
+                                                    .corner_radius(9.0),
+                                            )
+                                        })
+                                        .inner;
+                                    Self::decorate_button_response(ui, &paste_btn);
+                                    if paste_btn.clicked() {
+                                        match self
+                                            .paste_clipboard_sounds_to_folder(folder.id, ui.ctx())
+                                        {
+                                            Ok(imported) => {
+                                                self.status = Some(format!(
+                                                    "Pasted {imported} sound(s) into folder"
+                                                ));
+                                            }
+                                            Err(error) => self.set_error_status(error),
+                                        }
+                                    }
+                                    paste_btn_response = Some(paste_btn);
+
+                                    let import_btn = ui.add_sized(
+                                        [102.0, 28.0],
+                                        Button::new(
+                                            RichText::new(format!(
+                                                "+ {}",
+                                                self.t("library.import_sound_to_folder")
+                                            ))
+                                            .size(10.8),
+                                        )
+                                        .fill(Color32::from_rgb(227, 82, 149))
+                                        .corner_radius(9.0),
+                                    );
+                                    Self::decorate_button_response(ui, &import_btn);
+                                    if import_btn.clicked() {
+                                        self.folder_import_select_mode = Some(folder.id);
+                                    }
+                                    import_btn_response = Some(import_btn);
+                                });
+                            });
+                    });
             }
             let pointer_over_drop_target = external_drop_active
                 && self
