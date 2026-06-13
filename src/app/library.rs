@@ -89,7 +89,11 @@ impl SoundFxApp {
     }
 
     pub(super) fn filtered_library_sounds(&self) -> Vec<SoundEffect> {
-        self.filtered_library_sounds_for_folder(self.library_current_folder, true)
+        if self.library_search_active() {
+            self.filtered_library_sounds_for_folder(None, true)
+        } else {
+            self.filtered_library_sounds_for_folder(self.library_current_folder, true)
+        }
     }
 
     pub(super) fn filtered_library_sounds_for_folder(
@@ -205,7 +209,7 @@ impl SoundFxApp {
     }
 
     pub(super) fn reset_library_tree_state(&mut self) {
-        self.library_current_folder = self.default_library_root_folder();
+        self.library_current_folder = None;
         self.library_collapsed_folders = self.default_library_collapsed_folders();
         self.folder_import_select_mode = None;
         self.editing_folder_id = None;
