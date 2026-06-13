@@ -2646,6 +2646,9 @@ impl SoundFxApp {
             .as_ref()
             .and_then(|audio| audio.playback_progress(sound.id));
         let is_previewing = playback_progress.is_some();
+        let is_loading = self
+            .pending_preview_after_preload
+            .is_some_and(|(id, _)| id == sound.id);
         if is_previewing {
             ui.ctx()
                 .request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
@@ -2653,6 +2656,7 @@ impl SoundFxApp {
         let row_padding_y = self.library_row_vertical_padding();
         let waveform_height = self.library_row_wave_height();
         let ultra_compact_row = self.library_row_thickness == LIBRARY_ROW_MIN_THICKNESS;
+        let side_panel_width = 188.0;
 
         let row = Frame::new()
             .fill(Self::surface_fill())
@@ -2662,68 +2666,10 @@ impl SoundFxApp {
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.set_width(ui.available_width());
-                    ui.vertical(|ui| {
-                        ui.set_width((ui.available_width() - 170.0).max(120.0));
-                        ui.add(
-                            egui::Label::new(
-                                RichText::new(&sound.name)
-                                    .size(12.8)
-                                    .color(Self::strong_text_color())
-                                    .strong(),
-                            )
-                            .truncate(),
-                        );
-                        if !ultra_compact_row {
-                            ui.add_space(6.0);
-                            let waveform_samples = self.sound_waveform_samples(sound);
-                            let waveform_preview =
-                                Self::library_sound_waveform_preview_from_samples(
-                                    sound,
-                                    &waveform_samples,
-                                    72,
-                                );
-                            Self::draw_full_width_wave_strip(
-                                ui,
-                                &waveform_preview,
-                                playback_progress,
-                                Color32::from_rgb(214, 51, 132),
-                                Color32::from_rgb(238, 213, 227),
-                                Self::panel_fill(),
-                                waveform_height,
-                            );
-                        }
-                    });
-
-                    ui.add_space(12.0);
-                    ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                        if self.folder_import_select_mode.is_none() {
-                            let remove_btn =
-                                Self::icon_action(ui, [36.0, 30.0], 0xe872, false, false);
-                            Self::decorate_button_response(ui, &remove_btn);
-                            if remove_btn.clicked() {
-                                remove_sound_from_folder = Some(sound.id);
-                                remove_clicked = true;
-                            }
-                            remove_response = Some(remove_btn);
-                        }
-                        let copy_btn = Self::icon_action(
-                            ui,
-                            [36.0, 30.0],
-                            0xe14d,
-                            self.sound_copy_feedback_active(ui.ctx(), sound.id),
-                            self.sound_copy_feedback_active(ui.ctx(), sound.id),
-                        );
-                        if copy_btn.clicked() {
-                            copy_sound = Some(sound.id);
-                            copy_clicked = true;
-                        }
-                        copy_response = Some(copy_btn);
-                        let is_loading = self
-                            .pending_preview_after_preload
-                            .is_some_and(|(id, _)| id == sound.id);
+                    ui.vertical_centered(|ui| {
                         let play_btn = Self::icon_action(
                             ui,
-                            [36.0, 30.0],
+                            [42.0, 42.0],
                             if is_loading || is_previewing {
                                 0xe5d5
                             } else {
@@ -2741,25 +2687,113 @@ impl SoundFxApp {
                             preview_clicked = true;
                         }
                         play_response = Some(play_btn);
-                        let favorite_btn =
-                            Self::favorite_button_sized(ui, sound.favorite, [36.0, 30.0], 16.0);
-                        if favorite_btn.clicked() {
-                            favorite_sound = Some(sound.id);
-                            favorite_clicked = true;
-                        }
-                        favorite_response = Some(favorite_btn);
-                        if !ultra_compact_row {
-                            ui.add_space(10.0);
-                            ui.add_sized(
-                                [62.0, 20.0],
+                    });
+
+                    ui.add_space(12.0);
+                    ui.allocate_ui_with_layout(
+                        vec2((ui.available_width() - side_panel_width).max(140.0), 0.0),
+                        egui::Layout::top_down(Align::Min),
+                        |ui| {
+                            let waveform_samples = self.sound_waveform_samples(sound);
+                            let waveform_preview =
+                                Self::library_sound_waveform_preview_from_samples(
+                                    sound,
+                                    &waveform_samples,
+                                    72,
+                                );
+                            Self::draw_full_width_wave_strip(
+                                ui,
+                                &waveform_preview,
+                                playback_progress,
+                                Color32::from_rgb(214, 51, 132),
+                                Color32::from_rgb(238, 213, 227),
+                                Self::panel_fill(),
+                                if ultra_compact_row {
+                                    waveform_height - 8.0
+                                } else {
+                                    waveform_height
+                                },
+                            );
+                        },
+                    );
+
+                    ui.add_space(14.0);
+                    ui.allocate_ui_with_layout(
+                        vec2(side_panel_width.min(ui.available_width()), 0.0),
+                        egui::Layout::top_down(Align::Min),
+                        |ui| {
+                            ui.add(
                                 egui::Label::new(
+                                    RichText::new(&sound.name)
+                                        .size(if ultra_compact_row { 15.5 } else { 17.5 })
+                                        .color(Self::strong_text_color())
+                                        .strong(),
+                                )
+                                .truncate(),
+                            );
+                            ui.add_space(6.0);
+                            ui.horizontal_wrapped(|ui| {
+                                ui.spacing_mut().item_spacing = vec2(8.0, 4.0);
+                                ui.label(
                                     RichText::new(format_time(sound.trimmed_length()))
                                         .size(11.5)
                                         .color(Self::muted_text_color()),
-                                ),
-                            );
-                        }
-                    });
+                                );
+                                ui.label(
+                                    RichText::new(format!("{:.0}%", sound.volume * 100.0))
+                                        .size(11.5)
+                                        .color(Self::muted_text_color()),
+                                );
+                                if is_previewing {
+                                    ui.label(Self::icon(
+                                        0xe050,
+                                        14.0,
+                                        Color32::from_rgb(214, 51, 132),
+                                    ));
+                                }
+                            });
+                            if !ultra_compact_row {
+                                ui.add_space(8.0);
+                            }
+                            ui.horizontal(|ui| {
+                                let favorite_btn = Self::favorite_button_sized(
+                                    ui,
+                                    sound.favorite,
+                                    [36.0, 30.0],
+                                    16.0,
+                                );
+                                if favorite_btn.clicked() {
+                                    favorite_sound = Some(sound.id);
+                                    favorite_clicked = true;
+                                }
+                                favorite_response = Some(favorite_btn);
+
+                                let copy_btn = Self::icon_action(
+                                    ui,
+                                    [36.0, 30.0],
+                                    0xe14d,
+                                    self.sound_copy_feedback_active(ui.ctx(), sound.id),
+                                    self.sound_copy_feedback_active(ui.ctx(), sound.id),
+                                );
+                                if copy_btn.clicked() {
+                                    copy_sound = Some(sound.id);
+                                    copy_clicked = true;
+                                }
+                                copy_response = Some(copy_btn);
+
+                                if self.folder_import_select_mode.is_none() {
+                                    let remove_btn =
+                                        Self::icon_action(ui, [36.0, 30.0], 0xe872, false, false);
+                                    Self::decorate_button_response(ui, &remove_btn);
+                                    if remove_btn.clicked() {
+                                        remove_sound_from_folder = Some(sound.id);
+                                        remove_clicked = true;
+                                    }
+                                    remove_response = Some(remove_btn);
+                                }
+                            });
+                        },
+                    );
                 });
             });
 

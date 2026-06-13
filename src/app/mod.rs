@@ -6810,10 +6810,20 @@ impl SoundFxApp {
                                 .audio
                                 .as_ref()
                                 .is_some_and(|audio| audio.is_playing(sound.id));
+                            let is_loading = self
+                                .pending_preview_after_preload
+                                .is_some_and(|(id, _)| id == sound.id);
                             let progress = self
                                 .audio
                                 .as_ref()
                                 .and_then(|audio| audio.playback_progress(sound.id));
+                            if playing {
+                                ui.ctx().request_repaint_after(Duration::from_millis(
+                                    ACTIVE_UI_REPAINT_MS,
+                                ));
+                            }
+                            let mut play_clicked = false;
+                            let mut play_response = None;
                             let frame = Frame::new()
                                 .fill(if selected {
                                     if self.dark_theme {
@@ -6846,49 +6856,92 @@ impl SoundFxApp {
                                 .inner_margin(Margin::same(18))
                                 .show(ui, |ui| {
                                     ui.style_mut().interaction.selectable_labels = false;
-                                    ui.label(
-                                        RichText::new(&sound.name)
-                                            .size(16.5)
-                                            .color(Self::strong_text_color())
-                                            .strong(),
-                                    );
-                                    ui.add_space(8.0);
-                                    let waveform_samples = self.sound_waveform_samples(sound);
-                                    let waveform_preview =
-                                        Self::trimmed_waveform_preview_from_samples(
-                                            sound,
-                                            &waveform_samples,
-                                        );
-                                    Self::draw_wave_strip(
-                                        ui,
-                                        &waveform_preview,
-                                        progress,
-                                        Color32::from_rgb(214, 51, 132),
-                                        Color32::from_rgb(238, 213, 227),
-                                        Self::panel_fill(),
-                                        52.0,
-                                    );
-                                    ui.add_space(10.0);
                                     ui.horizontal(|ui| {
-                                        ui.label(
-                                            RichText::new(format_time(sound.trimmed_length()))
-                                                .size(12.0)
-                                                .color(Self::muted_text_color()),
+                                        ui.vertical_centered(|ui| {
+                                            let play_btn = Self::icon_action(
+                                                ui,
+                                                [44.0, 44.0],
+                                                if is_loading || playing {
+                                                    0xe5d5
+                                                } else {
+                                                    0xe037
+                                                },
+                                                is_loading || playing,
+                                                false,
+                                            );
+                                            if play_btn.clicked() {
+                                                if is_loading || playing {
+                                                    self.stop_preview();
+                                                } else {
+                                                    preview_request = Some(sound.id);
+                                                }
+                                                play_clicked = true;
+                                            }
+                                            play_response = Some(play_btn);
+                                        });
+
+                                        ui.add_space(12.0);
+                                        ui.allocate_ui_with_layout(
+                                            vec2((ui.available_width() * 0.42).max(120.0), 0.0),
+                                            egui::Layout::top_down(Align::Min),
+                                            |ui| {
+                                                let waveform_samples =
+                                                    self.sound_waveform_samples(sound);
+                                                let waveform_preview =
+                                                    Self::trimmed_waveform_preview_from_samples(
+                                                        sound,
+                                                        &waveform_samples,
+                                                    );
+                                                Self::draw_wave_strip(
+                                                    ui,
+                                                    &waveform_preview,
+                                                    progress,
+                                                    Color32::from_rgb(214, 51, 132),
+                                                    Color32::from_rgb(238, 213, 227),
+                                                    Self::panel_fill(),
+                                                    54.0,
+                                                );
+                                            },
                                         );
-                                        ui.separator();
-                                        ui.label(
-                                            RichText::new(format!("{:.0}%", sound.volume * 100.0))
-                                                .size(12.0)
-                                                .color(Self::muted_text_color()),
-                                        );
-                                        if playing {
-                                            ui.separator();
-                                            ui.label(Self::icon(
-                                                0xe050,
-                                                14.0,
-                                                Color32::from_rgb(214, 51, 132),
-                                            ));
-                                        }
+
+                                        ui.add_space(14.0);
+                                        ui.vertical(|ui| {
+                                            ui.add(
+                                                egui::Label::new(
+                                                    RichText::new(&sound.name)
+                                                        .size(18.5)
+                                                        .color(Self::strong_text_color())
+                                                        .strong(),
+                                                )
+                                                .truncate(),
+                                            );
+                                            ui.add_space(6.0);
+                                            ui.horizontal_wrapped(|ui| {
+                                                ui.spacing_mut().item_spacing = vec2(8.0, 4.0);
+                                                ui.label(
+                                                    RichText::new(format_time(
+                                                        sound.trimmed_length(),
+                                                    ))
+                                                    .size(12.0)
+                                                    .color(Self::muted_text_color()),
+                                                );
+                                                ui.label(
+                                                    RichText::new(format!(
+                                                        "{:.0}%",
+                                                        sound.volume * 100.0
+                                                    ))
+                                                    .size(12.0)
+                                                    .color(Self::muted_text_color()),
+                                                );
+                                                if playing {
+                                                    ui.label(Self::icon(
+                                                        0xe050,
+                                                        14.0,
+                                                        Color32::from_rgb(214, 51, 132),
+                                                    ));
+                                                }
+                                            });
+                                        });
                                     });
                                 });
                             let scrollbar_gutter = 18.0;
@@ -6944,7 +6997,9 @@ impl SoundFxApp {
                                 drag_request = Some(sound.id);
                                 self.pending_sound_drag = None;
                             }
-                            if !modal_open && response.clicked() {
+                            let over_play =
+                                play_response.as_ref().is_some_and(|value| value.hovered());
+                            if !modal_open && response.clicked() && !over_play && !play_clicked {
                                 self.selected = Some(sound.id);
                                 preview_request = Some(sound.id);
                             }
