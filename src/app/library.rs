@@ -201,13 +201,6 @@ impl SoundFxApp {
             .collect()
     }
 
-    pub(super) fn default_library_root_folder(&self) -> Option<Uuid> {
-        self.sorted_child_folders(None)
-            .into_iter()
-            .next()
-            .map(|folder| folder.id)
-    }
-
     pub(super) fn reset_library_tree_state(&mut self) {
         self.library_current_folder = None;
         self.library_collapsed_folders = self.default_library_collapsed_folders();
