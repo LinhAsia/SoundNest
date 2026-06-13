@@ -1457,14 +1457,7 @@ impl SoundFxApp {
                                         .size(12.5)
                                         .color(Self::strong_text_color()),
                                 );
-                                if self.demucs_installing {
-                                    ui.spinner();
-                                    ui.label(
-                                        RichText::new("Installing demucs-rs...")
-                                            .size(11.5)
-                                            .color(Self::muted_text_color()),
-                                    );
-                                } else if demucs_available {
+                                if demucs_available {
                                     let vocal_toggle = ui
                                         .scope(|ui| {
                                             let visuals = &mut ui.style_mut().visuals;
@@ -1525,14 +1518,7 @@ impl SoundFxApp {
                                         .size(12.5)
                                         .color(Self::strong_text_color()),
                                 );
-                                if self.demucs_installing {
-                                    ui.spinner();
-                                    ui.label(
-                                        RichText::new("Installing demucs-rs...")
-                                            .size(11.5)
-                                            .color(Self::muted_text_color()),
-                                    );
-                                } else if demucs_available {
+                                if demucs_available {
                                     let music_toggle = ui
                                         .scope(|ui| {
                                             let visuals = &mut ui.style_mut().visuals;
@@ -1585,27 +1571,10 @@ impl SoundFxApp {
                                 }
                             });
 
-                            if self.demucs_model_loading {
-                                ui.add_space(8.0);
-                                ui.horizontal(|ui| {
-                                    ui.spinner();
-                                    ui.label(
-                                        RichText::new("Preparing vocal model...")
-                                            .size(11.5)
-                                            .color(Self::muted_text_color()),
-                                    );
-                                });
-                            } else if self.demucs_model_ready {
+                            if !demucs_available {
                                 ui.add_space(8.0);
                                 ui.label(
-                                    RichText::new("(model ready)")
-                                        .size(11.5)
-                                        .color(Color32::from_rgb(100, 200, 100)),
-                                );
-                            } else if !demucs_available {
-                                ui.add_space(8.0);
-                                ui.label(
-                                    RichText::new("(install demucs-rs in Settings)")
+                                    RichText::new("(vocal separation is unavailable)")
                                         .size(11.5)
                                         .color(Self::muted_text_color()),
                                 );

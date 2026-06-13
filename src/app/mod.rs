@@ -296,11 +296,6 @@ pub(crate) enum GeminiTtsMessage {
     Finished(Result<GeminiTtsResult, String>),
 }
 
-pub(crate) enum DemucsModelMessage {
-    Finished(Result<(), String>),
-    Cancelled,
-}
-
 pub(crate) enum TransitionAnalysisMessage {
     StartupReady {
         waveform: Vec<f32>,
@@ -546,16 +541,6 @@ pub struct SoundFxApp {
     pub(super) library_import_rx: Receiver<LibraryImportMessage>,
     pub(super) normalize_tx: Sender<NormalizeMessage>,
     pub(super) normalize_rx: Receiver<NormalizeMessage>,
-    pub(super) demucs_installing: bool,
-    pub(super) demucs_install_error: Option<String>,
-    pub(super) demucs_install_tx: Sender<Result<(), String>>,
-    pub(super) demucs_install_rx: Receiver<Result<(), String>>,
-    pub(super) demucs_model_loading: bool,
-    pub(super) demucs_model_error: Option<String>,
-    pub(super) demucs_model_ready: bool,
-    pub(super) demucs_model_cancel: Option<Arc<AtomicBool>>,
-    pub(super) demucs_model_tx: Sender<DemucsModelMessage>,
-    pub(super) demucs_model_rx: Receiver<DemucsModelMessage>,
     pub(super) library_hydration_tx: Sender<LibraryHydrationMessage>,
     pub(super) library_hydration_rx: Receiver<LibraryHydrationMessage>,
     pub(super) transition_analysis_tx: Sender<TransitionAnalysisMessage>,
@@ -620,8 +605,6 @@ impl SoundFxApp {
             panic!("Myinstants init failed: {error}");
         });
         let (myinstants_waveform_tx, myinstants_waveform_rx) = mpsc::channel();
-        let (demucs_install_tx, demucs_install_rx) = mpsc::channel();
-        let (demucs_model_tx, demucs_model_rx) = mpsc::channel();
         let (tts_tx, tts_rx) = mpsc::channel();
         let (library_hydration_tx, library_hydration_rx) = mpsc::channel();
         let (transition_analysis_tx, transition_analysis_rx) = mpsc::channel();
@@ -886,16 +869,6 @@ impl SoundFxApp {
             library_import_rx,
             normalize_tx,
             normalize_rx,
-            demucs_installing: false,
-            demucs_install_error: None,
-            demucs_install_tx,
-            demucs_install_rx,
-            demucs_model_loading: false,
-            demucs_model_error: None,
-            demucs_model_ready: crate::vocal_separation::is_demucs_model_ready(),
-            demucs_model_cancel: None,
-            demucs_model_tx,
-            demucs_model_rx,
             library_hydration_tx,
             library_hydration_rx,
             transition_analysis_tx,
@@ -11587,8 +11560,6 @@ impl eframe::App for SoundFxApp {
         self.poll_audio_preload_jobs(ctx);
         self.poll_library_import_jobs(ctx);
         self.poll_normalize_jobs(ctx);
-        self.poll_demucs_install_result(ctx);
-        self.poll_demucs_model_result(ctx);
         self.poll_stream_driver_result(ctx);
         self.poll_stream_input_router(ctx);
         self.poll_vocal_separation_jobs(ctx);

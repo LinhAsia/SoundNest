@@ -121,86 +121,6 @@ impl SoundFxApp {
         }
     }
 
-    pub(super) fn start_demucs_install(&mut self, ctx: &Context) {
-        if self.demucs_installing {
-            return;
-        }
-        self.demucs_installing = true;
-        self.demucs_install_error = None;
-        let tx = self.demucs_install_tx.clone();
-        thread::spawn(move || {
-            let result = crate::vocal_separation::install_demucs();
-            let _ = tx.send(result);
-        });
-        ctx.request_repaint();
-    }
-
-    pub(super) fn start_demucs_model_preload(&mut self, ctx: &Context) {
-        if self.demucs_model_loading || !crate::vocal_separation::is_demucs_available() {
-            return;
-        }
-        self.demucs_model_loading = true;
-        self.demucs_model_error = None;
-        self.demucs_model_ready = false;
-        let cancel_flag = Arc::new(AtomicBool::new(false));
-        self.demucs_model_cancel = Some(Arc::clone(&cancel_flag));
-        let tx = self.demucs_model_tx.clone();
-        let root_dir = self.storage.root_dir().to_path_buf();
-        thread::spawn(move || {
-            let message = match crate::vocal_separation::preload_demucs_model_cancellable(
-                &root_dir,
-                cancel_flag,
-            ) {
-                Ok(true) => DemucsModelMessage::Finished(Ok(())),
-                Ok(false) => DemucsModelMessage::Cancelled,
-                Err(error) => DemucsModelMessage::Finished(Err(error)),
-            };
-            let _ = tx.send(message);
-        });
-        ctx.request_repaint();
-    }
-
-    pub(super) fn stop_demucs_model_work(&mut self) {
-        if self.demucs_model_loading {
-            if let Some(cancel_flag) = self.demucs_model_cancel.as_ref() {
-                cancel_flag.store(true, Ordering::Relaxed);
-            }
-            self.status = Some("Stopping demucs model preparation".to_owned());
-            return;
-        }
-
-        if self.demucs_model_ready {
-            match crate::vocal_separation::clear_demucs_model_ready() {
-                Ok(()) => {
-                    self.demucs_model_ready = false;
-                    self.demucs_model_error = None;
-                    self.status = Some("demucs model stopped".to_owned());
-                }
-                Err(error) => self.set_error_status(error),
-            }
-        }
-    }
-
-    pub(super) fn uninstall_demucs_from_settings(&mut self) {
-        match crate::vocal_separation::uninstall_demucs() {
-            Ok(()) => {
-                self.demucs_install_error = None;
-                self.demucs_model_error = None;
-                self.demucs_model_loading = false;
-                self.demucs_model_ready = false;
-                self.demucs_model_cancel = None;
-                if let Some(draft) = self.recording_draft.as_mut() {
-                    draft.keep_vocal = false;
-                    draft.vocal_separated_path = None;
-                    draft.keep_music = false;
-                    draft.music_separated_path = None;
-                }
-                self.status = Some("demucs-rs uninstalled".to_owned());
-            }
-            Err(error) => self.set_error_status(error),
-        }
-    }
-
     pub(super) fn begin_async_stream_driver_probe(&mut self) {
         self.stream_driver_checked = false;
         let tx = self.stream_driver_tx.clone();
@@ -309,47 +229,6 @@ impl SoundFxApp {
             changed = true;
         }
         changed
-    }
-
-    pub(super) fn poll_demucs_install_result(&mut self, ctx: &Context) {
-        while let Ok(result) = self.demucs_install_rx.try_recv() {
-            self.demucs_installing = false;
-            match result {
-                Ok(()) => {
-                    self.demucs_install_error = None;
-                    self.demucs_model_ready = crate::vocal_separation::is_demucs_model_ready();
-                    self.status = Some("demucs-rs installed".to_owned());
-                }
-                Err(e) => {
-                    self.demucs_install_error = Some(e);
-                }
-            }
-            ctx.request_repaint();
-        }
-    }
-
-    pub(super) fn poll_demucs_model_result(&mut self, ctx: &Context) {
-        while let Ok(message) = self.demucs_model_rx.try_recv() {
-            self.demucs_model_loading = false;
-            self.demucs_model_cancel = None;
-            match message {
-                DemucsModelMessage::Finished(Ok(())) => {
-                    self.demucs_model_error = None;
-                    self.demucs_model_ready = true;
-                    self.status = Some("demucs model ready".to_owned());
-                }
-                DemucsModelMessage::Finished(Err(error)) => {
-                    self.demucs_model_error = Some(error);
-                    self.demucs_model_ready = crate::vocal_separation::is_demucs_model_ready();
-                }
-                DemucsModelMessage::Cancelled => {
-                    self.demucs_model_error = None;
-                    self.demucs_model_ready = crate::vocal_separation::is_demucs_model_ready();
-                    self.status = Some("demucs model preparation stopped".to_owned());
-                }
-            }
-            ctx.request_repaint();
-        }
     }
 
     pub(super) fn poll_stream_driver_result(&mut self, ctx: &Context) {
@@ -578,10 +457,6 @@ impl SoundFxApp {
         let mut reset_startup = false;
         let mut reset_exit = false;
         let mut animation_changed = false;
-        let mut install_demucs = false;
-        let mut preload_demucs = false;
-        let mut stop_demucs = false;
-        let mut uninstall_demucs = false;
         let mut install_stream_driver = false;
         let mut uninstall_stream_driver = false;
         let available_languages = self.localization.available_languages();
@@ -727,140 +602,6 @@ impl SoundFxApp {
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.label(
-                                RichText::new(self.t("settings.keep_vocal_model"))
-                                    .size(13.0)
-                                    .color(Self::strong_text_color())
-                                    .strong(),
-                            );
-                            ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                                let status = if self.demucs_model_loading {
-                                    self.t("settings.preparing")
-                                } else if self.demucs_model_ready {
-                                    self.t("settings.ready")
-                                } else if crate::vocal_separation::is_demucs_available() {
-                                    self.t("settings.installed")
-                                } else {
-                                    self.t("settings.not_installed")
-                                };
-                                ui.label(
-                                    RichText::new(status)
-                                        .size(12.0)
-                                        .color(Self::muted_text_color()),
-                                );
-                            });
-                        });
-                        ui.add_space(8.0);
-                        ui.label(
-                            RichText::new(self.t("settings.keep_vocal_model_description"))
-                                .size(11.5)
-                                .color(Self::muted_text_color()),
-                        );
-                        ui.add_space(10.0);
-                        ui.horizontal(|ui| {
-                            let install = ui.add_enabled(
-                                !self.demucs_installing
-                                    && !crate::vocal_separation::is_demucs_available(),
-                                Self::action_button(
-                                    RichText::new(self.t("settings.install_demucs")).size(12.0),
-                                    false,
-                                    false,
-                                ),
-                            );
-                            Self::decorate_button_response(ui, &install);
-                            if install.clicked() {
-                                install_demucs = true;
-                            }
-
-                            let preload = ui.add_enabled(
-                                !self.demucs_model_loading
-                                    && crate::vocal_separation::is_demucs_available(),
-                                Self::action_button(
-                                    RichText::new(if self.demucs_model_ready {
-                                        self.t("settings.reload_model")
-                                    } else {
-                                        self.t("settings.prepare_model")
-                                    })
-                                    .size(12.0),
-                                    false,
-                                    false,
-                                ),
-                            );
-                            Self::decorate_button_response(ui, &preload);
-                            if preload.clicked() {
-                                preload_demucs = true;
-                            }
-
-                            let stop = ui.add_enabled(
-                                self.demucs_model_loading || self.demucs_model_ready,
-                                Self::action_button(
-                                    RichText::new(if self.demucs_model_loading {
-                                        self.t("settings.stop_preparing")
-                                    } else {
-                                        self.t("settings.stop_model")
-                                    })
-                                    .size(12.0),
-                                    false,
-                                    false,
-                                ),
-                            );
-                            Self::decorate_button_response(ui, &stop);
-                            if stop.clicked() {
-                                stop_demucs = true;
-                            }
-
-                            let uninstall = ui.add_enabled(
-                                !self.demucs_installing
-                                    && !self.demucs_model_loading
-                                    && crate::vocal_separation::is_demucs_available(),
-                                Self::action_button(
-                                    RichText::new(self.t("settings.uninstall_demucs")).size(12.0),
-                                    false,
-                                    false,
-                                ),
-                            );
-                            Self::decorate_button_response(ui, &uninstall);
-                            if uninstall.clicked() {
-                                uninstall_demucs = true;
-                            }
-                        });
-                        if self.demucs_installing || self.demucs_model_loading {
-                            ui.add_space(10.0);
-                            ui.horizontal(|ui| {
-                                ui.spinner();
-                                ui.label(
-                                    RichText::new(if self.demucs_installing {
-                                        "Installing demucs-rs..."
-                                    } else {
-                                        "Preparing vocal model..."
-                                    })
-                                    .size(11.5)
-                                    .color(Self::muted_text_color()),
-                                );
-                            });
-                        }
-                        if let Some(error) = self
-                            .demucs_model_error
-                            .as_ref()
-                            .or(self.demucs_install_error.as_ref())
-                        {
-                            ui.add_space(8.0);
-                            ui.label(
-                                RichText::new(error)
-                                    .size(11.5)
-                                    .color(Color32::from_rgb(171, 54, 91)),
-                            );
-                        }
-                    });
-
-                ui.add_space(12.0);
-                Frame::new()
-                    .fill(Self::surface_fill())
-                    .stroke(Stroke::new(1.0, Self::border_color()))
-                    .corner_radius(22.0)
-                    .inner_margin(Margin::same(16))
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(
                                 RichText::new(self.t("settings.stream_mic_driver"))
                                     .size(13.0)
                                     .color(Self::strong_text_color())
@@ -954,18 +695,6 @@ impl SoundFxApp {
             let _ = self
                 .storage
                 .save_language_code(self.localization.current_code());
-        }
-        if install_demucs {
-            self.start_demucs_install(ctx);
-        }
-        if preload_demucs {
-            self.start_demucs_model_preload(ctx);
-        }
-        if stop_demucs {
-            self.stop_demucs_model_work();
-        }
-        if uninstall_demucs {
-            self.uninstall_demucs_from_settings();
         }
         if install_stream_driver {
             self.start_stream_driver_install(ctx);
