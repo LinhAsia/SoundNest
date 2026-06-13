@@ -1266,6 +1266,8 @@ impl SoundFxApp {
     }
 
     fn import_paths(&mut self, paths: Vec<PathBuf>) {
+        self.library_current_folder = None;
+        self.folder_import_select_mode = None;
         if let Err(error) = self.import_paths_to_folder(paths, None) {
             self.set_error_status(error);
         }
@@ -1949,6 +1951,11 @@ impl SoundFxApp {
         match self.storage.import_sound(&export_path) {
             Ok(mut imported) => {
                 imported.name = sound.name.clone();
+                imported.folder_id = None;
+                self.app_view = AppView::Library;
+                self.library_tab = LibraryTab::Sounds;
+                self.library_current_folder = None;
+                self.folder_import_select_mode = None;
                 self.selected = Some(imported.id);
                 self.sounds.insert(0, imported);
                 self.save_now();

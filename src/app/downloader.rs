@@ -172,8 +172,11 @@ impl SoundFxApp {
                 if !preferred_name.is_empty() {
                     sound.name = preferred_name.to_owned();
                 }
+                sound.folder_id = None;
                 self.app_view = AppView::Library;
                 self.library_tab = LibraryTab::Sounds;
+                self.library_current_folder = None;
+                self.folder_import_select_mode = None;
                 self.selected = Some(sound.id);
                 self.library_audio_query.clear();
                 self.library_audio_tag_filter = None;

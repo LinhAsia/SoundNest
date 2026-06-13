@@ -744,6 +744,8 @@ impl SoundFxApp {
     }
 
     pub(super) fn import_downloaded_sound(&mut self, path: &Path, remove_source: bool) {
+        self.library_current_folder = None;
+        self.folder_import_select_mode = None;
         self.import_paths(vec![path.to_path_buf()]);
         if remove_source {
             let _ = fs::remove_file(path);
@@ -1597,6 +1599,10 @@ impl SoundFxApp {
             );
         }
 
+        if self.library_tab == LibraryTab::Sounds {
+            self.draw_root_inline_sounds(ui);
+        }
+
         self.apply_folder_tree_actions(
             select_folder_id,
             delete_folder_id,
@@ -1606,6 +1612,36 @@ impl SoundFxApp {
             toggle_folder_id,
             clear_selected_folder,
         );
+    }
+
+    fn draw_root_inline_sounds(&mut self, ui: &mut Ui) {
+        let sounds = self.direct_sounds_for_folder(None);
+        if sounds.is_empty() {
+            return;
+        }
+
+        let visible_count = self.visible_folder_sound_count(None, sounds.len(), ui.ctx());
+        ui.add_space(10.0);
+        self.draw_folder_loading_hint(ui, visible_count, sounds.len());
+        if self.library_sound_view == LibrarySoundView::Grid {
+            let modal_open = self.has_modal_panel();
+            let titlebar_drag_active = self.titlebar_drag_active(ui.ctx());
+            self.draw_library_sound_grid_content(
+                ui,
+                &sounds[..visible_count],
+                ui.available_width().max(180.0),
+                modal_open,
+                false,
+                titlebar_drag_active,
+            );
+        } else {
+            for (index, sound) in sounds.iter().take(visible_count).enumerate() {
+                self.draw_inline_folder_sound_row(ui, sound);
+                if index + 1 < visible_count {
+                    ui.add_space(8.0);
+                }
+            }
+        }
     }
 
     fn external_drop_preview_details(&self, ctx: &Context) -> Option<(String, bool, usize)> {
