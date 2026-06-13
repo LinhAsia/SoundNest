@@ -787,28 +787,6 @@ impl SoundFxApp {
             return;
         }
 
-        let active_hidden_tag = active_filter
-            .as_deref()
-            .filter(|tag| {
-                !tags
-                    .iter()
-                    .take(LIBRARY_TAG_COLLAPSED_COUNT)
-                    .any(|value| value.eq_ignore_ascii_case(tag))
-            })
-            .map(str::to_owned);
-        let mut visible_tags = tags
-            .iter()
-            .take(LIBRARY_TAG_COLLAPSED_COUNT)
-            .cloned()
-            .collect::<Vec<_>>();
-        if let Some(tag) = active_hidden_tag
-            && !visible_tags
-                .iter()
-                .any(|value| value.eq_ignore_ascii_case(&tag))
-        {
-            visible_tags.push(tag);
-        }
-
         ui.add_space(8.0);
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
@@ -817,7 +795,7 @@ impl SoundFxApp {
                 self.library_audio_tag_filter = None;
             }
 
-            for tag in visible_tags {
+            for tag in tags {
                 let active = active_filter.as_deref().is_some_and(|value| value == tag);
                 if Self::tag_chip_button(ui, &tag, active).clicked() {
                     self.library_audio_tag_filter = if active { None } else { Some(tag) };
