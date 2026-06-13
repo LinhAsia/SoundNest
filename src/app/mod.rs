@@ -214,6 +214,13 @@ pub(crate) enum AudioPreloadMessage {
     },
 }
 
+pub(crate) enum RecordingReviewMessage {
+    Finished {
+        path: PathBuf,
+        result: Result<SoundEffect, String>,
+    },
+}
+
 pub(crate) enum LibraryImportMessage {
     Progress {
         job_id: Uuid,
@@ -444,6 +451,9 @@ pub struct SoundFxApp {
     pub(super) recording_draft: Option<RecordingDraft>,
     pub(super) active_record_video_export: Option<RecordVideoExportState>,
     pub(super) video_viewer: Option<VideoViewerState>,
+    pub(super) recording_review_pending_path: Option<PathBuf>,
+    pub(super) recording_review_tx: Sender<RecordingReviewMessage>,
+    pub(super) recording_review_rx: Receiver<RecordingReviewMessage>,
     pub(super) pitch_monitor: PitchMonitor,
     pub(super) pitch_update_hz: f32,
     pub(super) pitch_overlay_animation: bool,
@@ -613,6 +623,7 @@ impl SoundFxApp {
         let (processed_export_tx, processed_export_rx) = mpsc::channel();
         let (trim_commit_tx, trim_commit_rx) = mpsc::channel();
         let (audio_preload_tx, audio_preload_rx) = mpsc::channel();
+        let (recording_review_tx, recording_review_rx) = mpsc::channel();
         let (library_import_tx, library_import_rx) = mpsc::channel();
         let (normalize_tx, normalize_rx) = mpsc::channel();
         let video_assets = storage.load_video_library().unwrap_or_else(|error| {
@@ -757,6 +768,9 @@ impl SoundFxApp {
             recording_draft: None,
             active_record_video_export: None,
             video_viewer: None,
+            recording_review_pending_path: None,
+            recording_review_tx,
+            recording_review_rx,
             pitch_monitor: PitchMonitor::new(),
             pitch_update_hz,
             pitch_overlay_animation,
@@ -1718,6 +1732,10 @@ impl SoundFxApp {
     }
 
     fn start_recording(&mut self, ctx: &Context, reveal_main_window: bool) {
+        if self.recording_review_pending_path.is_some() {
+            self.status = Some("Preparing recorded audio...".to_owned());
+            return;
+        }
         if self.record_input_source == PitchInputSource::Microphone
             && self.selected_record_input_device.is_none()
         {
@@ -1832,6 +1850,11 @@ impl SoundFxApp {
     }
 
     fn close_recording_review(&mut self, discard_audio: bool) {
+        if let Some(path) = self.recording_review_pending_path.take()
+            && discard_audio
+        {
+            let _ = fs::remove_file(path);
+        }
         if let Some(draft) = self.recording_draft.take() {
             if self
                 .audio
@@ -11566,6 +11589,7 @@ impl eframe::App for SoundFxApp {
         self.poll_processed_export_jobs(ctx);
         self.poll_trim_commit_jobs(ctx);
         self.poll_audio_preload_jobs(ctx);
+        self.poll_recording_review_jobs(ctx);
         self.poll_library_import_jobs(ctx);
         self.poll_normalize_jobs(ctx);
         self.poll_stream_driver_result(ctx);
@@ -11645,6 +11669,9 @@ impl eframe::App for SoundFxApp {
                 Self::reveal_window(ctx);
                 self.reveal_record_review_on_open = false;
             }
+        }
+        if self.recording_review_pending_path.is_some() {
+            ctx.request_repaint_after(Duration::from_millis(JOB_POLL_REPAINT_MS));
         }
         self.poll_record_video_export(ctx);
         if self.active_record_video_export.is_some() {

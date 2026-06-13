@@ -565,34 +565,73 @@ impl SoundFxApp {
         } else {
             self.record_name.trim().to_owned()
         };
+        let path = path.to_path_buf();
+        self.stop_preview();
+        self.show_record_panel = false;
+        self.show_record_review_panel = false;
+        self.app_view = AppView::Editor;
+        self.recording_review_pending_path = Some(path.clone());
+        self.status = Some("Preparing recorded audio...".to_owned());
 
-        match self.storage.analyze_sound_as_effect(path, &name) {
-            Ok(mut sound) => {
-                self.stop_preview();
-                sound.waveform = Self::center_waveform_visual(&sound.waveform);
-                let preview_id = sound.id;
-                let preview_start = sound.trim_start_secs;
-                let preview_duration = sound.safe_duration();
-                self.trim_timeline_zoom = 1.0;
-                self.recording_draft = Some(RecordingDraft {
-                    sound,
-                    source_path: path.to_path_buf(),
-                    source_is_temporary: true,
-                    keep_vocal: false,
-                    vocal_separated_path: None,
-                    keep_music: false,
-                    music_separated_path: None,
+        let tx = self.recording_review_tx.clone();
+        thread::spawn(move || {
+            let result = Storage::new()
+                .map_err(|error| error.to_string())
+                .and_then(|storage| {
+                    storage
+                        .analyze_sound_as_effect(&path, &name)
+                        .map_err(|error| error.to_string())
                 });
-                self.show_record_panel = false;
-                self.show_record_review_panel = true;
-                self.app_view = AppView::Editor;
-                self.set_preview_cursor_secs(preview_id, preview_start, preview_duration);
-                self.preview_recording_draft_from_position(Some(preview_start));
-                self.clear_status();
-            }
-            Err(error) => {
-                let _ = fs::remove_file(path);
-                self.set_error_status(error);
+            let _ = tx.send(RecordingReviewMessage::Finished { path, result });
+        });
+    }
+
+    pub(super) fn poll_recording_review_jobs(&mut self, ctx: &Context) {
+        while let Ok(message) = self.recording_review_rx.try_recv() {
+            match message {
+                RecordingReviewMessage::Finished { path, result } => {
+                    let is_current = self
+                        .recording_review_pending_path
+                        .as_ref()
+                        .is_some_and(|pending| pending == &path);
+                    if !is_current {
+                        let _ = fs::remove_file(path);
+                        continue;
+                    }
+
+                    self.recording_review_pending_path = None;
+                    match result {
+                        Ok(mut sound) => {
+                            sound.waveform = Self::center_waveform_visual(&sound.waveform);
+                            let preview_id = sound.id;
+                            let preview_start = sound.trim_start_secs;
+                            let preview_duration = sound.safe_duration();
+                            self.trim_timeline_zoom = 1.0;
+                            self.recording_draft = Some(RecordingDraft {
+                                sound,
+                                source_path: path,
+                                source_is_temporary: true,
+                                keep_vocal: false,
+                                vocal_separated_path: None,
+                                keep_music: false,
+                                music_separated_path: None,
+                            });
+                            self.show_record_review_panel = true;
+                            self.set_preview_cursor_secs(
+                                preview_id,
+                                preview_start,
+                                preview_duration,
+                            );
+                            self.preview_recording_draft_from_position(Some(preview_start));
+                            self.clear_status();
+                        }
+                        Err(error) => {
+                            let _ = fs::remove_file(path);
+                            self.set_error_status(error);
+                        }
+                    }
+                    ctx.request_repaint();
+                }
             }
         }
     }

@@ -1,6 +1,8 @@
+use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -16,27 +18,8 @@ fn bundled_demucs_exe_path() -> PathBuf {
         .join("demucs.exe")
 }
 
-/// Check if demucs-rs CLI is available (either installed or in PATH)
-pub fn is_demucs_available() -> bool {
-    let bundled = bundled_demucs_exe_path();
-    (bundled.exists()
-        && Command::new(&bundled)
-            .arg("--help")
-            .output()
-            .is_ok_and(|output| output.status.success()))
-        || Command::new("demucs")
-            .arg("--help")
-            .output()
-            .is_ok_and(|output| output.status.success())
-}
-
-fn demucs_command() -> Command {
-    let bundled = bundled_demucs_exe_path();
-    let mut cmd = if bundled.exists() {
-        Command::new(bundled)
-    } else {
-        Command::new("demucs")
-    };
+fn command_with_hidden_window(program: impl AsRef<OsStr>) -> Command {
+    let mut cmd = Command::new(program);
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -44,6 +27,32 @@ fn demucs_command() -> Command {
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
     cmd
+}
+
+/// Check if demucs-rs CLI is available (either installed or in PATH)
+pub fn is_demucs_available() -> bool {
+    static AVAILABLE: OnceLock<bool> = OnceLock::new();
+    *AVAILABLE.get_or_init(|| {
+        let bundled = bundled_demucs_exe_path();
+        (bundled.exists()
+            && command_with_hidden_window(&bundled)
+                .arg("--help")
+                .output()
+                .is_ok_and(|output| output.status.success()))
+            || command_with_hidden_window("demucs")
+                .arg("--help")
+                .output()
+                .is_ok_and(|output| output.status.success())
+    })
+}
+
+fn demucs_command() -> Command {
+    let bundled = bundled_demucs_exe_path();
+    if bundled.exists() {
+        command_with_hidden_window(bundled)
+    } else {
+        command_with_hidden_window("demucs")
+    }
 }
 
 /// Separate audio and extract only the vocal stem using demucs-rs CLI.
