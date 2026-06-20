@@ -6861,6 +6861,10 @@ impl SoundFxApp {
                             let row_height = self.library_list_row_height().max(108.0);
                             let (row_rect, _) =
                                 ui.allocate_exact_size(vec2(row_width, row_height), Sense::hover());
+                            let visible_row_rect = row_rect.intersect(ui.clip_rect());
+                            if visible_row_rect.is_negative() || visible_row_rect.height() <= 0.0 {
+                                continue;
+                            }
                             let row_fill = if selected {
                                 if self.dark_theme {
                                     Color32::from_rgb(60, 25, 52)
@@ -6878,13 +6882,9 @@ impl SoundFxApp {
                                     Self::border_color()
                                 },
                             );
-                            ui.painter().rect_filled(row_rect, 22.0, row_fill);
-                            ui.painter().rect_stroke(
-                                row_rect,
-                                22.0,
-                                row_stroke,
-                                StrokeKind::Inside,
-                            );
+                            let row_painter = ui.painter().with_clip_rect(ui.clip_rect());
+                            row_painter.rect_filled(row_rect, 22.0, row_fill);
+                            row_painter.rect_stroke(row_rect, 22.0, row_stroke, StrokeKind::Inside);
                             let inner_rect = row_rect.shrink2(vec2(14.0, row_padding_y as f32));
                             ui.scope_builder(egui::UiBuilder::new().max_rect(inner_rect), |ui| {
                                 ui.style_mut().interaction.selectable_labels = false;
