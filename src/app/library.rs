@@ -2667,9 +2667,9 @@ impl SoundFxApp {
         let play_column_width = play_button_size + 10.0;
         let side_panel_width = (row_width * 0.24).clamp(188.0, 250.0);
         let waveform_width = (row_width - play_column_width - side_panel_width - 42.0).max(140.0);
-        let row_height = (self.library_list_row_height() - 30.0).clamp(62.0, 100.0);
+        let row_height = (self.library_list_row_height() - 14.0).clamp(78.0, 112.0);
         let (row_rect, _) = ui.allocate_exact_size(vec2(row_width, row_height), Sense::hover());
-        let inner_rect = row_rect.shrink2(vec2(10.0, row_padding_y as f32));
+        let inner_rect = row_rect.shrink2(vec2(10.0, (row_padding_y as f32 * 0.75).max(6.0)));
         ui.painter()
             .rect_filled(row_rect, 14.0, Self::surface_fill());
         ui.painter().rect_stroke(
@@ -2737,18 +2737,18 @@ impl SoundFxApp {
                 ui.add_space(12.0);
                 ui.allocate_ui_with_layout(
                     vec2(side_panel_width, inner_rect.height()),
-                    egui::Layout::top_down(Align::Min),
+                    egui::Layout::top_down(Align::Center),
                     |ui| {
                         ui.add(
                             egui::Label::new(
                                 RichText::new(&sound.name)
-                                    .size(if ultra_compact_row { 15.5 } else { 17.0 })
+                                    .size(if ultra_compact_row { 15.0 } else { 16.5 })
                                     .color(Self::strong_text_color())
                                     .strong(),
                             )
                             .truncate(),
                         );
-                        ui.add_space(if ultra_compact_row { 4.0 } else { 6.0 });
+                        ui.add_space(if ultra_compact_row { 2.0 } else { 4.0 });
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing = vec2(8.0, 4.0);
                             ui.label(
@@ -2765,7 +2765,7 @@ impl SoundFxApp {
                                 ui.label(Self::icon(0xe050, 14.0, Color32::from_rgb(214, 51, 132)));
                             }
                         });
-                        ui.add_space(if ultra_compact_row { 4.0 } else { 8.0 });
+                        ui.add_space(if ultra_compact_row { 4.0 } else { 6.0 });
                         ui.horizontal(|ui| {
                             let favorite_btn =
                                 Self::favorite_button_sized(ui, sound.favorite, [36.0, 30.0], 16.0);
