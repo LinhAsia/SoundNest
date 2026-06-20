@@ -6858,7 +6858,7 @@ impl SoundFxApp {
                                     ACTIVE_UI_REPAINT_MS,
                                 ));
                             }
-                            let row_height = (self.library_list_row_height() - 12.0).max(88.0);
+                            let row_height = self.library_list_row_height().max(108.0);
                             let (row_rect, _) =
                                 ui.allocate_exact_size(vec2(row_width, row_height), Sense::hover());
                             let row_fill = if selected {
@@ -6910,9 +6910,10 @@ impl SoundFxApp {
                                         ui.add_space(title_spacing);
                                         let waveform_samples = self.sound_waveform_samples(sound);
                                         let waveform_preview =
-                                            Self::trimmed_waveform_preview_from_samples(
+                                            Self::library_sound_waveform_preview_from_samples(
                                                 sound,
                                                 &waveform_samples,
+                                                64,
                                             );
                                         Self::draw_full_width_wave_strip(
                                             ui,
@@ -7009,9 +7010,6 @@ impl SoundFxApp {
                                 } else {
                                     preview_request = Some(sound.id);
                                 }
-                            }
-                            if row_index + 1 < visible_sounds.len() {
-                                ui.add_space(12.0);
                             }
                         }
                     },
