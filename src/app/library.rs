@@ -2749,7 +2749,7 @@ impl SoundFxApp {
                         let info_width = (side_panel_width - actions_width - 16.0).max(120.0);
                         ui.allocate_ui_with_layout(
                             vec2(info_width, inner_rect.height()),
-                            egui::Layout::top_down(Align::Center),
+                            egui::Layout::top_down(Align::Min),
                             |ui| {
                                 ui.set_width(info_width);
                                 ui.set_min_width(info_width);
@@ -2789,44 +2789,52 @@ impl SoundFxApp {
                         ui.add_space(16.0);
                         ui.allocate_ui_with_layout(
                             vec2(actions_width, inner_rect.height()),
-                            egui::Layout::right_to_left(Align::Center),
+                            egui::Layout::top_down(Align::Center),
                             |ui| {
-                                ui.spacing_mut().item_spacing = vec2(10.0, 0.0);
-                                if self.folder_import_select_mode.is_none() {
-                                    let remove_btn =
-                                        Self::icon_action(ui, [38.0, 32.0], 0xe872, false, false);
-                                    Self::decorate_button_response(ui, &remove_btn);
-                                    if remove_btn.clicked() {
-                                        remove_sound_from_folder = Some(sound.id);
-                                        remove_clicked = true;
+                                ui.add_space(if ultra_compact_row { 26.0 } else { 28.0 });
+                                ui.horizontal(|ui| {
+                                    ui.spacing_mut().item_spacing = vec2(10.0, 0.0);
+                                    let favorite_btn = Self::favorite_button_sized(
+                                        ui,
+                                        sound.favorite,
+                                        [38.0, 32.0],
+                                        16.0,
+                                    );
+                                    if favorite_btn.clicked() {
+                                        favorite_sound = Some(sound.id);
+                                        favorite_clicked = true;
                                     }
-                                    remove_response = Some(remove_btn);
-                                }
+                                    favorite_response = Some(favorite_btn);
 
-                                let copy_btn = Self::icon_action(
-                                    ui,
-                                    [38.0, 32.0],
-                                    0xe14d,
-                                    self.sound_copy_feedback_active(ui.ctx(), sound.id),
-                                    self.sound_copy_feedback_active(ui.ctx(), sound.id),
-                                );
-                                if copy_btn.clicked() {
-                                    copy_sound = Some(sound.id);
-                                    copy_clicked = true;
-                                }
-                                copy_response = Some(copy_btn);
+                                    let copy_btn = Self::icon_action(
+                                        ui,
+                                        [38.0, 32.0],
+                                        0xe14d,
+                                        self.sound_copy_feedback_active(ui.ctx(), sound.id),
+                                        self.sound_copy_feedback_active(ui.ctx(), sound.id),
+                                    );
+                                    if copy_btn.clicked() {
+                                        copy_sound = Some(sound.id);
+                                        copy_clicked = true;
+                                    }
+                                    copy_response = Some(copy_btn);
 
-                                let favorite_btn = Self::favorite_button_sized(
-                                    ui,
-                                    sound.favorite,
-                                    [38.0, 32.0],
-                                    16.0,
-                                );
-                                if favorite_btn.clicked() {
-                                    favorite_sound = Some(sound.id);
-                                    favorite_clicked = true;
-                                }
-                                favorite_response = Some(favorite_btn);
+                                    if self.folder_import_select_mode.is_none() {
+                                        let remove_btn = Self::icon_action(
+                                            ui,
+                                            [38.0, 32.0],
+                                            0xe872,
+                                            false,
+                                            false,
+                                        );
+                                        Self::decorate_button_response(ui, &remove_btn);
+                                        if remove_btn.clicked() {
+                                            remove_sound_from_folder = Some(sound.id);
+                                            remove_clicked = true;
+                                        }
+                                        remove_response = Some(remove_btn);
+                                    }
+                                });
                             },
                         );
                     },
