@@ -6906,6 +6906,8 @@ impl SoundFxApp {
                                 .inner_margin(Margin::symmetric(14, row_padding_y))
                                 .show(ui, |ui| {
                                     ui.style_mut().interaction.selectable_labels = false;
+                                    ui.set_width(row_width);
+                                    ui.set_min_width(row_width);
                                     ui.horizontal(|ui| {
                                         ui.allocate_ui_with_layout(
                                             vec2(play_column_width, 0.0),

@@ -2668,6 +2668,8 @@ impl SoundFxApp {
             .corner_radius(14.0)
             .inner_margin(Margin::symmetric(10, row_padding_y))
             .show(ui, |ui| {
+                ui.set_width(row_width);
+                ui.set_min_width(row_width);
                 ui.horizontal(|ui| {
                     ui.allocate_ui_with_layout(
                         vec2(play_column_width, 0.0),
