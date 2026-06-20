@@ -2665,7 +2665,7 @@ impl SoundFxApp {
         };
         let row_width = ui.available_width();
         let play_column_width = play_button_size + 10.0;
-        let side_panel_width = (row_width * 0.26).clamp(220.0, 290.0);
+        let side_panel_width = (row_width * 0.30).clamp(260.0, 360.0);
         let waveform_width = (row_width - play_column_width - side_panel_width - 42.0).max(140.0);
         let row_height = (self.library_list_row_height() - 14.0).clamp(78.0, 112.0);
         let (row_rect, _) = ui.allocate_exact_size(vec2(row_width, row_height), Sense::hover());
@@ -2737,71 +2737,98 @@ impl SoundFxApp {
                 ui.add_space(12.0);
                 ui.allocate_ui_with_layout(
                     vec2(side_panel_width, inner_rect.height()),
-                    egui::Layout::top_down(Align::Center),
+                    egui::Layout::left_to_right(Align::Center),
                     |ui| {
                         ui.set_width(side_panel_width);
                         ui.set_min_width(side_panel_width);
-                        ui.add(
-                            egui::Label::new(
-                                RichText::new(&sound.name)
-                                    .size(if ultra_compact_row { 15.0 } else { 16.5 })
-                                    .color(Self::strong_text_color())
-                                    .strong(),
-                            )
-                            .truncate(),
+                        let actions_width = if self.folder_import_select_mode.is_none() {
+                            38.0 * 3.0 + 10.0 * 2.0
+                        } else {
+                            38.0 * 2.0 + 10.0
+                        };
+                        let info_width = (side_panel_width - actions_width - 16.0).max(120.0);
+                        ui.allocate_ui_with_layout(
+                            vec2(info_width, inner_rect.height()),
+                            egui::Layout::top_down(Align::Center),
+                            |ui| {
+                                ui.set_width(info_width);
+                                ui.set_min_width(info_width);
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(&sound.name)
+                                            .size(if ultra_compact_row { 15.0 } else { 16.5 })
+                                            .color(Self::strong_text_color())
+                                            .strong(),
+                                    )
+                                    .truncate(),
+                                );
+                                ui.add_space(if ultra_compact_row { 3.0 } else { 5.0 });
+                                ui.horizontal(|ui| {
+                                    ui.spacing_mut().item_spacing = vec2(8.0, 4.0);
+                                    ui.label(
+                                        RichText::new(format_time(sound.trimmed_length()))
+                                            .size(11.5)
+                                            .color(Self::muted_text_color()),
+                                    );
+                                    ui.label(
+                                        RichText::new(format!("{:.0}%", sound.volume * 100.0))
+                                            .size(11.5)
+                                            .color(Self::muted_text_color()),
+                                    );
+                                    if is_previewing {
+                                        ui.label(Self::icon(
+                                            0xe050,
+                                            14.0,
+                                            Color32::from_rgb(214, 51, 132),
+                                        ));
+                                    }
+                                });
+                            },
                         );
-                        ui.add_space(if ultra_compact_row { 3.0 } else { 5.0 });
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing = vec2(8.0, 4.0);
-                            ui.label(
-                                RichText::new(format_time(sound.trimmed_length()))
-                                    .size(11.5)
-                                    .color(Self::muted_text_color()),
-                            );
-                            ui.label(
-                                RichText::new(format!("{:.0}%", sound.volume * 100.0))
-                                    .size(11.5)
-                                    .color(Self::muted_text_color()),
-                            );
-                            if is_previewing {
-                                ui.label(Self::icon(0xe050, 14.0, Color32::from_rgb(214, 51, 132)));
-                            }
-                        });
-                        ui.add_space(if ultra_compact_row { 6.0 } else { 8.0 });
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing = vec2(10.0, 0.0);
-                            let favorite_btn =
-                                Self::favorite_button_sized(ui, sound.favorite, [38.0, 32.0], 16.0);
-                            if favorite_btn.clicked() {
-                                favorite_sound = Some(sound.id);
-                                favorite_clicked = true;
-                            }
-                            favorite_response = Some(favorite_btn);
 
-                            let copy_btn = Self::icon_action(
-                                ui,
-                                [38.0, 32.0],
-                                0xe14d,
-                                self.sound_copy_feedback_active(ui.ctx(), sound.id),
-                                self.sound_copy_feedback_active(ui.ctx(), sound.id),
-                            );
-                            if copy_btn.clicked() {
-                                copy_sound = Some(sound.id);
-                                copy_clicked = true;
-                            }
-                            copy_response = Some(copy_btn);
-
-                            if self.folder_import_select_mode.is_none() {
-                                let remove_btn =
-                                    Self::icon_action(ui, [38.0, 32.0], 0xe872, false, false);
-                                Self::decorate_button_response(ui, &remove_btn);
-                                if remove_btn.clicked() {
-                                    remove_sound_from_folder = Some(sound.id);
-                                    remove_clicked = true;
+                        ui.add_space(16.0);
+                        ui.allocate_ui_with_layout(
+                            vec2(actions_width, inner_rect.height()),
+                            egui::Layout::right_to_left(Align::Center),
+                            |ui| {
+                                ui.spacing_mut().item_spacing = vec2(10.0, 0.0);
+                                if self.folder_import_select_mode.is_none() {
+                                    let remove_btn =
+                                        Self::icon_action(ui, [38.0, 32.0], 0xe872, false, false);
+                                    Self::decorate_button_response(ui, &remove_btn);
+                                    if remove_btn.clicked() {
+                                        remove_sound_from_folder = Some(sound.id);
+                                        remove_clicked = true;
+                                    }
+                                    remove_response = Some(remove_btn);
                                 }
-                                remove_response = Some(remove_btn);
-                            }
-                        });
+
+                                let copy_btn = Self::icon_action(
+                                    ui,
+                                    [38.0, 32.0],
+                                    0xe14d,
+                                    self.sound_copy_feedback_active(ui.ctx(), sound.id),
+                                    self.sound_copy_feedback_active(ui.ctx(), sound.id),
+                                );
+                                if copy_btn.clicked() {
+                                    copy_sound = Some(sound.id);
+                                    copy_clicked = true;
+                                }
+                                copy_response = Some(copy_btn);
+
+                                let favorite_btn = Self::favorite_button_sized(
+                                    ui,
+                                    sound.favorite,
+                                    [38.0, 32.0],
+                                    16.0,
+                                );
+                                if favorite_btn.clicked() {
+                                    favorite_sound = Some(sound.id);
+                                    favorite_clicked = true;
+                                }
+                                favorite_response = Some(favorite_btn);
+                            },
+                        );
                     },
                 );
             });
