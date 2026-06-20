@@ -2579,10 +2579,15 @@ impl SoundFxApp {
                 |ui| {
                     ui.set_width(content_width.max(ui.available_width()));
                     self.draw_folder_loading_hint(ui, visible_count, sounds.len());
+                    let row_gap = if self.library_row_thickness <= 2 {
+                        10.0
+                    } else {
+                        12.0
+                    };
                     for (index, sound) in sounds.iter().take(visible_count).enumerate() {
                         self.draw_inline_folder_sound_row(ui, sound);
                         if index + 1 < visible_count {
-                            ui.add_space(8.0);
+                            ui.add_space(row_gap);
                         }
                     }
                 },
@@ -2667,7 +2672,7 @@ impl SoundFxApp {
         let play_column_width = play_button_size + 10.0;
         let side_panel_width = (row_width * 0.30).clamp(260.0, 360.0);
         let waveform_width = (row_width - play_column_width - side_panel_width - 42.0).max(140.0);
-        let row_height = (self.library_list_row_height() - 14.0).clamp(78.0, 112.0);
+        let row_height = self.library_list_row_height().clamp(96.0, 132.0);
         let (row_rect, _) = ui.allocate_exact_size(vec2(row_width, row_height), Sense::hover());
         let inner_rect = row_rect.shrink2(vec2(10.0, (row_padding_y as f32 * 0.75).max(6.0)));
         ui.painter()
