@@ -6877,148 +6877,148 @@ impl SoundFxApp {
                             }
                             let mut play_clicked = false;
                             let mut play_response = None;
-                            let frame = ui
-                                .allocate_ui_with_layout(
-                                    vec2(row_width, 0.0),
-                                    egui::Layout::top_down(Align::Min),
-                                    |ui| {
-                                        Frame::new()
-                                            .fill(if selected {
-                                                if self.dark_theme {
-                                                    Color32::from_rgb(60, 25, 52)
-                                                } else {
-                                                    Color32::from_rgb(255, 239, 247)
-                                                }
+                            let row_height = (self.library_list_row_height() - 12.0).max(72.0);
+                            let (row_rect, _) =
+                                ui.allocate_exact_size(vec2(row_width, row_height), Sense::hover());
+                            let frame = ui.scope_builder(
+                                egui::UiBuilder::new().max_rect(row_rect),
+                                |ui| {
+                                    Frame::new()
+                                        .fill(if selected {
+                                            if self.dark_theme {
+                                                Color32::from_rgb(60, 25, 52)
                                             } else {
-                                                Self::surface_fill()
-                                            })
-                                            .stroke(Stroke::new(
-                                                1.0,
-                                                if selected {
-                                                    Color32::from_rgb(235, 118, 171)
-                                                } else {
-                                                    Self::border_color()
-                                                },
-                                            ))
-                                            .shadow(Shadow {
-                                                offset: [0, 10],
-                                                blur: 24,
-                                                spread: 0,
-                                                color: if selected {
-                                                    Color32::from_rgba_premultiplied(138, 45, 93, 26)
-                                                } else {
-                                                    Color32::from_rgba_premultiplied(82, 48, 70, 14)
-                                                },
-                                            })
-                                            .corner_radius(22.0)
-                                            .inner_margin(Margin::symmetric(14, row_padding_y))
-                                            .show(ui, |ui| {
-                                                ui.style_mut().interaction.selectable_labels = false;
-                                                ui.set_width(row_width);
-                                                ui.set_min_width(row_width);
-                                                ui.horizontal(|ui| {
-                                                    ui.allocate_ui_with_layout(
-                                                        vec2(play_column_width, 0.0),
-                                                        egui::Layout::top_down(Align::Center),
-                                                        |ui| {
-                                                            let play_btn = Self::icon_action(
-                                                                ui,
-                                                                [play_button_size, play_button_size],
-                                                                if is_loading || playing {
-                                                                    0xe5d5
-                                                                } else {
-                                                                    0xe037
-                                                                },
-                                                                is_loading || playing,
-                                                                false,
-                                                            );
-                                                            if play_btn.clicked() {
-                                                                if is_loading || playing {
-                                                                    self.stop_preview();
-                                                                } else {
-                                                                    preview_request = Some(sound.id);
-                                                                }
-                                                                play_clicked = true;
+                                                Color32::from_rgb(255, 239, 247)
+                                            }
+                                        } else {
+                                            Self::surface_fill()
+                                        })
+                                        .stroke(Stroke::new(
+                                            1.0,
+                                            if selected {
+                                                Color32::from_rgb(235, 118, 171)
+                                            } else {
+                                                Self::border_color()
+                                            },
+                                        ))
+                                        .shadow(Shadow {
+                                            offset: [0, 10],
+                                            blur: 24,
+                                            spread: 0,
+                                            color: if selected {
+                                                Color32::from_rgba_premultiplied(138, 45, 93, 26)
+                                            } else {
+                                                Color32::from_rgba_premultiplied(82, 48, 70, 14)
+                                            },
+                                        })
+                                        .corner_radius(22.0)
+                                        .inner_margin(Margin::symmetric(14, row_padding_y))
+                                        .show(ui, |ui| {
+                                            ui.style_mut().interaction.selectable_labels = false;
+                                            ui.set_width(row_rect.width());
+                                            ui.set_min_width(row_rect.width());
+                                            ui.horizontal(|ui| {
+                                                ui.allocate_ui_with_layout(
+                                                    vec2(play_column_width, 0.0),
+                                                    egui::Layout::top_down(Align::Center),
+                                                    |ui| {
+                                                        let play_btn = Self::icon_action(
+                                                            ui,
+                                                            [play_button_size, play_button_size],
+                                                            if is_loading || playing {
+                                                                0xe5d5
+                                                            } else {
+                                                                0xe037
+                                                            },
+                                                            is_loading || playing,
+                                                            false,
+                                                        );
+                                                        if play_btn.clicked() {
+                                                            if is_loading || playing {
+                                                                self.stop_preview();
+                                                            } else {
+                                                                preview_request = Some(sound.id);
                                                             }
-                                                            play_response = Some(play_btn);
-                                                        },
-                                                    );
+                                                            play_clicked = true;
+                                                        }
+                                                        play_response = Some(play_btn);
+                                                    },
+                                                );
 
-                                                    ui.add_space(12.0);
-                                                    ui.allocate_ui_with_layout(
-                                                        vec2(waveform_width, 0.0),
-                                                        egui::Layout::top_down(Align::Min),
-                                                        |ui| {
-                                                            let waveform_samples =
-                                                                self.sound_waveform_samples(sound);
-                                                            let waveform_preview =
-                                                                Self::trimmed_waveform_preview_from_samples(
-                                                                    sound,
-                                                                    &waveform_samples,
-                                                                );
-                                                            Self::draw_full_width_wave_strip(
-                                                                ui,
-                                                                &waveform_preview,
-                                                                progress,
-                                                                Color32::from_rgb(214, 51, 132),
-                                                                Color32::from_rgb(238, 213, 227),
-                                                                Self::panel_fill(),
-                                                                waveform_height,
+                                                ui.add_space(12.0);
+                                                ui.allocate_ui_with_layout(
+                                                    vec2(waveform_width, 0.0),
+                                                    egui::Layout::top_down(Align::Min),
+                                                    |ui| {
+                                                        let waveform_samples =
+                                                            self.sound_waveform_samples(sound);
+                                                        let waveform_preview =
+                                                            Self::trimmed_waveform_preview_from_samples(
+                                                                sound,
+                                                                &waveform_samples,
                                                             );
-                                                        },
-                                                    );
+                                                        Self::draw_full_width_wave_strip(
+                                                            ui,
+                                                            &waveform_preview,
+                                                            progress,
+                                                            Color32::from_rgb(214, 51, 132),
+                                                            Color32::from_rgb(238, 213, 227),
+                                                            Self::panel_fill(),
+                                                            waveform_height,
+                                                        );
+                                                    },
+                                                );
 
-                                                    ui.add_space(14.0);
-                                                    ui.allocate_ui_with_layout(
-                                                        vec2(details_width, 0.0),
-                                                        egui::Layout::top_down(Align::Min),
-                                                        |ui| {
-                                                            ui.add(
-                                                                egui::Label::new(
-                                                                    RichText::new(&sound.name)
-                                                                        .size(if compact_row {
-                                                                            15.5
-                                                                        } else {
-                                                                            17.0
-                                                                        })
-                                                                        .color(Self::strong_text_color())
-                                                                        .strong(),
-                                                                )
-                                                                .truncate(),
+                                                ui.add_space(14.0);
+                                                ui.allocate_ui_with_layout(
+                                                    vec2(details_width, 0.0),
+                                                    egui::Layout::top_down(Align::Min),
+                                                    |ui| {
+                                                        ui.add(
+                                                            egui::Label::new(
+                                                                RichText::new(&sound.name)
+                                                                    .size(if compact_row {
+                                                                        15.5
+                                                                    } else {
+                                                                        17.0
+                                                                    })
+                                                                    .color(Self::strong_text_color())
+                                                                    .strong(),
+                                                            )
+                                                            .truncate(),
+                                                        );
+                                                        ui.add_space(6.0);
+                                                        ui.horizontal_wrapped(|ui| {
+                                                            ui.spacing_mut().item_spacing = vec2(8.0, 4.0);
+                                                            ui.label(
+                                                                RichText::new(format_time(
+                                                                    sound.trimmed_length(),
+                                                                ))
+                                                                .size(11.5)
+                                                                .color(Self::muted_text_color()),
                                                             );
-                                                            ui.add_space(6.0);
-                                                            ui.horizontal_wrapped(|ui| {
-                                                                ui.spacing_mut().item_spacing = vec2(8.0, 4.0);
-                                                                ui.label(
-                                                                    RichText::new(format_time(
-                                                                        sound.trimmed_length(),
-                                                                    ))
-                                                                    .size(11.5)
-                                                                    .color(Self::muted_text_color()),
-                                                                );
-                                                                ui.label(
-                                                                    RichText::new(format!(
-                                                                        "{:.0}%",
-                                                                        sound.volume * 100.0
-                                                                    ))
-                                                                    .size(11.5)
-                                                                    .color(Self::muted_text_color()),
-                                                                );
-                                                                if playing {
-                                                                    ui.label(Self::icon(
-                                                                        0xe050,
-                                                                        14.0,
-                                                                        Color32::from_rgb(214, 51, 132),
-                                                                    ));
-                                                                }
-                                                            });
-                                                        },
-                                                    );
-                                                });
-                                            })
-                                    },
-                                )
-                                .inner;
+                                                            ui.label(
+                                                                RichText::new(format!(
+                                                                    "{:.0}%",
+                                                                    sound.volume * 100.0
+                                                                ))
+                                                                .size(11.5)
+                                                                .color(Self::muted_text_color()),
+                                                            );
+                                                            if playing {
+                                                                ui.label(Self::icon(
+                                                                    0xe050,
+                                                                    14.0,
+                                                                    Color32::from_rgb(214, 51, 132),
+                                                                ));
+                                                            }
+                                                        });
+                                                    },
+                                                );
+                                            });
+                                        })
+                                },
+                            );
                             let scrollbar_gutter = 18.0;
                             let interactive_rect = Rect::from_min_max(
                                 frame.response.rect.min,
