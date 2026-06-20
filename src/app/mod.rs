@@ -6907,6 +6907,7 @@ impl SoundFxApp {
                             let inner_rect = row_rect.shrink2(vec2(14.0, row_padding_y as f32));
                             ui.scope_builder(egui::UiBuilder::new().max_rect(inner_rect), |ui| {
                                 ui.style_mut().interaction.selectable_labels = false;
+                                ui.set_clip_rect(inner_rect);
                                 ui.set_width(inner_rect.width());
                                 ui.set_min_width(inner_rect.width());
                                 ui.set_min_size(inner_rect.size());
@@ -6964,9 +6965,10 @@ impl SoundFxApp {
 
                                     ui.add_space(14.0);
                                     ui.allocate_ui_with_layout(
-                                        vec2(details_width, 0.0),
-                                        egui::Layout::top_down(Align::Min),
+                                        vec2(details_width, inner_rect.height()),
+                                        egui::Layout::top_down(Align::Center),
                                         |ui| {
+                                            let meta_spacing = if compact_row { 2.0 } else { 6.0 };
                                             ui.add(
                                                 egui::Label::new(
                                                     RichText::new(&sound.name)
@@ -6976,14 +6978,14 @@ impl SoundFxApp {
                                                 )
                                                 .truncate(),
                                             );
-                                            ui.add_space(6.0);
-                                            ui.horizontal_wrapped(|ui| {
+                                            ui.add_space(meta_spacing);
+                                            ui.horizontal(|ui| {
                                                 ui.spacing_mut().item_spacing = vec2(8.0, 4.0);
                                                 ui.label(
                                                     RichText::new(format_time(
                                                         sound.trimmed_length(),
                                                     ))
-                                                    .size(11.5)
+                                                    .size(if compact_row { 10.5 } else { 11.5 })
                                                     .color(Self::muted_text_color()),
                                                 );
                                                 ui.label(
@@ -6991,7 +6993,7 @@ impl SoundFxApp {
                                                         "{:.0}%",
                                                         sound.volume * 100.0
                                                     ))
-                                                    .size(11.5)
+                                                    .size(if compact_row { 10.5 } else { 11.5 })
                                                     .color(Self::muted_text_color()),
                                                 );
                                                 if playing {
@@ -7156,7 +7158,6 @@ impl SoundFxApp {
             cursor
         };
 
-        let mut preview_toggle = false;
         let mut delete_request = false;
         let mut copy_request = false;
         let mut open_location_request = false;
@@ -7240,7 +7241,7 @@ impl SoundFxApp {
             .inner_margin(Margin::same(14))
             .show(ui, |ui| {
                 let sound = &mut self.sounds[index];
-                let controls_width = 52.0 + 52.0 + 52.0 + 64.0 + 64.0 + 36.0;
+                let controls_width = 52.0 + 52.0 + 52.0 + 64.0 + 36.0;
                 let row_gap = 8.0;
                 let back_button_width = if self.editing_from_folder.is_some() {
                     42.0 + 8.0
@@ -7297,24 +7298,6 @@ impl SoundFxApp {
                             }
                             if Self::icon_action(ui, [52.0, 34.0], 0xe2c8, false, false).clicked() {
                                 open_location_request = true;
-                            }
-                            let is_loading = editor_audio_loading;
-                            if Self::icon_action(
-                                ui,
-                                [64.0, 34.0],
-                                if is_loading {
-                                    0xe5d5
-                                } else if is_playing {
-                                    0xe047
-                                } else {
-                                    0xe037
-                                },
-                                is_loading || is_playing,
-                                false,
-                            )
-                            .clicked()
-                            {
-                                preview_toggle = true;
                             }
                         },
                     );
@@ -7953,20 +7936,6 @@ impl SoundFxApp {
 
         if commit_trim_request {
             self.show_trim_commit_panel = true;
-        }
-
-        if preview_toggle {
-            if is_playing || editor_audio_loading {
-                self.stop_preview();
-            } else {
-                let sound = self.sounds[index].clone();
-                let mut cursor_secs = self.preview_cursor_secs_for(&sound);
-                if cursor_secs >= sound.trim_end_secs - 0.02 {
-                    cursor_secs = sound.trim_start_secs;
-                    self.set_preview_cursor_secs(sound_id, cursor_secs, sound_duration);
-                }
-                self.preview_sound_from_position(sound_id, Some(cursor_secs));
-            }
         }
     }
 
