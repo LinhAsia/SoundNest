@@ -2665,7 +2665,7 @@ impl SoundFxApp {
         };
         let row_width = ui.available_width();
         let play_column_width = play_button_size + 10.0;
-        let side_panel_width = (row_width * 0.24).clamp(188.0, 250.0);
+        let side_panel_width = (row_width * 0.26).clamp(220.0, 290.0);
         let waveform_width = (row_width - play_column_width - side_panel_width - 42.0).max(140.0);
         let row_height = (self.library_list_row_height() - 14.0).clamp(78.0, 112.0);
         let (row_rect, _) = ui.allocate_exact_size(vec2(row_width, row_height), Sense::hover());
@@ -2739,6 +2739,8 @@ impl SoundFxApp {
                     vec2(side_panel_width, inner_rect.height()),
                     egui::Layout::top_down(Align::Center),
                     |ui| {
+                        ui.set_width(side_panel_width);
+                        ui.set_min_width(side_panel_width);
                         ui.add(
                             egui::Label::new(
                                 RichText::new(&sound.name)
@@ -2748,7 +2750,7 @@ impl SoundFxApp {
                             )
                             .truncate(),
                         );
-                        ui.add_space(if ultra_compact_row { 2.0 } else { 4.0 });
+                        ui.add_space(if ultra_compact_row { 3.0 } else { 5.0 });
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing = vec2(8.0, 4.0);
                             ui.label(
@@ -2765,10 +2767,11 @@ impl SoundFxApp {
                                 ui.label(Self::icon(0xe050, 14.0, Color32::from_rgb(214, 51, 132)));
                             }
                         });
-                        ui.add_space(if ultra_compact_row { 4.0 } else { 6.0 });
+                        ui.add_space(if ultra_compact_row { 6.0 } else { 8.0 });
                         ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing = vec2(10.0, 0.0);
                             let favorite_btn =
-                                Self::favorite_button_sized(ui, sound.favorite, [36.0, 30.0], 16.0);
+                                Self::favorite_button_sized(ui, sound.favorite, [38.0, 32.0], 16.0);
                             if favorite_btn.clicked() {
                                 favorite_sound = Some(sound.id);
                                 favorite_clicked = true;
@@ -2777,7 +2780,7 @@ impl SoundFxApp {
 
                             let copy_btn = Self::icon_action(
                                 ui,
-                                [36.0, 30.0],
+                                [38.0, 32.0],
                                 0xe14d,
                                 self.sound_copy_feedback_active(ui.ctx(), sound.id),
                                 self.sound_copy_feedback_active(ui.ctx(), sound.id),
@@ -2790,7 +2793,7 @@ impl SoundFxApp {
 
                             if self.folder_import_select_mode.is_none() {
                                 let remove_btn =
-                                    Self::icon_action(ui, [36.0, 30.0], 0xe872, false, false);
+                                    Self::icon_action(ui, [38.0, 32.0], 0xe872, false, false);
                                 Self::decorate_button_response(ui, &remove_btn);
                                 if remove_btn.clicked() {
                                     remove_sound_from_folder = Some(sound.id);
