@@ -6835,6 +6835,7 @@ impl SoundFxApp {
             });
             let mut preview_request = None;
             let mut drag_request = None;
+            let list_width = ui.available_width().max(220.0);
 
             ScrollArea::vertical()
                 .auto_shrink([false, false])
@@ -6843,6 +6844,8 @@ impl SoundFxApp {
                     self.library_list_row_height(),
                     visible_sounds.len(),
                     |ui, row_range| {
+                        ui.set_width(list_width);
+                        ui.set_min_width(list_width);
                         for row_index in row_range {
                             let sound = &visible_sounds[row_index];
                             let selected = self.selected == Some(sound.id);
@@ -6862,7 +6865,7 @@ impl SoundFxApp {
                             let play_button_size = self.library_row_play_button_size();
                             let compact_row =
                                 self.library_row_thickness <= LIBRARY_ROW_MIN_THICKNESS + 1;
-                            let row_width = ui.available_width();
+                            let row_width = list_width;
                             let play_column_width = play_button_size + 10.0;
                             let details_width = (row_width * 0.22).clamp(168.0, 236.0);
                             let waveform_width =
