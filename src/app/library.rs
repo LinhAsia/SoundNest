@@ -2656,16 +2656,17 @@ impl SoundFxApp {
         let row_padding_y = self.library_row_vertical_padding();
         let waveform_height = self.library_row_wave_height();
         let ultra_compact_row = self.library_row_thickness == LIBRARY_ROW_MIN_THICKNESS;
+        let play_button_size = self.library_row_play_button_size();
         let row_width = ui.available_width();
-        let play_column_width = 54.0;
-        let side_panel_width = (row_width * 0.24).clamp(190.0, 280.0);
-        let waveform_width = (row_width - play_column_width - side_panel_width - 42.0).max(180.0);
+        let play_column_width = play_button_size + 8.0;
+        let side_panel_width = (row_width * 0.22).clamp(172.0, 236.0);
+        let waveform_width = (row_width - play_column_width - side_panel_width - 34.0).max(140.0);
 
         let row = Frame::new()
             .fill(Self::surface_fill())
             .stroke(Stroke::new(1.0, Self::border_color()))
-            .corner_radius(16.0)
-            .inner_margin(Margin::symmetric(12, row_padding_y))
+            .corner_radius(14.0)
+            .inner_margin(Margin::symmetric(10, row_padding_y))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.allocate_ui_with_layout(
@@ -2674,7 +2675,7 @@ impl SoundFxApp {
                         |ui| {
                             let play_btn = Self::icon_action(
                                 ui,
-                                [42.0, 42.0],
+                                [play_button_size, play_button_size],
                                 if is_loading || is_previewing {
                                     0xe5d5
                                 } else {
@@ -2803,15 +2804,8 @@ impl SoundFxApp {
                 });
             });
 
-        let open_rect = Rect::from_min_max(
-            row.response.rect.min,
-            Pos2::new(
-                (row.response.rect.max.x - 176.0).max(row.response.rect.min.x),
-                row.response.rect.max.y,
-            ),
-        );
         let response = ui.interact(
-            open_rect,
+            row.response.rect,
             ui.id().with(("folder-sound-row", sound.id)),
             Sense::click_and_drag(),
         );
@@ -2836,12 +2830,16 @@ impl SoundFxApp {
         }
         let over_action = favorite_response
             .as_ref()
-            .is_some_and(|value| value.hovered())
-            || play_response.as_ref().is_some_and(|value| value.hovered())
-            || copy_response.as_ref().is_some_and(|value| value.hovered())
+            .is_some_and(|value| Self::response_pointer_within(ui.ctx(), value))
+            || play_response
+                .as_ref()
+                .is_some_and(|value| Self::response_pointer_within(ui.ctx(), value))
+            || copy_response
+                .as_ref()
+                .is_some_and(|value| Self::response_pointer_within(ui.ctx(), value))
             || remove_response
                 .as_ref()
-                .is_some_and(|value| value.hovered());
+                .is_some_and(|value| Self::response_pointer_within(ui.ctx(), value));
         let action_clicked = preview_clicked || copy_clicked || favorite_clicked || remove_clicked;
         if response.clicked() && !over_action && !action_clicked {
             open_sound = true;

@@ -57,7 +57,6 @@ const LIBRARY_GRID_MIN_COLUMNS: usize = 3;
 const LIBRARY_GRID_MAX_COLUMNS: usize = 8;
 const LIBRARY_ROW_MIN_THICKNESS: usize = 1;
 const LIBRARY_ROW_MAX_THICKNESS: usize = 5;
-const LIBRARY_LIST_ROW_HEIGHT: f32 = 146.0;
 const RECORD_EXPORT_VIDEO_FPS_OPTIONS: [u32; 3] = [
     record_video::LOW_VIDEO_FPS,
     record_video::STANDARD_VIDEO_FPS,
@@ -122,16 +121,29 @@ impl LibraryFolderView {
 }
 
 impl SoundFxApp {
+    fn library_list_row_height(&self) -> f32 {
+        match self
+            .library_row_thickness
+            .clamp(LIBRARY_ROW_MIN_THICKNESS, LIBRARY_ROW_MAX_THICKNESS)
+        {
+            1 => 96.0,
+            2 => 104.0,
+            3 => 112.0,
+            4 => 122.0,
+            _ => 132.0,
+        }
+    }
+
     fn library_row_wave_height(&self) -> f32 {
         match self
             .library_row_thickness
             .clamp(LIBRARY_ROW_MIN_THICKNESS, LIBRARY_ROW_MAX_THICKNESS)
         {
-            1 => 28.0,
-            2 => 34.0,
-            3 => 40.0,
-            4 => 48.0,
-            _ => 56.0,
+            1 => 22.0,
+            2 => 26.0,
+            3 => 30.0,
+            4 => 36.0,
+            _ => 42.0,
         }
     }
 
@@ -140,11 +152,24 @@ impl SoundFxApp {
             .library_row_thickness
             .clamp(LIBRARY_ROW_MIN_THICKNESS, LIBRARY_ROW_MAX_THICKNESS)
         {
-            1 => 6,
-            2 => 8,
-            3 => 10,
-            4 => 12,
-            _ => 14,
+            1 => 4,
+            2 => 6,
+            3 => 8,
+            4 => 10,
+            _ => 12,
+        }
+    }
+
+    fn library_row_play_button_size(&self) -> f32 {
+        match self
+            .library_row_thickness
+            .clamp(LIBRARY_ROW_MIN_THICKNESS, LIBRARY_ROW_MAX_THICKNESS)
+        {
+            1 => 34.0,
+            2 => 36.0,
+            3 => 38.0,
+            4 => 40.0,
+            _ => 42.0,
         }
     }
 }
@@ -2391,6 +2416,21 @@ impl SoundFxApp {
                     .zip(input.pointer.interact_pos().or(input.pointer.latest_pos()))
                     .is_some_and(|(origin, pos)| origin.distance_sq(pos) >= 36.0)
         })
+    }
+
+    fn pointer_within_rect(ctx: &Context, rect: Rect) -> bool {
+        ctx.input(|input| {
+            input
+                .pointer
+                .hover_pos()
+                .or(input.pointer.interact_pos())
+                .or(input.pointer.press_origin())
+                .is_some_and(|pos| rect.contains(pos))
+        })
+    }
+
+    fn response_pointer_within(ctx: &Context, response: &egui::Response) -> bool {
+        response.hovered() || Self::pointer_within_rect(ctx, response.rect)
     }
 
     fn titlebar_drag_active(&self, ctx: &Context) -> bool {
@@ -6800,7 +6840,7 @@ impl SoundFxApp {
                 .auto_shrink([false, false])
                 .show_rows(
                     ui,
-                    LIBRARY_LIST_ROW_HEIGHT,
+                    self.library_list_row_height(),
                     visible_sounds.len(),
                     |ui, row_range| {
                         for row_index in row_range {
@@ -6817,11 +6857,16 @@ impl SoundFxApp {
                                 .audio
                                 .as_ref()
                                 .and_then(|audio| audio.playback_progress(sound.id));
+                            let row_padding_y = self.library_row_vertical_padding();
+                            let waveform_height = self.library_row_wave_height();
+                            let play_button_size = self.library_row_play_button_size();
+                            let compact_row =
+                                self.library_row_thickness <= LIBRARY_ROW_MIN_THICKNESS + 1;
                             let row_width = ui.available_width();
-                            let play_column_width = 56.0;
-                            let details_width = (row_width * 0.28).clamp(220.0, 320.0);
+                            let play_column_width = play_button_size + 10.0;
+                            let details_width = (row_width * 0.22).clamp(168.0, 236.0);
                             let waveform_width =
-                                (row_width - play_column_width - details_width - 48.0).max(220.0);
+                                (row_width - play_column_width - details_width - 36.0).max(140.0);
                             if playing {
                                 ui.ctx().request_repaint_after(Duration::from_millis(
                                     ACTIVE_UI_REPAINT_MS,
@@ -6857,8 +6902,8 @@ impl SoundFxApp {
                                         Color32::from_rgba_premultiplied(82, 48, 70, 14)
                                     },
                                 })
-                                .corner_radius(28.0)
-                                .inner_margin(Margin::same(18))
+                                .corner_radius(22.0)
+                                .inner_margin(Margin::symmetric(14, row_padding_y))
                                 .show(ui, |ui| {
                                     ui.style_mut().interaction.selectable_labels = false;
                                     ui.horizontal(|ui| {
@@ -6868,7 +6913,7 @@ impl SoundFxApp {
                                             |ui| {
                                                 let play_btn = Self::icon_action(
                                                     ui,
-                                                    [44.0, 44.0],
+                                                    [play_button_size, play_button_size],
                                                     if is_loading || playing {
                                                         0xe5d5
                                                     } else {
@@ -6901,14 +6946,14 @@ impl SoundFxApp {
                                                         sound,
                                                         &waveform_samples,
                                                     );
-                                                Self::draw_wave_strip(
+                                                Self::draw_full_width_wave_strip(
                                                     ui,
                                                     &waveform_preview,
                                                     progress,
                                                     Color32::from_rgb(214, 51, 132),
                                                     Color32::from_rgb(238, 213, 227),
                                                     Self::panel_fill(),
-                                                    54.0,
+                                                    waveform_height,
                                                 );
                                             },
                                         );
@@ -6921,7 +6966,11 @@ impl SoundFxApp {
                                                 ui.add(
                                                     egui::Label::new(
                                                         RichText::new(&sound.name)
-                                                            .size(18.5)
+                                                            .size(if compact_row {
+                                                                15.5
+                                                            } else {
+                                                                17.0
+                                                            })
                                                             .color(Self::strong_text_color())
                                                             .strong(),
                                                     )
@@ -6934,7 +6983,7 @@ impl SoundFxApp {
                                                         RichText::new(format_time(
                                                             sound.trimmed_length(),
                                                         ))
-                                                        .size(12.0)
+                                                        .size(11.5)
                                                         .color(Self::muted_text_color()),
                                                     );
                                                     ui.label(
@@ -6942,7 +6991,7 @@ impl SoundFxApp {
                                                             "{:.0}%",
                                                             sound.volume * 100.0
                                                         ))
-                                                        .size(12.0)
+                                                        .size(11.5)
                                                         .color(Self::muted_text_color()),
                                                     );
                                                     if playing {
@@ -7010,8 +7059,9 @@ impl SoundFxApp {
                                 drag_request = Some(sound.id);
                                 self.pending_sound_drag = None;
                             }
-                            let over_play =
-                                play_response.as_ref().is_some_and(|value| value.hovered());
+                            let over_play = play_response.as_ref().is_some_and(|value| {
+                                Self::response_pointer_within(ui.ctx(), value)
+                            });
                             if !modal_open && response.clicked() && !over_play && !play_clicked {
                                 self.selected = Some(sound.id);
                                 preview_request = Some(sound.id);
