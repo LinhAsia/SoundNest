@@ -2628,16 +2628,13 @@ impl SoundFxApp {
     }
 
     fn draw_inline_folder_sound_row(&mut self, ui: &mut Ui, sound: &SoundEffect) {
-        let mut preview_sound = None;
         let mut copy_sound = None;
         let mut favorite_sound = None;
         let mut remove_sound_from_folder = None;
         let mut open_sound = false;
         let mut favorite_response = None;
-        let mut play_response = None;
         let mut copy_response = None;
         let mut remove_response = None;
-        let mut preview_clicked = false;
         let mut copy_clicked = false;
         let mut favorite_clicked = false;
         let mut remove_clicked = false;
@@ -2646,9 +2643,6 @@ impl SoundFxApp {
             .as_ref()
             .and_then(|audio| audio.playback_progress(sound.id));
         let is_previewing = playback_progress.is_some();
-        let is_loading = self
-            .pending_preview_after_preload
-            .is_some_and(|(id, _)| id == sound.id);
         if is_previewing {
             ui.ctx()
                 .request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
@@ -2656,11 +2650,9 @@ impl SoundFxApp {
         let row_padding_y = self.library_row_vertical_padding();
         let waveform_height = self.library_row_wave_height();
         let ultra_compact_row = self.library_row_thickness == LIBRARY_ROW_MIN_THICKNESS;
-        let play_button_size = self.library_row_play_button_size();
         let row_width = ui.available_width();
-        let play_column_width = play_button_size + 8.0;
         let side_panel_width = (row_width * 0.22).clamp(172.0, 236.0);
-        let waveform_width = (row_width - play_column_width - side_panel_width - 34.0).max(140.0);
+        let waveform_width = (row_width - side_panel_width - 26.0).max(140.0);
 
         let row = ui
             .allocate_ui_with_layout(
@@ -2676,34 +2668,6 @@ impl SoundFxApp {
                             ui.set_width(row_width);
                             ui.set_min_width(row_width);
                             ui.horizontal(|ui| {
-                                ui.allocate_ui_with_layout(
-                                    vec2(play_column_width, 0.0),
-                                    egui::Layout::top_down(Align::Center),
-                                    |ui| {
-                                        let play_btn = Self::icon_action(
-                                            ui,
-                                            [play_button_size, play_button_size],
-                                            if is_loading || is_previewing {
-                                                0xe5d5
-                                            } else {
-                                                0xe037
-                                            },
-                                            is_loading || is_previewing,
-                                            false,
-                                        );
-                                        if play_btn.clicked() {
-                                            if is_loading || is_previewing {
-                                                self.stop_preview();
-                                            } else {
-                                                preview_sound = Some(sound.id);
-                                            }
-                                            preview_clicked = true;
-                                        }
-                                        play_response = Some(play_btn);
-                                    },
-                                );
-
-                                ui.add_space(12.0);
                                 ui.allocate_ui_with_layout(
                                     vec2(waveform_width, 0.0),
                                     egui::Layout::top_down(Align::Min),
@@ -2853,23 +2817,17 @@ impl SoundFxApp {
         let over_action = favorite_response
             .as_ref()
             .is_some_and(|value| Self::response_pointer_within(ui.ctx(), value))
-            || play_response
-                .as_ref()
-                .is_some_and(|value| Self::response_pointer_within(ui.ctx(), value))
             || copy_response
                 .as_ref()
                 .is_some_and(|value| Self::response_pointer_within(ui.ctx(), value))
             || remove_response
                 .as_ref()
                 .is_some_and(|value| Self::response_pointer_within(ui.ctx(), value));
-        let action_clicked = preview_clicked || copy_clicked || favorite_clicked || remove_clicked;
+        let action_clicked = copy_clicked || favorite_clicked || remove_clicked;
         if response.clicked() && !over_action && !action_clicked {
             open_sound = true;
         }
 
-        if let Some(sound_id) = preview_sound {
-            self.preview_sound(sound_id);
-        }
         if let Some(sound_id) = copy_sound {
             if let Some(sound) = self
                 .sounds
