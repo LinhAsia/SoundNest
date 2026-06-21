@@ -8999,33 +8999,26 @@ impl SoundFxApp {
             .corner_radius(18.0)
             .inner_margin(Margin::same(12))
             .show(ui, |ui| {
-                let label_width = 88.0;
-                let field_gap = 12.0;
+                let column_gap = 14.0;
                 let action_button_width = 30.0;
                 let action_gap = 8.0;
-                let min_field_width = 150.0;
-                let available_width = ui.available_width();
-                let field_width = ((available_width
-                    - (label_width * 2.0)
-                    - field_gap
-                    - action_button_width * 2.0
-                    - action_gap * 2.0)
-                    / 2.0)
-                    .max(min_field_width);
+                let column_width = ((ui.available_width() - column_gap) / 2.0).max(180.0);
+                let label_size = 12.0;
 
-                egui::Grid::new("gemini-tts-top-grid")
-                    .num_columns(4)
-                    .spacing(vec2(field_gap, 10.0))
-                    .show(ui, |ui| {
-                        ui.set_width(label_width);
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = column_gap;
+
+                    ui.vertical(|ui| {
+                        ui.set_width(column_width);
                         ui.label(
                             RichText::new(self.t("download.voice"))
-                                .size(12.0)
+                                .size(label_size)
                                 .color(Self::muted_text_color()),
                         );
+                        ui.add_space(4.0);
                         Self::with_dark_combo_visuals(ui, |ui| {
                             ComboBox::from_id_salt("gemini-tts-voice")
-                                .width(field_width)
+                                .width(column_width)
                                 .selected_text(
                                     RichText::new(&selected_voice_label)
                                         .color(Self::strong_text_color()),
@@ -9045,31 +9038,41 @@ impl SoundFxApp {
                                     }
                                 });
                         });
+                    });
 
-                        ui.set_width(label_width);
+                    ui.vertical(|ui| {
+                        ui.set_width(column_width);
                         ui.label(
                             RichText::new(self.t("download.name"))
-                                .size(12.0)
+                                .size(label_size)
                                 .color(Self::muted_text_color()),
                         );
+                        ui.add_space(4.0);
                         let name_response = ui.add_sized(
-                            [field_width, 30.0],
+                            [column_width, 30.0],
                             TextEdit::singleline(&mut self.tts_output_name)
                                 .hint_text("gemini tts")
                                 .desired_width(f32::INFINITY),
                         );
                         draft_changed |= name_response.changed();
-                        ui.end_row();
+                    });
+                });
 
-                        ui.set_width(label_width);
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = column_gap;
+
+                    ui.vertical(|ui| {
+                        ui.set_width(column_width);
                         ui.label(
                             RichText::new(self.t("download.prompt_preset"))
-                                .size(12.0)
+                                .size(label_size)
                                 .color(Self::muted_text_color()),
                         );
+                        ui.add_space(4.0);
                         Self::with_dark_combo_visuals(ui, |ui| {
                             ComboBox::from_id_salt("gemini-tts-preset")
-                                .width(field_width)
+                                .width(column_width)
                                 .selected_text(
                                     RichText::new(selected_preset_name.clone())
                                         .color(Self::strong_text_color()),
@@ -9106,19 +9109,23 @@ impl SoundFxApp {
                                     }
                                 });
                         });
+                    });
 
-                        ui.set_width(label_width);
+                    ui.vertical(|ui| {
+                        ui.set_width(column_width);
                         ui.label(
                             RichText::new(self.t("download.preset_name"))
-                                .size(12.0)
+                                .size(label_size)
                                 .color(Self::muted_text_color()),
                         );
+                        ui.add_space(4.0);
                         ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = action_gap;
                             let preset_name_hint = self.t("download.preset_name");
                             let preset_response = ui.add_sized(
                                 [
-                                    (field_width - action_button_width * 2.0 - action_gap * 2.0)
-                                        .max(92.0),
+                                    (column_width - action_button_width * 2.0 - action_gap * 2.0)
+                                        .max(84.0),
                                     30.0,
                                 ],
                                 TextEdit::singleline(&mut self.tts_preset_name)
@@ -9144,8 +9151,8 @@ impl SoundFxApp {
                                 delete_preset = true;
                             }
                         });
-                        ui.end_row();
                     });
+                });
 
                 ui.add_space(10.0);
                 Frame::new()
