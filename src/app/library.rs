@@ -2647,12 +2647,15 @@ impl SoundFxApp {
         let mut copy_clicked = false;
         let mut favorite_clicked = false;
         let mut remove_clicked = false;
+        let is_loading = self
+            .pending_preview_after_preload
+            .is_some_and(|(id, _)| id == sound.id);
         let playback_progress = self
             .audio
             .as_ref()
             .and_then(|audio| audio.playback_progress(sound.id));
         let is_previewing = playback_progress.is_some();
-        if is_previewing {
+        if is_previewing || is_loading {
             ui.ctx()
                 .request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
         }
@@ -2724,22 +2727,33 @@ impl SoundFxApp {
         );
 
         ui.scope_builder(egui::UiBuilder::new().max_rect(play_rect), |ui| {
-            let play_btn = Self::icon_action(
-                ui,
-                [play_button_size, play_button_size],
-                if is_previewing { 0xe5d5 } else { 0xe037 },
-                is_previewing,
-                false,
-            );
-            if play_btn.clicked() {
-                if is_previewing {
-                    self.stop_preview();
-                } else {
-                    preview_sound = Some(sound.id);
+            ui.set_clip_rect(play_rect);
+            ui.set_width(play_rect.width());
+            ui.set_min_width(play_rect.width());
+            ui.set_min_size(play_rect.size());
+            ui.with_layout(egui::Layout::top_down(Align::Center), |ui| {
+                let play_btn = Self::icon_action(
+                    ui,
+                    [play_button_size, play_button_size],
+                    if is_loading || is_previewing {
+                        0xe5d5
+                    } else {
+                        0xe037
+                    },
+                    is_loading || is_previewing,
+                    false,
+                );
+                if play_btn.clicked() {
+                    self.pending_sound_drag = None;
+                    if is_loading || is_previewing {
+                        self.stop_preview();
+                    } else {
+                        preview_sound = Some(sound.id);
+                    }
+                    preview_clicked = true;
                 }
-                preview_clicked = true;
-            }
-            play_response = Some(play_btn);
+                play_response = Some(play_btn);
+            });
         });
 
         ui.scope_builder(egui::UiBuilder::new().max_rect(waveform_rect), |ui| {
