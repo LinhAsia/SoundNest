@@ -1626,25 +1626,42 @@ fn analyze_audio_file(path: &Path, buckets: usize) -> Result<AudioAnalysis> {
     let bucket_count = buckets.max(64);
     let samples_per_bucket = (decoded.samples.len() / bucket_count).max(1);
     let mut peaks = vec![0.0f32; bucket_count];
+    let mut energy = vec![0.0f32; bucket_count];
+    let mut counts = vec![0usize; bucket_count];
     for (sample_index, sample) in decoded.samples.iter().enumerate() {
         let bucket = (sample_index / samples_per_bucket).min(bucket_count - 1);
         peaks[bucket] = peaks[bucket].max(sample.abs());
+        energy[bucket] += sample * sample;
+        counts[bucket] += 1;
     }
 
     let decoded_duration_secs = decoded.samples.len() as f32
         / decoded.channels.max(1) as f32
         / decoded.sample_rate.max(1) as f32;
 
-    let peak_max = peaks.iter().copied().fold(0.0f32, f32::max);
+    let mut waveform = Vec::with_capacity(bucket_count);
+    for bucket_index in 0..bucket_count {
+        let rms = if counts[bucket_index] == 0 {
+            0.0
+        } else {
+            (energy[bucket_index] / counts[bucket_index] as f32).sqrt()
+        };
+        waveform.push((peaks[bucket_index] * 0.62 + rms * 0.38).powf(1.12));
+    }
+
+    let peak_max = waveform.iter().copied().fold(0.0f32, f32::max);
     if peak_max > 0.0 {
-        for peak in &mut peaks {
-            *peak /= peak_max;
+        for value in &mut waveform {
+            *value = (*value / peak_max).clamp(0.0, 1.0);
+            if *value < 0.06 {
+                *value *= 0.5;
+            }
         }
     }
 
     Ok(AudioAnalysis {
         duration_secs: decoded_duration_secs,
-        waveform: peaks,
+        waveform,
     })
 }
 
