@@ -347,20 +347,42 @@ impl eframe::App for AlreadyRunningNoticeApp {
 
 fn configure_fonts(ctx: &egui::Context) {
     let mut fonts = FontDefinitions::default();
-    if let Ok(bytes) = fs::read(r"C:\Windows\Fonts\segoeui.ttf") {
-        fonts
-            .font_data
-            .insert(UI_FONT.to_owned(), Arc::new(FontData::from_owned(bytes)));
-        fonts
-            .families
-            .entry(FontFamily::Proportional)
-            .or_default()
-            .insert(0, UI_FONT.to_owned());
-        fonts
-            .families
-            .entry(FontFamily::Monospace)
-            .or_default()
-            .insert(0, UI_FONT.to_owned());
+    let proportional_fonts = [
+        (UI_FONT, r"C:\Windows\Fonts\segoeui.ttf"),
+        ("ui_font_jp", r"C:\Windows\Fonts\YuGothM.ttc"),
+        ("ui_font_jp_alt", r"C:\Windows\Fonts\meiryo.ttc"),
+        ("ui_font_kr", r"C:\Windows\Fonts\malgun.ttf"),
+        ("ui_font_symbols", r"C:\Windows\Fonts\seguisym.ttf"),
+        ("ui_font_emoji", r"C:\Windows\Fonts\seguiemj.ttf"),
+    ];
+    for (font_name, font_path) in proportional_fonts {
+        if let Ok(bytes) = fs::read(font_path) {
+            fonts
+                .font_data
+                .insert(font_name.to_owned(), Arc::new(FontData::from_owned(bytes)));
+            fonts
+                .families
+                .entry(FontFamily::Proportional)
+                .or_default()
+                .push(font_name.to_owned());
+            fonts
+                .families
+                .entry(FontFamily::Monospace)
+                .or_default()
+                .push(font_name.to_owned());
+        }
+    }
+    if let Some(proportional_family) = fonts.families.get_mut(&FontFamily::Proportional)
+        && let Some(primary_index) = proportional_family.iter().position(|name| name == UI_FONT)
+    {
+        let primary = proportional_family.remove(primary_index);
+        proportional_family.insert(0, primary);
+    }
+    if let Some(monospace_family) = fonts.families.get_mut(&FontFamily::Monospace)
+        && let Some(primary_index) = monospace_family.iter().position(|name| name == UI_FONT)
+    {
+        let primary = monospace_family.remove(primary_index);
+        monospace_family.insert(0, primary);
     }
     fonts.font_data.insert(
         MATERIAL_ICONS_FONT.to_owned(),
