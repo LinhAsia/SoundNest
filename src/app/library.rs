@@ -633,6 +633,41 @@ impl SoundFxApp {
         });
     }
 
+    fn library_row_gap(&self) -> f32 {
+        if self.library_row_thickness <= 2 {
+            16.0
+        } else {
+            18.0
+        }
+    }
+
+    fn inline_folder_sound_row_height(&self) -> f32 {
+        (self.library_list_row_height() + 8.0).clamp(116.0, 152.0)
+    }
+
+    fn inline_folder_sound_row_outer_height(&self) -> f32 {
+        self.inline_folder_sound_row_height() + self.library_row_gap()
+    }
+
+    fn draw_inline_folder_sound_rows(&mut self, ui: &mut Ui, sounds: &[SoundEffect]) {
+        if sounds.is_empty() {
+            return;
+        }
+
+        ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show_rows(
+                ui,
+                self.inline_folder_sound_row_outer_height(),
+                sounds.len(),
+                |ui, row_range| {
+                    for row_index in row_range {
+                        self.draw_inline_folder_sound_row(ui, &sounds[row_index]);
+                    }
+                },
+            );
+    }
+
     pub(super) fn apply_tag_to_input(input: &mut String, tag: &str, active: bool) {
         let mut tags = Self::parse_tags(input);
         let Some(normalized) = Self::normalize_tag(tag) else {
@@ -1613,12 +1648,7 @@ impl SoundFxApp {
                 titlebar_drag_active,
             );
         } else {
-            for (index, sound) in sounds.iter().take(visible_count).enumerate() {
-                self.draw_inline_folder_sound_row(ui, sound);
-                if index + 1 < visible_count {
-                    ui.add_space(8.0);
-                }
-            }
+            self.draw_inline_folder_sound_rows(ui, &sounds[..visible_count]);
         }
     }
 
@@ -1794,12 +1824,7 @@ impl SoundFxApp {
                     titlebar_drag_active,
                 );
             } else {
-                for (index, sound) in sounds.iter().take(visible_count).enumerate() {
-                    self.draw_inline_folder_sound_row(ui, sound);
-                    if index + 1 < visible_count {
-                        ui.add_space(8.0);
-                    }
-                }
+                self.draw_inline_folder_sound_rows(ui, &sounds[..visible_count]);
             }
         }
     }
@@ -2579,18 +2604,7 @@ impl SoundFxApp {
                 |ui| {
                     ui.set_width(content_width.max(ui.available_width()));
                     self.draw_folder_loading_hint(ui, visible_count, sounds.len());
-                    let row_gap = if self.library_row_thickness <= 2 {
-                        16.0
-                    } else {
-                        18.0
-                    };
-                    for (index, sound) in sounds.iter().take(visible_count).enumerate() {
-                        self.draw_inline_folder_sound_row(ui, sound);
-                        if index + 1 < visible_count {
-                            ui.add_space(row_gap);
-                        }
-                    }
-                    ui.add_space(row_gap);
+                    self.draw_inline_folder_sound_rows(ui, &sounds[..visible_count]);
                 },
             );
         });
@@ -2676,12 +2690,16 @@ impl SoundFxApp {
         let play_column_width = play_button_size + 10.0;
         let side_panel_width = (row_width * 0.30).clamp(260.0, 360.0);
         let waveform_width = (row_width - play_column_width - side_panel_width - 42.0).max(140.0);
-        let row_height = (self.library_list_row_height() + 8.0).clamp(116.0, 152.0);
-        let (row_rect, _) = ui.allocate_exact_size(vec2(row_width, row_height), Sense::hover());
+        let row_height = self.inline_folder_sound_row_height();
+        let row_outer_height = self.inline_folder_sound_row_outer_height();
+        let (row_outer_rect, _) =
+            ui.allocate_exact_size(vec2(row_width, row_outer_height), Sense::hover());
+        let row_rect = Rect::from_min_size(row_outer_rect.min, vec2(row_width, row_height));
         let inner_rect = row_rect.shrink2(vec2(10.0, (row_padding_y as f32 * 0.75).max(6.0)));
-        ui.painter()
-            .rect_filled(row_rect, 14.0, Self::surface_fill());
-        ui.painter().rect_stroke(
+        let viewport_clip_rect = ui.clip_rect();
+        let row_painter = ui.painter().with_clip_rect(viewport_clip_rect);
+        row_painter.rect_filled(row_rect, 14.0, Self::surface_fill());
+        row_painter.rect_stroke(
             row_rect,
             14.0,
             Stroke::new(1.0, Self::border_color()),
@@ -2727,7 +2745,7 @@ impl SoundFxApp {
         );
 
         ui.scope_builder(egui::UiBuilder::new().max_rect(play_rect), |ui| {
-            ui.set_clip_rect(play_rect);
+            ui.set_clip_rect(play_rect.intersect(viewport_clip_rect));
             ui.set_width(play_rect.width());
             ui.set_min_width(play_rect.width());
             ui.set_min_size(play_rect.size());
@@ -2757,7 +2775,7 @@ impl SoundFxApp {
         });
 
         ui.scope_builder(egui::UiBuilder::new().max_rect(waveform_rect), |ui| {
-            ui.set_clip_rect(waveform_rect);
+            ui.set_clip_rect(waveform_rect.intersect(viewport_clip_rect));
             let waveform_preview = self.cached_library_waveform_preview(sound, 72);
             ui.add_space(((waveform_rect.height() - waveform_height).max(0.0)) * 0.5);
             Self::draw_full_width_wave_strip(
@@ -2776,7 +2794,7 @@ impl SoundFxApp {
         });
 
         ui.scope_builder(egui::UiBuilder::new().max_rect(info_rect), |ui| {
-            ui.set_clip_rect(info_rect);
+            ui.set_clip_rect(info_rect.intersect(viewport_clip_rect));
             ui.set_width(info_rect.width());
             ui.set_min_width(info_rect.width());
             let title_top = if ultra_compact_row { 6.0 } else { 8.0 };
@@ -2810,7 +2828,7 @@ impl SoundFxApp {
         });
 
         ui.scope_builder(egui::UiBuilder::new().max_rect(actions_rect), |ui| {
-            ui.set_clip_rect(actions_rect);
+            ui.set_clip_rect(actions_rect.intersect(viewport_clip_rect));
             ui.add_space(((actions_rect.height() - 32.0).max(0.0)) * 0.5);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing = vec2(10.0, 0.0);
