@@ -46,7 +46,7 @@ const APP_OUTER_MARGIN: f32 = 0.0;
 const LIVE_UI_FADE_SEC: f32 = 0.32;
 const TRANSITION_POINT_COUNT: usize = 240;
 const MATERIAL_ICONS_FONT: &str = "material_icons";
-const ACTIVE_UI_REPAINT_MS: u64 = 33;
+const ACTIVE_UI_REPAINT_MS: u64 = 8;
 const JOB_POLL_REPAINT_MS: u64 = 90;
 const DEFAULT_INTRO_DURATION_SEC: f32 = 1.35;
 const DEFAULT_OUTRO_DURATION_SEC: f32 = 0.72;
@@ -2480,7 +2480,9 @@ impl SoundFxApp {
     fn mark_dirty(&mut self, ctx: &Context) {
         self.pending_save = true;
         self.last_edit_at = ctx.input(|input| input.time);
-        self.library_filtered_sound_indices_cache.borrow_mut().clear();
+        self.library_filtered_sound_indices_cache
+            .borrow_mut()
+            .clear();
         self.library_waveform_preview_cache.borrow_mut().clear();
     }
 
