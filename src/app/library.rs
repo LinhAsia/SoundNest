@@ -2758,9 +2758,7 @@ impl SoundFxApp {
 
         ui.scope_builder(egui::UiBuilder::new().max_rect(waveform_rect), |ui| {
             ui.set_clip_rect(waveform_rect);
-            let waveform_samples = self.sound_waveform_samples(sound);
-            let waveform_preview =
-                Self::library_sound_waveform_preview_from_samples(sound, &waveform_samples, 72);
+            let waveform_preview = self.cached_library_waveform_preview(sound, 72);
             ui.add_space(((waveform_rect.height() - waveform_height).max(0.0)) * 0.5);
             Self::draw_full_width_wave_strip(
                 ui,

@@ -412,6 +412,7 @@ pub struct SoundFxApp {
     pub(super) myinstants_waveform_rx: Receiver<MyinstantsWaveformMessage>,
     pub(super) vocal_waveform_cache: RefCell<HashMap<Uuid, Vec<f32>>>,
     pub(super) music_waveform_cache: RefCell<HashMap<Uuid, Vec<f32>>>,
+    pub(super) library_waveform_preview_cache: RefCell<HashMap<String, Vec<f32>>>,
     pub(super) myinstants_preview_audio_url: Option<String>,
     pub(super) show_download_panel: bool,
     pub(super) download_was_running: bool,
@@ -729,6 +730,7 @@ impl SoundFxApp {
             myinstants_waveform_rx,
             vocal_waveform_cache: RefCell::new(HashMap::new()),
             music_waveform_cache: RefCell::new(HashMap::new()),
+            library_waveform_preview_cache: RefCell::new(HashMap::new()),
             myinstants_preview_audio_url: None,
             show_download_panel: false,
             download_was_running: false,
@@ -6092,13 +6094,8 @@ impl SoundFxApp {
                                 }
                                 let bucket_count =
                                     (card_size * 0.34).round().clamp(20.0, 52.0) as usize;
-                                let waveform_samples = self.sound_waveform_samples(sound);
                                 let waveform_preview =
-                                    Self::library_sound_waveform_preview_from_samples(
-                                        sound,
-                                        &waveform_samples,
-                                        bucket_count,
-                                    );
+                                    self.cached_library_waveform_preview(sound, bucket_count);
                                 let w_color1 = if hovered {
                                     Color32::from_rgb(255, 214, 232)
                                 } else {
@@ -6909,13 +6906,8 @@ impl SoundFxApp {
                                             .truncate(),
                                         );
                                         ui.add_space(title_spacing);
-                                        let waveform_samples = self.sound_waveform_samples(sound);
                                         let waveform_preview =
-                                            Self::library_sound_waveform_preview_from_samples(
-                                                sound,
-                                                &waveform_samples,
-                                                64,
-                                            );
+                                            self.cached_library_waveform_preview(sound, 64);
                                         Self::draw_full_width_wave_strip(
                                             ui,
                                             &waveform_preview,
@@ -8496,6 +8488,37 @@ impl SoundFxApp {
         }
 
         draft.sound.waveform.clone()
+    }
+
+    fn cached_library_waveform_preview(&self, sound: &SoundEffect, buckets: usize) -> Vec<f32> {
+        let cache_key = format!(
+            "{}:{}:{}:{}:{}:{}:{}:{}",
+            sound.id,
+            sound.asset_file,
+            sound.vocal_asset_file.as_deref().unwrap_or(""),
+            sound.music_asset_file.as_deref().unwrap_or(""),
+            sound.music_only,
+            sound.vocal_only,
+            (sound.trim_start_secs * 1000.0).round() as i32,
+            (sound.trim_end_secs * 1000.0).round() as i32,
+        );
+        let cache_key = format!("{cache_key}:{buckets}");
+        if let Some(existing) = self
+            .library_waveform_preview_cache
+            .borrow()
+            .get(&cache_key)
+            .cloned()
+        {
+            return existing;
+        }
+
+        let waveform_samples = self.sound_waveform_samples(sound);
+        let preview =
+            Self::library_sound_waveform_preview_from_samples(sound, &waveform_samples, buckets);
+        self.library_waveform_preview_cache
+            .borrow_mut()
+            .insert(cache_key, preview.clone());
+        preview
     }
 
     fn trimmed_waveform_preview_from_samples(sound: &SoundEffect, samples: &[f32]) -> Vec<f32> {
