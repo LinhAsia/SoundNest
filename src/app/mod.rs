@@ -709,6 +709,7 @@ impl SoundFxApp {
             .flatten()
             .unwrap_or_default();
         let tts_prompt_presets = storage.load_tts_prompt_presets().unwrap_or_default();
+        let tts_draft = storage.load_tts_draft().unwrap_or_default();
         let resolved_startup_sound = storage.resolved_startup_sound_path().ok().flatten();
 
         let mut app = Self {
@@ -855,12 +856,20 @@ impl SoundFxApp {
             library_drop_target_folder_rects: Vec::new(),
             ignored_drop_path: None,
             download_panel_tab: DownloadPanelTab::Download,
-            tts_text: String::new(),
-            tts_voice_name: "Kore".to_owned(),
-            tts_direction_prompt: String::new(),
+            tts_text: tts_draft.text,
+            tts_voice_name: if tts_draft.voice_name.trim().is_empty() {
+                "Kore".to_owned()
+            } else {
+                tts_draft.voice_name
+            },
+            tts_direction_prompt: tts_draft.direction_prompt,
             tts_prompt_presets,
             tts_preset_name: String::new(),
-            tts_output_name: "gemini tts".to_owned(),
+            tts_output_name: if tts_draft.output_name.trim().is_empty() {
+                "gemini tts".to_owned()
+            } else {
+                tts_draft.output_name
+            },
             tts_running: false,
             tts_status: String::new(),
             tts_error: None,
@@ -8965,6 +8974,7 @@ impl SoundFxApp {
         let mut save_gemini = false;
         let mut save_preset = false;
         let mut delete_preset = false;
+        let mut draft_changed = false;
         let selected_voice_label = Self::gemini_voice_label(&self.tts_voice_name).to_owned();
         let selected_preset_name = self
             .selected_tts_preset_name()
@@ -8989,113 +8999,154 @@ impl SoundFxApp {
             .corner_radius(18.0)
             .inner_margin(Margin::same(12))
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(self.t("download.voice"))
-                            .size(12.0)
-                            .color(Self::muted_text_color()),
-                    );
-                    Self::with_dark_combo_visuals(ui, |ui| {
-                        ComboBox::from_id_salt("gemini-tts-voice")
-                            .width(170.0)
-                            .selected_text(
-                                RichText::new(&selected_voice_label)
-                                    .color(Self::strong_text_color()),
-                            )
-                            .show_ui(ui, |ui| {
-                                for voice in GEMINI_VOICE_OPTIONS {
+                let label_width = 88.0;
+                let field_gap = 12.0;
+                let action_button_width = 30.0;
+                let action_gap = 8.0;
+                let min_field_width = 150.0;
+                let available_width = ui.available_width();
+                let field_width = ((available_width
+                    - (label_width * 2.0)
+                    - field_gap
+                    - action_button_width * 2.0
+                    - action_gap * 2.0)
+                    / 2.0)
+                    .max(min_field_width);
+
+                egui::Grid::new("gemini-tts-top-grid")
+                    .num_columns(4)
+                    .spacing(vec2(field_gap, 10.0))
+                    .show(ui, |ui| {
+                        ui.set_width(label_width);
+                        ui.label(
+                            RichText::new(self.t("download.voice"))
+                                .size(12.0)
+                                .color(Self::muted_text_color()),
+                        );
+                        Self::with_dark_combo_visuals(ui, |ui| {
+                            ComboBox::from_id_salt("gemini-tts-voice")
+                                .width(field_width)
+                                .selected_text(
+                                    RichText::new(&selected_voice_label)
+                                        .color(Self::strong_text_color()),
+                                )
+                                .show_ui(ui, |ui| {
+                                    for voice in GEMINI_VOICE_OPTIONS {
+                                        if ui
+                                            .selectable_label(
+                                                self.tts_voice_name == voice.name,
+                                                Self::gemini_voice_label(voice.name),
+                                            )
+                                            .clicked()
+                                        {
+                                            self.tts_voice_name = voice.name.to_owned();
+                                            draft_changed = true;
+                                        }
+                                    }
+                                });
+                        });
+
+                        ui.set_width(label_width);
+                        ui.label(
+                            RichText::new(self.t("download.name"))
+                                .size(12.0)
+                                .color(Self::muted_text_color()),
+                        );
+                        let name_response = ui.add_sized(
+                            [field_width, 30.0],
+                            TextEdit::singleline(&mut self.tts_output_name)
+                                .hint_text("gemini tts")
+                                .desired_width(f32::INFINITY),
+                        );
+                        draft_changed |= name_response.changed();
+                        ui.end_row();
+
+                        ui.set_width(label_width);
+                        ui.label(
+                            RichText::new(self.t("download.prompt_preset"))
+                                .size(12.0)
+                                .color(Self::muted_text_color()),
+                        );
+                        Self::with_dark_combo_visuals(ui, |ui| {
+                            ComboBox::from_id_salt("gemini-tts-preset")
+                                .width(field_width)
+                                .selected_text(
+                                    RichText::new(selected_preset_name.clone())
+                                        .color(Self::strong_text_color()),
+                                )
+                                .show_ui(ui, |ui| {
                                     if ui
                                         .selectable_label(
-                                            self.tts_voice_name == voice.name,
-                                            Self::gemini_voice_label(voice.name),
+                                            self.selected_tts_preset_name().is_none(),
+                                            self.t("download.custom"),
                                         )
                                         .clicked()
                                     {
-                                        self.tts_voice_name = voice.name.to_owned();
+                                        self.tts_preset_name.clear();
+                                        draft_changed = true;
                                     }
-                                }
-                            });
-                    });
-                    ui.add_space(10.0);
-                    ui.label(
-                        RichText::new(self.t("download.name"))
-                            .size(12.0)
-                            .color(Self::muted_text_color()),
-                    );
-                    ui.add_sized(
-                        [ui.available_width().max(120.0), 30.0],
-                        TextEdit::singleline(&mut self.tts_output_name)
-                            .hint_text("gemini tts")
-                            .desired_width(f32::INFINITY),
-                    );
-                });
-                ui.add_space(10.0);
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(self.t("download.prompt_preset"))
-                            .size(12.0)
-                            .color(Self::muted_text_color()),
-                    );
-                    Self::with_dark_combo_visuals(ui, |ui| {
-                        ComboBox::from_id_salt("gemini-tts-preset")
-                            .width(156.0)
-                            .selected_text(
-                                RichText::new(selected_preset_name.clone())
-                                    .color(Self::strong_text_color()),
-                            )
-                            .show_ui(ui, |ui| {
-                                if ui
-                                    .selectable_label(
-                                        self.selected_tts_preset_name().is_none(),
-                                        self.t("download.custom"),
-                                    )
-                                    .clicked()
-                                {
-                                    self.tts_preset_name.clear();
-                                }
-                                let preset_names = self
-                                    .tts_prompt_presets
-                                    .iter()
-                                    .map(|preset| preset.name.clone())
-                                    .collect::<Vec<_>>();
-                                for preset_name in preset_names {
-                                    if ui
-                                        .selectable_label(
-                                            self.selected_tts_preset_name()
-                                                == Some(preset_name.as_str()),
-                                            &preset_name,
-                                        )
-                                        .clicked()
-                                    {
-                                        self.apply_tts_preset_by_name(&preset_name);
+
+                                    let preset_names = self
+                                        .tts_prompt_presets
+                                        .iter()
+                                        .map(|preset| preset.name.clone())
+                                        .collect::<Vec<_>>();
+                                    for preset_name in preset_names {
+                                        if ui
+                                            .selectable_label(
+                                                self.selected_tts_preset_name()
+                                                    == Some(preset_name.as_str()),
+                                                &preset_name,
+                                            )
+                                            .clicked()
+                                        {
+                                            self.apply_tts_preset_by_name(&preset_name);
+                                            draft_changed = true;
+                                        }
                                     }
-                                }
-                            });
+                                });
+                        });
+
+                        ui.set_width(label_width);
+                        ui.label(
+                            RichText::new(self.t("download.preset_name"))
+                                .size(12.0)
+                                .color(Self::muted_text_color()),
+                        );
+                        ui.horizontal(|ui| {
+                            let preset_name_hint = self.t("download.preset_name");
+                            let preset_response = ui.add_sized(
+                                [
+                                    (field_width - action_button_width * 2.0 - action_gap * 2.0)
+                                        .max(92.0),
+                                    30.0,
+                                ],
+                                TextEdit::singleline(&mut self.tts_preset_name)
+                                    .hint_text(preset_name_hint),
+                            );
+                            draft_changed |= preset_response.changed();
+
+                            let save = ui.add_sized(
+                                [action_button_width, 30.0],
+                                Self::action_button(RichText::new("+").size(16.0), false, false),
+                            );
+                            Self::decorate_button_response(ui, &save);
+                            if save.clicked() {
+                                save_preset = true;
+                            }
+
+                            let delete = ui.add_enabled(
+                                self.selected_tts_preset_name().is_some(),
+                                Self::action_button(RichText::new("x").size(15.0), false, false),
+                            );
+                            Self::decorate_button_response(ui, &delete);
+                            if delete.clicked() {
+                                delete_preset = true;
+                            }
+                        });
+                        ui.end_row();
                     });
-                    ui.add_space(8.0);
-                    let preset_name_hint = self.t("download.preset_name");
-                    ui.add_sized(
-                        [ui.available_width() - 82.0, 30.0],
-                        TextEdit::singleline(&mut self.tts_preset_name)
-                            .hint_text(preset_name_hint),
-                    );
-                    let save = ui.add_sized(
-                        [30.0, 30.0],
-                        Self::action_button(RichText::new("+").size(16.0), false, false),
-                    );
-                    Self::decorate_button_response(ui, &save);
-                    if save.clicked() {
-                        save_preset = true;
-                    }
-                    let delete = ui.add_enabled(
-                        self.selected_tts_preset_name().is_some(),
-                        Self::action_button(RichText::new("×").size(16.0), false, false),
-                    );
-                    Self::decorate_button_response(ui, &delete);
-                    if delete.clicked() {
-                        delete_preset = true;
-                    }
-                });
+
                 ui.add_space(10.0);
                 Frame::new()
                     .fill(Self::surface_fill())
@@ -9112,6 +9163,7 @@ impl SoundFxApp {
                             save_gemini = true;
                         }
                     });
+
                 ui.add_space(8.0);
                 ui.label(
                     RichText::new(self.t("download.direction_prompt"))
@@ -9119,67 +9171,29 @@ impl SoundFxApp {
                         .color(Self::muted_text_color()),
                 );
                 ui.add_space(6.0);
-                if false {
-                    ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
-                    for (label, prompt) in [
-                        (
-                            "VN Bắc",
-                            "Accent: Northern Vietnamese from Hanoi. Style: clear, natural, warm. Pacing: conversational and steady.",
-                        ),
-                        (
-                            "VN Trung",
-                            "Accent: Central Vietnamese from Hue. Style: gentle and clear. Pacing: natural and calm.",
-                        ),
-                        (
-                            "VN Nam",
-                            "Accent: Southern Vietnamese from Ho Chi Minh City. Style: friendly and relaxed. Pacing: natural conversational pace.",
-                        ),
-                        (
-                            "Indian EN",
-                            "Accent: Indian English. Style: confident and clear. Pacing: natural professional delivery.",
-                        ),
-                        (
-                            "US EN",
-                            "Accent: American English. Style: natural and energetic. Pacing: medium and clear.",
-                        ),
-                        (
-                            "UK EN",
-                            "Accent: British English from London. Style: polished and clear. Pacing: medium.",
-                        ),
-                    ] {
-                        let response = ui.add_sized(
-                            [76.0, 28.0],
-                            Self::action_button(
-                                RichText::new(label).size(11.5),
-                                false,
-                                false,
-                            ),
-                        );
-                        Self::decorate_button_response(ui, &response);
-                        if response.clicked() {
-                            self.tts_direction_prompt = prompt.to_owned();
-                        }
-                    }
-                    });
-                }
-                ui.add_space(0.0);
                 let direction_hint = self.t("download.direction_hint");
-                ui.add_sized(
+                let direction_response = ui.add_sized(
                     [ui.available_width(), 96.0],
                     TextEdit::multiline(&mut self.tts_direction_prompt)
                         .desired_width(f32::INFINITY)
                         .hint_text(direction_hint),
                 );
+                draft_changed |= direction_response.changed();
+
                 ui.add_space(10.0);
                 let enter_text_hint = self.t("download.enter_text");
-                ui.add_sized(
+                let text_response = ui.add_sized(
                     [ui.available_width(), 130.0],
                     TextEdit::multiline(&mut self.tts_text)
                         .desired_width(f32::INFINITY)
                         .hint_text(enter_text_hint),
                 );
+                draft_changed |= text_response.changed();
             });
+
+        if draft_changed {
+            self.save_tts_draft_preferences();
+        }
 
         ui.add_space(12.0);
         ui.horizontal(|ui| {
@@ -9287,14 +9301,16 @@ impl SoundFxApp {
             );
         }
 
-        if save_preset {
-            self.save_current_tts_preset();
-        }
         if save_gemini {
             let _ = self.storage.save_gemini_api_key(&self.gemini_api_key);
         }
         if delete_preset {
             self.delete_selected_tts_preset();
+            self.save_tts_draft_preferences();
+        }
+        if save_preset {
+            self.save_current_tts_preset();
+            self.save_tts_draft_preferences();
         }
         if generate_request {
             self.start_tts_generation();

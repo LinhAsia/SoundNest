@@ -40,6 +40,16 @@ use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 impl SoundFxApp {
+    pub(super) fn save_tts_draft_preferences(&mut self) {
+        let draft = crate::storage::GeminiTtsDraftPreferences {
+            text: self.tts_text.clone(),
+            voice_name: self.tts_voice_name.clone(),
+            direction_prompt: self.tts_direction_prompt.clone(),
+            output_name: self.tts_output_name.clone(),
+        };
+        let _ = self.storage.save_tts_draft(&draft);
+    }
+
     pub(super) fn start_tts_generation(&mut self) {
         if self.tts_running {
             return;
@@ -65,6 +75,7 @@ impl SoundFxApp {
         self.tts_last_file = None;
         self.tts_can_add_to_library = false;
         self.tts_added_to_library = false;
+        self.save_tts_draft_preferences();
         thread::spawn(move || {
             let result = gemini_tts::generate_speech_to_file(
                 &api_key,

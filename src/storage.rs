@@ -101,6 +101,14 @@ pub struct GeminiTtsPromptPreset {
     pub prompt: String,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct GeminiTtsDraftPreferences {
+    pub text: String,
+    pub voice_name: String,
+    pub direction_prompt: String,
+    pub output_name: String,
+}
+
 impl VideoAsset {
     pub fn asset_path(&self, storage_dir: &Path) -> PathBuf {
         storage_dir.join("videos").join(&self.asset_file)
@@ -243,6 +251,8 @@ struct PreferencesFile {
     gemini_api_key: Option<String>,
     #[serde(default)]
     tts_prompt_presets: Vec<GeminiTtsPromptPreset>,
+    #[serde(default)]
+    tts_draft: GeminiTtsDraftPreferences,
 }
 
 pub struct Storage {
@@ -630,6 +640,22 @@ impl Storage {
                     .then_some(GeminiTtsPromptPreset { name, prompt })
             })
             .collect();
+        self.save_preferences(&preferences)
+    }
+
+    pub fn load_tts_draft(&self) -> Result<GeminiTtsDraftPreferences> {
+        let preferences = self.load_preferences()?;
+        Ok(preferences.tts_draft)
+    }
+
+    pub fn save_tts_draft(&self, draft: &GeminiTtsDraftPreferences) -> Result<()> {
+        let mut preferences = self.load_preferences()?;
+        preferences.tts_draft = GeminiTtsDraftPreferences {
+            text: draft.text.trim().to_owned(),
+            voice_name: draft.voice_name.trim().to_owned(),
+            direction_prompt: draft.direction_prompt.trim().to_owned(),
+            output_name: draft.output_name.trim().to_owned(),
+        };
         self.save_preferences(&preferences)
     }
 
