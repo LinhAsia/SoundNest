@@ -6886,9 +6886,10 @@ impl SoundFxApp {
                             row_painter.rect_filled(row_rect, 22.0, row_fill);
                             row_painter.rect_stroke(row_rect, 22.0, row_stroke, StrokeKind::Inside);
                             let inner_rect = row_rect.shrink2(vec2(14.0, row_padding_y as f32));
+                            let inner_clip_rect = inner_rect.intersect(ui.clip_rect());
                             ui.scope_builder(egui::UiBuilder::new().max_rect(inner_rect), |ui| {
                                 ui.style_mut().interaction.selectable_labels = false;
-                                ui.set_clip_rect(inner_rect);
+                                ui.set_clip_rect(inner_clip_rect);
                                 ui.set_width(inner_rect.width());
                                 ui.set_min_width(inner_rect.width());
                                 ui.set_min_size(inner_rect.size());
