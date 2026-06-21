@@ -457,10 +457,14 @@ fn search_youtube(query: &str) -> Result<Vec<YoutubeSearchResult>> {
 
 fn extract_yt_initial_data(body: &str) -> Option<&str> {
     for marker in ["var ytInitialData = ", "window[\"ytInitialData\"] = "] {
-        let start = body.find(marker)? + marker.len();
+        let Some(start) = body.find(marker) else {
+            continue;
+        };
+        let start = start + marker.len();
         let rest = &body[start..];
-        let end = rest.find(";</script>").or_else(|| rest.find(";</body>"))?;
-        return Some(rest[..end].trim());
+        if let Some(end) = rest.find(";</script>").or_else(|| rest.find(";</body>")) {
+            return Some(rest[..end].trim());
+        }
     }
     None
 }

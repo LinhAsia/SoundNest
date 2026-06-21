@@ -1,43 +1,4 @@
 use super::*;
-use crate::audio::{AudioEngine, calculate_normalization_gain};
-use crate::downloader::{YoutubeAudioDownloader, YoutubeSearchResult};
-use crate::gemini_tts;
-use crate::hotkey::{GlobalHotkeyManager, Hotkey};
-use crate::localization::Localization;
-use crate::myinstants::{MyinstantsClient, MyinstantsResult};
-use crate::pitch::{
-    PitchInputSource, PitchMonitor, PitchMonitorConfig, PitchSnapshot, analyze_pitch_file,
-    list_capture_devices,
-};
-use crate::platform;
-use crate::record_video;
-use crate::recorder::{Recorder, RecorderConfig};
-use crate::storage::{GeminiTtsPromptPreset, SoundEffect, Storage, VideoAsset, format_time};
-use crate::stream_input::{StreamInputConfig, StreamInputRouter};
-use anyhow::{Context as _, Result};
-#[cfg(windows)]
-use clipboard_win::{Clipboard, Setter, formats::FileList};
-use eframe::egui::{
-    self, Align, Align2, Button, CentralPanel, Checkbox, Color32, ComboBox, Context, CornerRadius,
-    DragValue, FontFamily, FontId, Frame, Margin, Pos2, ProgressBar, Rect, RichText, ScrollArea,
-    Sense, Stroke, StrokeKind, TextEdit, TextureHandle, Ui, Vec2, ViewportCommand, vec2,
-};
-use eframe::epaint::Shadow;
-use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
-use std::fs;
-#[cfg(windows)]
-use std::os::windows::fs::MetadataExt;
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
-use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
-use std::thread;
-use std::time::{Duration, Instant};
-use uuid::Uuid;
 
 impl SoundFxApp {
     pub(super) fn available_import_roots() -> Vec<PathBuf> {
