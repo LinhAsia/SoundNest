@@ -413,6 +413,7 @@ pub struct SoundFxApp {
     pub(super) vocal_waveform_cache: RefCell<HashMap<Uuid, Vec<f32>>>,
     pub(super) music_waveform_cache: RefCell<HashMap<Uuid, Vec<f32>>>,
     pub(super) library_waveform_preview_cache: RefCell<HashMap<String, Vec<f32>>>,
+    pub(super) library_filtered_sound_indices_cache: RefCell<HashMap<String, Vec<usize>>>,
     pub(super) myinstants_preview_audio_url: Option<String>,
     pub(super) show_download_panel: bool,
     pub(super) download_was_running: bool,
@@ -731,6 +732,7 @@ impl SoundFxApp {
             vocal_waveform_cache: RefCell::new(HashMap::new()),
             music_waveform_cache: RefCell::new(HashMap::new()),
             library_waveform_preview_cache: RefCell::new(HashMap::new()),
+            library_filtered_sound_indices_cache: RefCell::new(HashMap::new()),
             myinstants_preview_audio_url: None,
             show_download_panel: false,
             download_was_running: false,
@@ -2478,6 +2480,8 @@ impl SoundFxApp {
     fn mark_dirty(&mut self, ctx: &Context) {
         self.pending_save = true;
         self.last_edit_at = ctx.input(|input| input.time);
+        self.library_filtered_sound_indices_cache.borrow_mut().clear();
+        self.library_waveform_preview_cache.borrow_mut().clear();
     }
 
     fn flush_pending_save(&mut self, ctx: &Context) {

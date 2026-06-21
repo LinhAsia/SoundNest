@@ -109,12 +109,34 @@ impl SoundFxApp {
         folder_id: Option<Uuid>,
         include_descendants: bool,
     ) -> Vec<usize> {
+        let normalized_query = self.library_audio_query.trim().to_ascii_lowercase();
+        let active_tag_filter = self
+            .active_audio_tag_filter()
+            .map(|value| value.to_ascii_lowercase());
+        let cache_key = format!(
+            "folder:{:?}|desc:{}|import:{:?}|favorites:{}|tag:{:?}|query:{}|len:{}",
+            folder_id,
+            include_descendants,
+            self.folder_import_select_mode,
+            self.library_favorites_only_audio,
+            active_tag_filter,
+            normalized_query,
+            self.sounds.len()
+        );
+        if let Some(cached) = self
+            .library_filtered_sound_indices_cache
+            .borrow()
+            .get(&cache_key)
+            .cloned()
+        {
+            return cached;
+        }
+
         let active_folder_ids = if include_descendants {
             folder_id.map(|root_id| self.folder_branch_ids(root_id))
         } else {
             folder_id.map(|root_id| HashSet::from([root_id]))
         };
-        let active_tag_filter = self.active_audio_tag_filter();
         let mut favorites = Vec::new();
         let mut regular = Vec::new();
 
@@ -131,10 +153,16 @@ impl SoundFxApp {
             if !folder_matches {
                 continue;
             }
-            if !Self::library_sound_query_matches(sound, &self.library_audio_query) {
+            if !normalized_query.is_empty()
+                && !Self::library_query_matches(&sound.name, &normalized_query)
+                && !sound
+                    .tags
+                    .iter()
+                    .any(|tag| tag.to_ascii_lowercase().contains(&normalized_query))
+            {
                 continue;
             }
-            if !Self::sound_tag_matches_filter(&sound.tags, active_tag_filter) {
+            if !Self::sound_tag_matches_filter(&sound.tags, active_tag_filter.as_deref()) {
                 continue;
             }
             if self.library_favorites_only_audio && !sound.favorite {
@@ -149,6 +177,9 @@ impl SoundFxApp {
         }
 
         favorites.extend(regular);
+        self.library_filtered_sound_indices_cache
+            .borrow_mut()
+            .insert(cache_key, favorites.clone());
         favorites
     }
 
