@@ -2849,8 +2849,15 @@ impl SoundFxApp {
             });
         });
 
+        let row_interactive_rect = Rect::from_min_max(
+            Pos2::new(
+                (play_rect.right() + 8.0).min(row_rect.right()),
+                row_rect.top(),
+            ),
+            row_rect.right_bottom(),
+        );
         let response = ui.interact(
-            row_rect,
+            row_interactive_rect,
             ui.id().with(("folder-sound-row", sound.id)),
             Sense::click_and_drag(),
         );
