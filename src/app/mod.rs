@@ -6785,8 +6785,8 @@ impl SoundFxApp {
                 });
             let search_block_rect = search_panel.response.rect.expand2(vec2(12.0, 10.0));
             ui.add_space(12.0);
-            let visible_sounds = self.filtered_library_sounds();
-            if visible_sounds.is_empty() {
+            let visible_sound_indices = self.filtered_library_sound_indices();
+            if visible_sound_indices.is_empty() {
                 Frame::new()
                     .fill(Self::surface_fill())
                     .stroke(Stroke::new(1.0, Self::border_color()))
@@ -6826,12 +6826,13 @@ impl SoundFxApp {
                 .show_rows(
                     ui,
                     self.library_list_row_height(),
-                    visible_sounds.len(),
+                    visible_sound_indices.len(),
                     |ui, row_range| {
                         ui.set_width(list_width);
                         ui.set_min_width(list_width);
                         for row_index in row_range {
-                            let sound = &visible_sounds[row_index];
+                            let sound_index = visible_sound_indices[row_index];
+                            let sound = &self.sounds[sound_index];
                             let selected = self.selected == Some(sound.id);
                             let playing = self
                                 .audio

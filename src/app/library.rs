@@ -96,6 +96,62 @@ impl SoundFxApp {
         }
     }
 
+    pub(super) fn filtered_library_sound_indices(&self) -> Vec<usize> {
+        if self.library_search_active() {
+            self.filtered_library_sound_indices_for_folder(None, true)
+        } else {
+            self.filtered_library_sound_indices_for_folder(self.library_current_folder, true)
+        }
+    }
+
+    pub(super) fn filtered_library_sound_indices_for_folder(
+        &self,
+        folder_id: Option<Uuid>,
+        include_descendants: bool,
+    ) -> Vec<usize> {
+        let active_folder_ids = if include_descendants {
+            folder_id.map(|root_id| self.folder_branch_ids(root_id))
+        } else {
+            folder_id.map(|root_id| HashSet::from([root_id]))
+        };
+        let active_tag_filter = self.active_audio_tag_filter();
+        let mut favorites = Vec::new();
+        let mut regular = Vec::new();
+
+        for (index, sound) in self.sounds.iter().enumerate() {
+            let folder_matches = if let Some(folder_id) = self.folder_import_select_mode {
+                sound.folder_id != Some(folder_id)
+            } else if let Some(folder_ids) = &active_folder_ids {
+                sound
+                    .folder_id
+                    .is_some_and(|folder_id| folder_ids.contains(&folder_id))
+            } else {
+                true
+            };
+            if !folder_matches {
+                continue;
+            }
+            if !Self::library_sound_query_matches(sound, &self.library_audio_query) {
+                continue;
+            }
+            if !Self::sound_tag_matches_filter(&sound.tags, active_tag_filter) {
+                continue;
+            }
+            if self.library_favorites_only_audio && !sound.favorite {
+                continue;
+            }
+
+            if sound.favorite {
+                favorites.push(index);
+            } else {
+                regular.push(index);
+            }
+        }
+
+        favorites.extend(regular);
+        favorites
+    }
+
     pub(super) fn filtered_library_sounds_for_folder(
         &self,
         folder_id: Option<Uuid>,
@@ -647,6 +703,21 @@ impl SoundFxApp {
 
     fn inline_folder_sound_row_outer_height(&self) -> f32 {
         self.inline_folder_sound_row_height() + self.library_row_gap()
+    }
+
+    fn draw_inline_folder_sound_rows_content(&mut self, ui: &mut Ui, sounds: &[SoundEffect]) {
+        if sounds.is_empty() {
+            return;
+        }
+
+        ui.set_width(ui.available_width());
+        ui.set_min_width(ui.available_width());
+        for (index, sound) in sounds.iter().enumerate() {
+            self.draw_inline_folder_sound_row(ui, sound);
+            if index + 1 == sounds.len() {
+                ui.add_space(self.library_row_gap());
+            }
+        }
     }
 
     fn draw_inline_folder_sound_rows(&mut self, ui: &mut Ui, sounds: &[SoundEffect]) {
@@ -2604,7 +2675,7 @@ impl SoundFxApp {
                 |ui| {
                     ui.set_width(content_width.max(ui.available_width()));
                     self.draw_folder_loading_hint(ui, visible_count, sounds.len());
-                    self.draw_inline_folder_sound_rows(ui, &sounds[..visible_count]);
+                    self.draw_inline_folder_sound_rows_content(ui, &sounds[..visible_count]);
                 },
             );
         });
