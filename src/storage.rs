@@ -793,12 +793,17 @@ impl Storage {
             bail!("file not found");
         }
 
+        let name = source_path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or("Sound")
+            .to_owned();
         let extension = source_path
             .extension()
             .and_then(|value| value.to_str())
             .unwrap_or("bin");
         let id = Uuid::new_v4();
-        let asset_file = format!("{id}.{extension}");
+        let asset_file = sound_asset_file_name(&name, id, extension);
         let target_path = sounds_dir.join(&asset_file);
 
         fs::copy(source_path, &target_path).context("unable to copy imported sound")?;
@@ -810,12 +815,6 @@ impl Storage {
                 return Err(error);
             }
         };
-
-        let name = source_path
-            .file_stem()
-            .and_then(|value| value.to_str())
-            .unwrap_or("Sound")
-            .to_owned();
 
         Ok(SoundEffect {
             id,
@@ -1267,7 +1266,7 @@ impl Storage {
         }
 
         let mut updated = sound.clone();
-        let target_file = format!("{}.wav", updated.id);
+        let target_file = sound_asset_file_name(&updated.name, updated.id, "wav");
         let target_path = root_dir.join("sounds").join(&target_file);
         let temp_path = root_dir
             .join("sounds")
@@ -1965,6 +1964,12 @@ fn committed_trimmed_sound_name(sound: &SoundEffect) -> String {
         format_time(sound.trim_start_secs),
         format_time(sound.trim_end_secs)
     )
+}
+
+fn sound_asset_file_name(name: &str, sound_id: Uuid, extension: &str) -> String {
+    let base_name = sanitize_file_system_name(name, "sound").replace(' ', "_");
+    let extension = extension.trim_start_matches('.');
+    format!("{base_name}-{sound_id}.{extension}")
 }
 
 fn sanitize_stem(name: &str) -> String {
