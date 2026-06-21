@@ -850,14 +850,14 @@ impl Storage {
         if export_path.exists() {
             let import_result =
                 Self::import_sound_at(root_dir, &export_path).map(|mut imported_sound| {
-                    imported_sound.name = format!("{} trim", sound.name);
+                    imported_sound.name = committed_trimmed_sound_name(sound);
                     imported_sound
                 });
             let _ = fs::remove_file(&export_path);
             return import_result;
         }
         Self::import_sound_at(root_dir, &export_path).map(|mut imported_sound| {
-            imported_sound.name = format!("{} trim", sound.name);
+            imported_sound.name = committed_trimmed_sound_name(sound);
             imported_sound
         })
     }
@@ -1303,6 +1303,10 @@ impl Storage {
         updated.speed = 1.0;
         updated.trim_start_secs = 0.0;
         updated.trim_end_secs = updated.duration_secs;
+        updated.vocal_only = false;
+        updated.vocal_asset_file = None;
+        updated.music_only = false;
+        updated.music_asset_file = None;
         updated.reverb_enabled = false;
         updated.telephone_enabled = false;
         updated.distortion_enabled = false;
@@ -1946,6 +1950,21 @@ pub fn format_time(seconds: f32) -> String {
     let secs = (total % 60.0).floor() as u32;
     let millis = ((total.fract()) * 100.0).round() as u32;
     format!("{mins:02}:{secs:02}.{millis:02}")
+}
+
+fn committed_trimmed_sound_name(sound: &SoundEffect) -> String {
+    let base_name = sound.name.trim();
+    let base_name = if base_name.is_empty() {
+        "sound"
+    } else {
+        base_name
+    };
+    format!(
+        "{} [trim {}-{}]",
+        base_name,
+        format_time(sound.trim_start_secs),
+        format_time(sound.trim_end_secs)
+    )
 }
 
 fn sanitize_stem(name: &str) -> String {
