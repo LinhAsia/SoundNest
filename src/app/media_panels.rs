@@ -1072,4 +1072,185 @@ impl SoundFxApp {
             self.video_viewer = None;
         }
     }
+
+    pub(super) fn render_record_overlay_viewport(&mut self, ctx: &Context) {
+        let snapshot = self.recorder.snapshot();
+        if !snapshot.running {
+            self.record_overlay_open = false;
+            self.record_overlay_native_visuals_applied = false;
+            return;
+        }
+        self.record_overlay_open = true;
+        let mut should_stop = false;
+
+        let overlay_size = vec2(430.0, 118.0);
+        let overlay_pos =
+            if self.center_record_overlay_next_frame || self.record_overlay_pos.is_none() {
+                let centered = self.centered_overlay_pos(ctx, overlay_size);
+                self.record_overlay_pos = Some(centered);
+                centered
+            } else {
+                self.record_overlay_pos.unwrap_or_default()
+            };
+        ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
+        let area_id = egui::Id::new("record-overlay-panel");
+        egui::Area::new(area_id)
+            .order(egui::Order::Foreground)
+            .current_pos(overlay_pos)
+            .constrain_to(self.popup_safe_rect(ctx))
+            .interactable(true)
+            .show(ctx, |ui| {
+                ui.allocate_ui_with_layout(
+                    overlay_size,
+                    egui::Layout::top_down(Align::Min),
+                    |ui| self.render_record_blob_overlay(ui, ctx, &snapshot, &mut should_stop),
+                );
+            });
+        if let Some(state) = egui::AreaState::load(ctx, area_id) {
+            self.record_overlay_pos =
+                Some(self.clamp_overlay_pos(ctx, overlay_size, state.left_top_pos()));
+        }
+        self.center_record_overlay_next_frame = false;
+        self.record_overlay_native_visuals_applied = false;
+        if should_stop {
+            self.stop_recording(Some(ctx));
+        }
+    }
+
+    pub(super) fn render_record_blob_overlay(
+        &mut self,
+        ui: &mut Ui,
+        overlay_ctx: &Context,
+        snapshot: &crate::recorder::RecorderSnapshot,
+        should_stop: &mut bool,
+    ) {
+        let rect = ui.max_rect().shrink2(vec2(8.0, 8.0));
+        let response = ui.interact(
+            rect,
+            ui.id().with("record-blob-overlay-drag"),
+            Sense::click_and_drag(),
+        );
+        if self.overlay_only_mode {
+            if response.drag_started() {
+                overlay_ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+            }
+        } else {
+            let overlay_rect = self.popup_safe_rect(overlay_ctx);
+            Self::update_overlay_drag_position(
+                overlay_ctx,
+                overlay_rect,
+                &response,
+                vec2(430.0, 118.0),
+                &mut self.record_overlay_pos,
+            );
+        }
+        let painter = ui.painter_at(rect);
+        let center = rect.center();
+        let time = overlay_ctx.input(|input| input.time) as f32;
+        let pulse = (time * 4.4).sin() * 0.5 + 0.5;
+        let aura = snapshot.level.clamp(0.06, 1.0);
+
+        for (scale, alpha) in [(1.08, 20), (1.04, 34)] {
+            let points = Self::squircle_points(
+                center,
+                rect.width() * 0.5 * scale,
+                rect.height() * 0.38 * scale,
+                4.8,
+                0.03 + aura * 0.02,
+                time * 0.8,
+            );
+            painter.add(egui::Shape::convex_polygon(
+                points,
+                Color32::from_rgba_premultiplied(214, 51, 132, alpha),
+                Stroke::NONE,
+            ));
+        }
+
+        let blob = Self::squircle_points(
+            center,
+            rect.width() * 0.48,
+            rect.height() * 0.34,
+            4.8,
+            0.04 + aura * 0.025,
+            time,
+        );
+        painter.add(egui::Shape::convex_polygon(
+            blob,
+            Color32::from_rgba_premultiplied(17, 14, 20, 238),
+            Stroke::new(1.4, Color32::from_rgba_premultiplied(236, 116, 179, 220)),
+        ));
+
+        let dot_center = Pos2::new(rect.left() + 40.0, center.y - 6.0);
+        painter.circle_filled(
+            dot_center,
+            8.0 + pulse * 2.0,
+            Color32::from_rgba_premultiplied(214, 51, 132, 230),
+        );
+        painter.text(
+            Pos2::new(rect.left() + 58.0, center.y - 18.0),
+            egui::Align2::LEFT_TOP,
+            "Recording",
+            egui::FontId::new(16.0, FontFamily::Proportional),
+            Color32::from_rgb(255, 234, 244),
+        );
+        painter.text(
+            Pos2::new(rect.left() + 58.0, center.y + 2.0),
+            egui::Align2::LEFT_TOP,
+            format_time(snapshot.elapsed_secs),
+            egui::FontId::new(12.0, FontFamily::Proportional),
+            Color32::from_rgb(219, 185, 206),
+        );
+
+        let stop_rect = Rect::from_center_size(
+            Pos2::new(rect.right() - 22.0, rect.top() + 22.0),
+            vec2(28.0, 28.0),
+        );
+        let stop_response = ui.interact(
+            stop_rect,
+            ui.id().with("record-blob-overlay-stop"),
+            Sense::click(),
+        );
+        if stop_response.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        painter.rect_filled(
+            stop_rect,
+            14.0,
+            Color32::from_rgba_premultiplied(255, 255, 255, 16),
+        );
+        painter.text(
+            stop_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            char::from_u32(0xe047).unwrap_or(' '),
+            egui::FontId::new(18.0, FontFamily::Name(MATERIAL_ICONS_FONT.into())),
+            Color32::from_rgb(255, 234, 244),
+        );
+        if stop_response.clicked() {
+            *should_stop = true;
+        }
+
+        let wave_rect =
+            Rect::from_center_size(Pos2::new(rect.right() - 132.0, center.y), vec2(210.0, 44.0));
+        painter.rect_filled(
+            wave_rect,
+            18.0,
+            Color32::from_rgba_premultiplied(255, 255, 255, 10),
+        );
+        let bars = if snapshot.waveform.is_empty() {
+            vec![0.04; 40]
+        } else {
+            snapshot.waveform.clone()
+        };
+        let inner = wave_rect.shrink2(vec2(12.0, 8.0));
+        let bar_width = inner.width() / bars.len().max(1) as f32;
+        for (index, level) in bars.iter().enumerate() {
+            let x = inner.left() + (index as f32 + 0.5) * bar_width;
+            let half = level.clamp(0.04, 1.0) * inner.height() * 0.42;
+            let bar = Rect::from_min_max(
+                Pos2::new(x - bar_width * 0.18, inner.center().y - half),
+                Pos2::new(x + bar_width * 0.18, inner.center().y + half),
+            );
+            painter.rect_filled(bar, 4.0, Color32::from_rgb(231, 92, 162));
+        }
+    }
 }
