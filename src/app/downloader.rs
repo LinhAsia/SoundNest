@@ -787,4 +787,1087 @@ impl SoundFxApp {
             });
         download_clicked
     }
+
+    pub(super) fn render_tts_download_tab(&mut self, ui: &mut Ui, ctx: &Context) {
+        let mut generate_request = false;
+        let mut preview_request = false;
+        let mut add_to_library = false;
+        let mut clear_result = false;
+        let mut save_gemini = false;
+        let mut save_preset = false;
+        let mut delete_preset = false;
+        let mut draft_changed = false;
+        let selected_voice_label = Self::gemini_voice_label(&self.tts_voice_name).to_owned();
+        let selected_preset_name = self
+            .selected_tts_preset_name()
+            .map(str::to_owned)
+            .unwrap_or_else(|| self.t("download.custom"));
+
+        if self.tts_running {
+            ctx.request_repaint_after(Duration::from_millis(JOB_POLL_REPAINT_MS));
+        }
+
+        ui.label(
+            RichText::new(self.t("download.gemini_tts"))
+                .size(14.0)
+                .color(Self::strong_text_color())
+                .strong(),
+        );
+        ui.add_space(10.0);
+
+        Frame::new()
+            .fill(Self::surface_fill())
+            .stroke(Stroke::new(1.0, Self::border_color()))
+            .corner_radius(18.0)
+            .inner_margin(Margin::same(12))
+            .show(ui, |ui| {
+                let column_gap = 14.0;
+                let action_button_width = 30.0;
+                let action_gap = 8.0;
+                let column_width = ((ui.available_width() - column_gap) / 2.0).max(180.0);
+                let label_size = 12.0;
+
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = column_gap;
+
+                    ui.vertical(|ui| {
+                        ui.set_width(column_width);
+                        ui.label(
+                            RichText::new(self.t("download.voice"))
+                                .size(label_size)
+                                .color(Self::muted_text_color()),
+                        );
+                        ui.add_space(4.0);
+                        Self::with_dark_combo_visuals(ui, |ui| {
+                            ComboBox::from_id_salt("gemini-tts-voice")
+                                .width(column_width)
+                                .selected_text(
+                                    RichText::new(&selected_voice_label)
+                                        .color(Self::strong_text_color()),
+                                )
+                                .show_ui(ui, |ui| {
+                                    for voice in GEMINI_VOICE_OPTIONS {
+                                        if ui
+                                            .selectable_label(
+                                                self.tts_voice_name == voice.name,
+                                                Self::gemini_voice_label(voice.name),
+                                            )
+                                            .clicked()
+                                        {
+                                            self.tts_voice_name = voice.name.to_owned();
+                                            draft_changed = true;
+                                        }
+                                    }
+                                });
+                        });
+                    });
+
+                    ui.vertical(|ui| {
+                        ui.set_width(column_width);
+                        ui.label(
+                            RichText::new(self.t("download.name"))
+                                .size(label_size)
+                                .color(Self::muted_text_color()),
+                        );
+                        ui.add_space(4.0);
+                        let name_response = ui.add_sized(
+                            [column_width, 30.0],
+                            TextEdit::singleline(&mut self.tts_output_name)
+                                .hint_text("gemini tts")
+                                .desired_width(f32::INFINITY),
+                        );
+                        draft_changed |= name_response.changed();
+                    });
+                });
+
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = column_gap;
+
+                    ui.vertical(|ui| {
+                        ui.set_width(column_width);
+                        ui.label(
+                            RichText::new(self.t("download.prompt_preset"))
+                                .size(label_size)
+                                .color(Self::muted_text_color()),
+                        );
+                        ui.add_space(4.0);
+                        Self::with_dark_combo_visuals(ui, |ui| {
+                            ComboBox::from_id_salt("gemini-tts-preset")
+                                .width(column_width)
+                                .selected_text(
+                                    RichText::new(selected_preset_name.clone())
+                                        .color(Self::strong_text_color()),
+                                )
+                                .show_ui(ui, |ui| {
+                                    if ui
+                                        .selectable_label(
+                                            self.selected_tts_preset_name().is_none(),
+                                            self.t("download.custom"),
+                                        )
+                                        .clicked()
+                                    {
+                                        self.tts_preset_name.clear();
+                                        draft_changed = true;
+                                    }
+
+                                    let preset_names = self
+                                        .tts_prompt_presets
+                                        .iter()
+                                        .map(|preset| preset.name.clone())
+                                        .collect::<Vec<_>>();
+                                    for preset_name in preset_names {
+                                        if ui
+                                            .selectable_label(
+                                                self.selected_tts_preset_name()
+                                                    == Some(preset_name.as_str()),
+                                                &preset_name,
+                                            )
+                                            .clicked()
+                                        {
+                                            self.apply_tts_preset_by_name(&preset_name);
+                                            draft_changed = true;
+                                        }
+                                    }
+                                });
+                        });
+                    });
+
+                    ui.vertical(|ui| {
+                        ui.set_width(column_width);
+                        ui.label(
+                            RichText::new(self.t("download.preset_name"))
+                                .size(label_size)
+                                .color(Self::muted_text_color()),
+                        );
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = action_gap;
+                            let preset_name_hint = self.t("download.preset_name");
+                            let preset_response = ui.add_sized(
+                                [
+                                    (column_width - action_button_width * 2.0 - action_gap * 2.0)
+                                        .max(84.0),
+                                    30.0,
+                                ],
+                                TextEdit::singleline(&mut self.tts_preset_name)
+                                    .hint_text(preset_name_hint),
+                            );
+                            draft_changed |= preset_response.changed();
+
+                            let save = ui.add_sized(
+                                [action_button_width, 30.0],
+                                Self::action_button(RichText::new("+").size(16.0), false, false),
+                            );
+                            Self::decorate_button_response(ui, &save);
+                            if save.clicked() {
+                                save_preset = true;
+                            }
+
+                            let delete = ui.add_enabled(
+                                self.selected_tts_preset_name().is_some(),
+                                Self::action_button(RichText::new("x").size(15.0), false, false),
+                            );
+                            Self::decorate_button_response(ui, &delete);
+                            if delete.clicked() {
+                                delete_preset = true;
+                            }
+                        });
+                    });
+                });
+
+                ui.add_space(10.0);
+                Frame::new()
+                    .fill(Self::surface_fill())
+                    .stroke(Stroke::new(1.0, Self::border_color()))
+                    .corner_radius(22.0)
+                    .inner_margin(Margin::same(16))
+                    .show(ui, |ui| {
+                        if Self::gemini_api_key_field(
+                            ui,
+                            &self.t("download.gemini_api_key"),
+                            &mut self.gemini_api_key,
+                            &mut self.gemini_api_key_visible,
+                        ) {
+                            save_gemini = true;
+                        }
+                    });
+
+                ui.add_space(8.0);
+                ui.label(
+                    RichText::new(self.t("download.direction_prompt"))
+                        .size(12.0)
+                        .color(Self::muted_text_color()),
+                );
+                ui.add_space(6.0);
+                let direction_hint = self.t("download.direction_hint");
+                let direction_response = ui.add_sized(
+                    [ui.available_width(), 96.0],
+                    TextEdit::multiline(&mut self.tts_direction_prompt)
+                        .desired_width(f32::INFINITY)
+                        .hint_text(direction_hint),
+                );
+                draft_changed |= direction_response.changed();
+
+                ui.add_space(10.0);
+                let enter_text_hint = self.t("download.enter_text");
+                let text_response = ui.add_sized(
+                    [ui.available_width(), 130.0],
+                    TextEdit::multiline(&mut self.tts_text)
+                        .desired_width(f32::INFINITY)
+                        .hint_text(enter_text_hint),
+                );
+                draft_changed |= text_response.changed();
+            });
+
+        if draft_changed {
+            self.save_tts_draft_preferences();
+        }
+
+        ui.add_space(12.0);
+        ui.horizontal(|ui| {
+            let generate = ui.add_enabled(
+                !self.tts_running
+                    && !self.tts_text.trim().is_empty()
+                    && !self.gemini_api_key.trim().is_empty(),
+                Self::action_button(
+                    RichText::new(self.t("download.generate")).size(13.0),
+                    false,
+                    true,
+                ),
+            );
+            Self::decorate_button_response(ui, &generate);
+            if generate.clicked() {
+                generate_request = true;
+            }
+
+            let preview = ui.add_enabled(
+                self.tts_last_file.is_some() && !self.tts_running,
+                Self::action_button(
+                    RichText::new(self.t("download.preview")).size(13.0),
+                    false,
+                    false,
+                ),
+            );
+            Self::decorate_button_response(ui, &preview);
+            if preview.clicked() {
+                preview_request = true;
+            }
+
+            let add = ui.add_enabled(
+                self.tts_can_add_to_library,
+                Self::action_button(
+                    RichText::new(self.t("download.add_to_library")).size(13.0),
+                    false,
+                    false,
+                ),
+            );
+            Self::decorate_button_response(ui, &add);
+            if add.clicked() {
+                add_to_library = true;
+            }
+
+            let clear = ui.add_enabled(
+                self.tts_last_file.is_some() && !self.tts_running,
+                Self::action_button(
+                    RichText::new(self.t("download.clear")).size(13.0),
+                    false,
+                    false,
+                ),
+            );
+            Self::decorate_button_response(ui, &clear);
+            if clear.clicked() {
+                clear_result = true;
+            }
+        });
+
+        if self.tts_running {
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                ui.add(egui::Spinner::new().size(18.0));
+                ui.label(
+                    RichText::new(self.t("download.generating_speech"))
+                        .size(12.5)
+                        .color(Self::muted_text_color()),
+                );
+            });
+        } else if !self.gemini_api_key.trim().is_empty() {
+            ui.add_space(10.0);
+            ui.label(
+                RichText::new(self.t("download.gemini_tts_help"))
+                    .size(12.0)
+                    .color(Self::muted_text_color()),
+            );
+        }
+
+        if self.gemini_api_key.trim().is_empty() {
+            ui.add_space(10.0);
+            ui.label(
+                RichText::new(self.t("download.gemini_api_key_missing"))
+                    .size(12.5)
+                    .color(Color32::from_rgb(171, 54, 91)),
+            );
+        } else if let Some(path) = &self.tts_last_file {
+            ui.add_space(12.0);
+            ui.label(
+                RichText::new(
+                    path.file_name()
+                        .and_then(|value| value.to_str())
+                        .unwrap_or("audio"),
+                )
+                .size(13.5)
+                .color(Self::strong_text_color())
+                .strong(),
+            );
+        }
+
+        if let Some(error) = &self.tts_error {
+            ui.add_space(10.0);
+            ui.label(
+                RichText::new(error)
+                    .size(12.5)
+                    .color(Color32::from_rgb(171, 54, 91)),
+            );
+        }
+
+        if save_gemini {
+            let _ = self.storage.save_gemini_api_key(&self.gemini_api_key);
+        }
+        if delete_preset {
+            self.delete_selected_tts_preset();
+            self.save_tts_draft_preferences();
+        }
+        if save_preset {
+            self.save_current_tts_preset();
+            self.save_tts_draft_preferences();
+        }
+        if generate_request {
+            self.start_tts_generation();
+        }
+        if preview_request
+            && let Some(path) = self.tts_last_file.clone()
+            && let Some(audio) = self.audio.as_mut()
+        {
+            if let Err(error) = audio.play_file(&path) {
+                self.set_error_status(error);
+            }
+        }
+        if add_to_library && let Some(path) = self.tts_last_file.clone() {
+            self.add_tts_result_to_library(&path);
+        }
+        if clear_result {
+            if let Some(path) = self.tts_last_file.take() {
+                let _ = fs::remove_file(path);
+            }
+            self.tts_status.clear();
+            self.tts_error = None;
+            self.tts_can_add_to_library = false;
+            self.tts_added_to_library = false;
+        }
+    }
+
+    pub(super) fn render_download_panel(&mut self, ctx: &Context) {
+        if !self.show_download_panel {
+            return;
+        }
+
+        let snapshot = self.downloader.snapshot();
+        let mut open_panel = self.show_download_panel;
+        let mut should_start_download = false;
+        let mut should_stop_download = false;
+        let mut add_to_library = false;
+        let mut open_file = false;
+        let mut open_folder = false;
+        let mut clear_result = false;
+        let mut minimize_request = false;
+        let mut close_request = false;
+        let (_panel_bounds, panel_size, panel_pos) =
+            self.centered_modal_placement(ctx, vec2(520.0, 420.0), vec2(320.0, 260.0), 0.0);
+
+        egui::Window::new("")
+            .id(egui::Id::new("youtube-audio-download"))
+            .order(egui::Order::Foreground)
+            .title_bar(false)
+            .resizable(false)
+            .collapsible(false)
+            .pivot(egui::Align2::CENTER_CENTER)
+            .fixed_size(panel_size)
+            .fixed_pos(panel_pos)
+            .open(&mut open_panel)
+            .frame(
+                Frame::new()
+                    .fill(Self::overlay_panel_fill())
+                    .stroke(Stroke::new(1.0, Self::border_color()))
+                    .shadow(Shadow {
+                        offset: [0, 14],
+                        blur: 32,
+                        spread: 0,
+                        color: Color32::from_rgba_premultiplied(78, 40, 63, 24),
+                    })
+                    .corner_radius(28.0)
+                    .inner_margin(Margin {
+                        left: 20,
+                        right: 12,
+                        top: 12,
+                        bottom: 20,
+                    }),
+            )
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.set_height(34.0);
+                    ui.label(Self::icon(0xe2c4, 20.0, Self::strong_text_color()).strong());
+                    ui.add_space(8.0);
+                    ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        if Self::icon_titlebar(ui, [34.0, 34.0], 0xe5cd, false, true).clicked() {
+                            clear_result = !snapshot.running;
+                            close_request = true;
+                        }
+                        if Self::icon_titlebar(ui, [34.0, 34.0], 0xe15b, false, false).clicked() {
+                            minimize_request = true;
+                        }
+                    });
+                });
+
+                ui.add_space(12.0);
+                ui.horizontal(|ui| {
+                    let download_tab = ui.add_sized(
+                        [120.0, 32.0],
+                        Self::action_button(
+                            RichText::new(self.t("download.download")).size(12.5),
+                            self.download_panel_tab == DownloadPanelTab::Download,
+                            false,
+                        ),
+                    );
+                    Self::decorate_button_response(ui, &download_tab);
+                    if download_tab.clicked() {
+                        self.download_panel_tab = DownloadPanelTab::Download;
+                    }
+                    let tts_tab = ui.add_sized(
+                        [120.0, 32.0],
+                        Self::action_button(
+                            RichText::new(self.t("download.gemini_tts")).size(12.5),
+                            self.download_panel_tab == DownloadPanelTab::Tts,
+                            false,
+                        ),
+                    );
+                    Self::decorate_button_response(ui, &tts_tab);
+                    if tts_tab.clicked() {
+                        self.download_panel_tab = DownloadPanelTab::Tts;
+                    }
+                });
+
+                ui.add_space(12.0);
+                if self.download_panel_tab == DownloadPanelTab::Tts {
+                    self.render_tts_download_tab(ui, ctx);
+                } else {
+                    if snapshot.running {
+                        ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
+                    }
+
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new("Supporting web:")
+                                .size(12.5)
+                                .color(Self::muted_text_color()),
+                        );
+                        let help = ui.add_sized(
+                            [22.0, 22.0],
+                            Button::new(Self::icon(0xe887, 15.0, Color32::from_rgb(214, 51, 132)))
+                                .fill(Self::surface_fill())
+                                .stroke(Stroke::new(1.0, Self::border_color()))
+                                .corner_radius(11.0),
+                        );
+                        if help.hovered() {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::Help);
+                        }
+                        help.on_hover_ui_at_pointer(|ui| {
+                            ui.set_max_width(300.0);
+                            ui.label(
+                                RichText::new("Supported websites")
+                                    .size(13.0)
+                                    .color(Self::strong_text_color())
+                                    .strong(),
+                            );
+                            ui.add_space(4.0);
+                            ui.label("Works through yt-dlp, so it supports many sites.");
+                            ui.label("Common examples: YouTube, SoundCloud, Bandcamp, TikTok, Facebook, Instagram, X/Twitter, Vimeo, Dailymotion, Bilibili, Twitch, Google Drive, direct media links.");
+                            ui.add_space(4.0);
+                            ui.label("Some sites can still fail because of login, region lock, cookies, or DRM.");
+                            ui.label("Spotify album / track links are usually DRM-protected and will not download.");
+                        });
+                    });
+                    ui.add_space(8.0);
+                    Self::render_download_site_badges(ui);
+
+                    ui.add_space(10.0);
+
+                    ui.horizontal(|ui| {
+                        let response = Frame::new()
+                            .fill(Self::input_fill())
+                            .stroke(Stroke::new(1.0, Self::border_color()))
+                            .corner_radius(16.0)
+                            .inner_margin(Margin::symmetric(14, 10))
+                            .show(ui, |ui| {
+                                ui.add_sized(
+                                    [ui.available_width() - 4.0, 22.0],
+                                    TextEdit::singleline(&mut self.download_url)
+                                        .frame(false)
+                                        .hint_text("https://youtube.com/watch?v=... or soundcloud / tiktok / facebook")
+                                        .desired_width(f32::INFINITY)
+                                        .margin(Vec2::new(0.0, 4.0)),
+                                )
+                            })
+                            .inner;
+                        if response.lost_focus()
+                            && ui.input(|input| input.key_pressed(egui::Key::Enter))
+                            && !snapshot.running
+                        {
+                            should_start_download = true;
+                        }
+
+                    });
+
+                    ui.add_space(10.0);
+
+                    ui.horizontal(|ui| {
+                        let start_button = ui.add_enabled(
+                            !snapshot.running && !self.download_url.trim().is_empty(),
+                            Self::action_button(
+                                RichText::new(self.t("download.download_sound")).size(13.0),
+                                false,
+                                true,
+                            ),
+                        );
+                        Self::decorate_button_response(ui, &start_button);
+                        if start_button.clicked() {
+                            should_start_download = true;
+                        }
+
+                        if snapshot.running {
+                            if Self::icon_action(ui, [42.0, 32.0], 0xe047, false, true).clicked() {
+                                should_stop_download = true;
+                            }
+                            ui.label(
+                                RichText::new(snapshot.stage.clone())
+                                    .size(13.0)
+                                    .color(Self::muted_text_color()),
+                            );
+                        }
+                    });
+
+                    if let Some(progress) = snapshot.progress {
+                        ui.add_space(8.0);
+                        ui.add(
+                            egui::ProgressBar::new(progress)
+                                .desired_width(ui.available_width())
+                                .fill(Color32::from_rgb(227, 82, 149)),
+                        );
+                    } else if snapshot.running {
+                        ui.add_space(8.0);
+                        ui.horizontal(|ui| {
+                            ui.add(egui::Spinner::new().size(18.0));
+                            ui.label(
+                                RichText::new(self.t("download.working"))
+                                    .size(12.5)
+                                    .color(Self::muted_text_color()),
+                            );
+                        });
+                    }
+
+                    if let Some(error) = &snapshot.error {
+                        ui.add_space(12.0);
+                        ui.label(
+                            RichText::new(error)
+                                .size(13.0)
+                                .color(Color32::from_rgb(171, 54, 91)),
+                        );
+                    }
+
+                    if let Some(path) = &snapshot.last_file {
+                        ui.add_space(14.0);
+                        ui.label(
+                            RichText::new(
+                                path.file_name()
+                                    .and_then(|value| value.to_str())
+                                    .unwrap_or("audio"),
+                            )
+                            .size(14.0)
+                            .color(Self::strong_text_color())
+                            .strong(),
+                        );
+
+                        ui.add_space(10.0);
+                        ui.horizontal(|ui| {
+                            let add_response = ui.add_enabled(
+                                snapshot.can_add_to_library,
+                                Self::action_button(
+                                    Self::icon(0xe02e, 18.0, Color32::WHITE),
+                                    false,
+                                    true,
+                                ),
+                            );
+                            Self::decorate_button_response(ui, &add_response);
+                            if add_response.clicked() {
+                                add_to_library = true;
+                            }
+                            if Self::icon_action(ui, [52.0, 34.0], 0xe89e, false, false).clicked() {
+                                open_file = true;
+                            }
+                            if Self::icon_action(ui, [52.0, 34.0], 0xe2c8, false, false).clicked() {
+                                open_folder = true;
+                            }
+                            if Self::icon_action(ui, [52.0, 34.0], 0xe14c, false, false).clicked() {
+                                clear_result = true;
+                            }
+                        });
+                    }
+                }
+            });
+
+        if close_request {
+            open_panel = false;
+        }
+        if minimize_request {
+            open_panel = false;
+        }
+        self.show_download_panel = open_panel;
+
+        if should_start_download {
+            match self
+                .downloader
+                .start_audio_download(self.download_url.trim().to_owned())
+            {
+                Ok(()) => self.clear_status(),
+                Err(error) => self.set_error_status(error),
+            }
+        }
+        if should_stop_download {
+            self.downloader.stop_audio_download();
+        }
+
+        if let Some(path) = snapshot.last_file.clone() {
+            if add_to_library {
+                self.import_paths(vec![path.clone()]);
+                self.downloader.mark_added_to_library();
+            }
+            if open_file {
+                if let Err(error) = self.downloader.open_file(&path) {
+                    self.set_error_status(error);
+                }
+            }
+            if open_folder {
+                if let Err(error) = self.downloader.open_folder(&path) {
+                    self.set_error_status(error);
+                }
+            }
+        }
+
+        if clear_result {
+            self.downloader.clear_result();
+        }
+    }
+
+    pub(super) fn render_myinstants_panel(&mut self, ctx: &Context) {
+        if !self.show_myinstants_panel {
+            return;
+        }
+
+        let snapshot = self.myinstants.snapshot();
+        let youtube_snapshot = self.downloader.snapshot();
+        let youtube_results = youtube_snapshot.youtube_results.clone();
+        let was_open = self.show_myinstants_panel;
+        let mut open_panel = self.show_myinstants_panel;
+        let mut close_request = false;
+        let mut search_request = false;
+        let mut youtube_search_request = false;
+        let mut add_request: Option<MyinstantsResult> = None;
+        let mut download_request: Option<MyinstantsResult> = None;
+        let mut preview_request: Option<MyinstantsResult> = None;
+        let mut folder_request: Option<MyinstantsResult> = None;
+        let mut copy_request: Option<MyinstantsResult> = None;
+        let mut youtube_download_request: Option<String> = None;
+        let mut stop_youtube_download = false;
+        let mut clear_youtube_results = false;
+        let mut more_request = false;
+        let (_panel_bounds, panel_size, panel_pos) =
+            self.centered_modal_placement(ctx, vec2(720.0, 620.0), vec2(360.0, 300.0), 0.0);
+
+        egui::Window::new("")
+            .id(egui::Id::new("myinstants-search-panel"))
+            .order(egui::Order::Foreground)
+            .title_bar(false)
+            .resizable(false)
+            .collapsible(false)
+            .pivot(egui::Align2::CENTER_CENTER)
+            .fixed_size(panel_size)
+            .fixed_pos(panel_pos)
+            .open(&mut open_panel)
+            .frame(
+                Frame::new()
+                    .fill(Self::overlay_panel_fill())
+                    .stroke(Stroke::new(1.0, Self::border_color()))
+                    .shadow(Shadow {
+                        offset: [0, 14],
+                        blur: 32,
+                        spread: 0,
+                        color: Color32::from_rgba_premultiplied(78, 40, 63, 24),
+                    })
+                    .corner_radius(30.0)
+                    .inner_margin(Margin::same(20)),
+            )
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(Self::icon(0xe8b6, 20.0, Self::strong_text_color()).strong());
+                    ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                        if Self::icon_titlebar(ui, [34.0, 28.0], 0xe5cd, false, true).clicked() {
+                            close_request = true;
+                        }
+                    });
+                });
+
+                ui.add_space(12.0);
+                ui.horizontal(|ui| {
+                    let button_group_width = 236.0;
+                    let search_placeholder = self.t("download.search_placeholder");
+                    let response = ui.add_sized(
+                        [(ui.available_width() - button_group_width).max(180.0), 42.0],
+                        TextEdit::singleline(&mut self.myinstants_query)
+                            .hint_text(search_placeholder)
+                            .margin(Vec2::new(14.0, 12.0)),
+                    );
+                    if response.lost_focus()
+                        && ui.input(|input| input.key_pressed(egui::Key::Enter))
+                    {
+                        search_request = true;
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                        let youtube_button = Self::youtube_search_button(
+                            ui,
+                            &self.t("download.search_youtube"),
+                            !snapshot.searching
+                                && !snapshot.downloading
+                                && !youtube_snapshot.running
+                                && !youtube_snapshot.searching
+                                && !self.myinstants_query.trim().is_empty(),
+                        );
+                        if youtube_button.clicked() {
+                            youtube_search_request = true;
+                        }
+                        ui.label(
+                            RichText::new(self.t("download.or"))
+                                .size(12.5)
+                                .color(Self::muted_text_color())
+                                .strong(),
+                        );
+                        if Self::search_sound_button(
+                            ui,
+                            !snapshot.searching
+                                && !snapshot.downloading
+                                && !self.myinstants_query.trim().is_empty(),
+                        )
+                        .clicked()
+                        {
+                            search_request = true;
+                        }
+                    });
+                });
+
+                ui.add_space(14.0);
+                if snapshot.searching
+                    || snapshot.downloading
+                    || youtube_snapshot.searching
+                    || youtube_snapshot.running
+                {
+                    ui.horizontal(|ui| {
+                        ui.add(egui::Spinner::new().size(16.0));
+                        ui.label(
+                            RichText::new(
+                                if youtube_snapshot.searching || youtube_snapshot.running {
+                                    youtube_snapshot.stage.as_str()
+                                } else {
+                                    "..."
+                                },
+                            )
+                            .size(14.0)
+                            .color(Color32::from_rgb(214, 51, 132)),
+                        );
+                        if youtube_snapshot.running
+                            && Self::icon_action(ui, [42.0, 30.0], 0xe047, false, true).clicked()
+                        {
+                            stop_youtube_download = true;
+                        }
+                    });
+                    ui.add_space(8.0);
+                }
+                if let Some(error) = snapshot
+                    .error
+                    .as_deref()
+                    .or(youtube_snapshot.error.as_deref())
+                {
+                    ui.label(
+                        RichText::new(Self::truncate_middle_ascii(error, 80))
+                            .size(12.0)
+                            .color(Color32::from_rgb(189, 62, 117)),
+                    );
+                    ui.add_space(8.0);
+                }
+
+                ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        if !youtube_results.is_empty() {
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new("YouTube")
+                                        .size(14.0)
+                                        .color(Self::strong_text_color())
+                                        .strong(),
+                                );
+                                ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                                    if Self::icon_action(ui, [42.0, 32.0], 0xe14c, false, false)
+                                        .clicked()
+                                    {
+                                        clear_youtube_results = true;
+                                    }
+                                });
+                            });
+                            ui.add_space(8.0);
+                            for result in youtube_results
+                                .iter()
+                                .take(self.youtube_search_visible_count)
+                            {
+                                if Self::render_youtube_result_row(
+                                    ui,
+                                    result,
+                                    &self.t("download.download"),
+                                ) {
+                                    youtube_download_request = Some(result.webpage_url.clone());
+                                }
+                                ui.add_space(8.0);
+                            }
+                            ui.add_space(12.0);
+                        }
+
+                        for result in snapshot.results.iter().take(self.myinstants_visible_count) {
+                            self.queue_myinstants_waveform_prefetch(result);
+                            let downloaded_path =
+                                self.existing_myinstants_download_path(&result.audio_url);
+                            let preview_path = downloaded_path.clone().or_else(|| {
+                                self.existing_myinstants_preview_path(&result.audio_url)
+                            });
+                            let is_downloaded = downloaded_path.is_some();
+                            let is_previewing = preview_path.as_ref().is_some_and(|path| {
+                                self.audio
+                                    .as_ref()
+                                    .is_some_and(|audio| audio.is_playing_file(path))
+                            });
+                            let preview_progress = preview_path.as_ref().and_then(|path| {
+                                self.audio
+                                    .as_ref()
+                                    .and_then(|audio| audio.playback_progress_for_file(path))
+                            });
+                            Frame::new()
+                                .fill(Self::surface_fill())
+                                .stroke(Stroke::new(1.0, Self::border_color()))
+                                .corner_radius(22.0)
+                                .inner_margin(Margin::same(14))
+                                .show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.add_sized(
+                                            [ui.available_width() - 176.0, 20.0],
+                                            egui::Label::new(
+                                                RichText::new(&result.title)
+                                                    .size(13.5)
+                                                    .color(Self::strong_text_color())
+                                                    .strong(),
+                                            )
+                                            .truncate(),
+                                        );
+                                        if Self::icon_action(
+                                            ui,
+                                            [44.0, 32.0],
+                                            if is_previewing { 0xe047 } else { 0xe037 },
+                                            is_previewing,
+                                            false,
+                                        )
+                                        .clicked()
+                                        {
+                                            preview_request = Some(result.clone());
+                                        }
+                                        if is_downloaded {
+                                            if Self::icon_action(
+                                                ui,
+                                                [44.0, 32.0],
+                                                0xe2c7,
+                                                false,
+                                                false,
+                                            )
+                                            .clicked()
+                                            {
+                                                folder_request = Some(result.clone());
+                                            }
+                                            if Self::icon_action(
+                                                ui,
+                                                [44.0, 32.0],
+                                                0xe14d,
+                                                false,
+                                                false,
+                                            )
+                                            .clicked()
+                                            {
+                                                copy_request = Some(result.clone());
+                                            }
+                                        } else if Self::icon_action(
+                                            ui,
+                                            [44.0, 32.0],
+                                            0xe2c4,
+                                            false,
+                                            false,
+                                        )
+                                        .clicked()
+                                        {
+                                            download_request = Some(result.clone());
+                                        }
+                                        if Self::icon_action(ui, [44.0, 32.0], 0xe145, false, true)
+                                            .clicked()
+                                        {
+                                            add_request = Some(result.clone());
+                                        }
+                                    });
+
+                                    ui.add_space(10.0);
+                                    let waveform = self
+                                        .myinstants_waveforms
+                                        .get(&result.audio_url)
+                                        .map(Vec::as_slice)
+                                        .unwrap_or(&[]);
+                                    Self::draw_wave_strip(
+                                        ui,
+                                        waveform,
+                                        if is_previewing {
+                                            preview_progress
+                                        } else {
+                                            None
+                                        },
+                                        Color32::from_rgb(214, 51, 132),
+                                        if self.dark_theme {
+                                            Color32::from_rgb(102, 74, 102)
+                                        } else {
+                                            Color32::from_rgb(238, 213, 227)
+                                        },
+                                        Self::panel_fill(),
+                                        46.0,
+                                    );
+                                });
+                            ui.add_space(10.0);
+                        }
+
+                        if snapshot.results.len() > self.myinstants_visible_count {
+                            ui.add_space(2.0);
+                            ui.horizontal_centered(|ui| {
+                                let more_response = ui.add_sized(
+                                    [76.0, 34.0],
+                                    Self::action_button(
+                                        RichText::new("+10")
+                                            .size(13.0)
+                                            .color(Self::strong_text_color()),
+                                        false,
+                                        false,
+                                    ),
+                                );
+                                Self::decorate_button_response(ui, &more_response);
+                                if more_response.clicked() {
+                                    more_request = true;
+                                }
+                            });
+                        }
+                    });
+            });
+
+        if close_request {
+            open_panel = false;
+        }
+        self.show_myinstants_panel = open_panel;
+        if was_open && !open_panel && self.myinstants_preview_audio_url.is_some() {
+            self.stop_preview();
+        }
+
+        if search_request {
+            match self.myinstants.start_search(self.myinstants_query.clone()) {
+                Ok(()) => {
+                    self.myinstants_visible_count = 10;
+                    self.clear_status();
+                }
+                Err(error) => self.set_error_status(error),
+            }
+        }
+        if youtube_search_request {
+            match self
+                .downloader
+                .start_youtube_search(self.myinstants_query.clone())
+            {
+                Ok(()) => {
+                    self.youtube_search_visible_count = 8;
+                    self.clear_status();
+                }
+                Err(error) => self.set_error_status(error),
+            }
+        }
+        if more_request {
+            self.myinstants_visible_count =
+                (self.myinstants_visible_count + 10).min(snapshot.results.len());
+        }
+        if let Some(url) = youtube_download_request {
+            self.download_url = url.clone();
+            match self.downloader.start_audio_download(url) {
+                Ok(()) => self.clear_status(),
+                Err(error) => self.set_error_status(error),
+            }
+        }
+        if stop_youtube_download {
+            self.downloader.stop_audio_download();
+        }
+        if clear_youtube_results {
+            self.downloader.clear_youtube_results();
+        }
+        if let Some(result) = preview_request {
+            match self.toggle_myinstants_preview(&result) {
+                Ok(()) => self.clear_status(),
+                Err(error) => self.set_error_status(error),
+            }
+        }
+        if let Some(result) = download_request {
+            match self.myinstants.start_download(result, false) {
+                Ok(()) => self.clear_status(),
+                Err(error) => self.set_error_status(error),
+            }
+        }
+        if let Some(result) = folder_request
+            && let Some(path) = self.existing_myinstants_download_path(&result.audio_url)
+            && let Some(parent) = path.parent()
+            && let Err(error) = open::that(parent)
+        {
+            self.set_error_status(error);
+        }
+        if let Some(result) = copy_request
+            && let Some(path) = self.existing_myinstants_download_path(&result.audio_url)
+        {
+            match self.copy_file_path_to_clipboard(&path) {
+                Ok(()) => self.clear_status(),
+                Err(error) => self.set_error_status(error),
+            }
+        }
+        if let Some(result) = add_request {
+            if let Some(path) = self.existing_myinstants_download_path(&result.audio_url) {
+                self.import_downloaded_sound(&path, false);
+                self.clear_status();
+            } else {
+                match self.myinstants.start_download(result, true) {
+                    Ok(()) => self.clear_status(),
+                    Err(error) => self.set_error_status(error),
+                }
+            }
+        }
+    }
 }
