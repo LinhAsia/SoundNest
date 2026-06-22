@@ -11,6 +11,9 @@ pub struct DragGhostSpec {
     pub dark_theme: bool,
 }
 
+pub mod audio_stream;
+pub mod hotkey;
+
 #[cfg(windows)]
 mod windows;
 
