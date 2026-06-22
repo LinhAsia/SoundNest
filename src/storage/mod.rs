@@ -1,5 +1,6 @@
 mod cache;
 mod json_store;
+mod migration;
 mod models;
 mod paths;
 
@@ -9,11 +10,11 @@ pub use self::models::{
 };
 pub use self::paths::format_time;
 
+use self::migration::{migrate_storage_root_if_needed, preferred_storage_root};
 use self::models::PreferencesFile;
 use self::paths::{
-    WAVEFORM_BUCKETS, committed_trimmed_sound_name, migrate_storage_root_if_needed,
-    normalize_video_fps, preferred_storage_root, sanitize_file_system_name, sanitize_stem,
-    sound_asset_file_name, unique_directory_path, unique_file_path,
+    WAVEFORM_BUCKETS, committed_trimmed_sound_name, normalize_video_fps, sanitize_file_system_name,
+    sanitize_stem, sound_asset_file_name, unique_directory_path, unique_file_path,
 };
 use anyhow::{Context, Result, bail};
 use cache::{analyze_audio_file, write_processed_wav};
