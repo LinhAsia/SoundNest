@@ -2,6 +2,7 @@
 
 mod app;
 mod audio;
+mod domain;
 mod downloader;
 mod gemini_tts;
 mod hotkey;
