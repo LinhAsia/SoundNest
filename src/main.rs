@@ -11,6 +11,7 @@ mod pitch;
 mod platform;
 mod record_video;
 mod recorder;
+mod services;
 mod storage;
 mod stream_driver;
 mod stream_input;
