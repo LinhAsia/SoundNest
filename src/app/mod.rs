@@ -122,6 +122,7 @@ mod layout;
 mod library;
 mod library_filtering;
 mod library_helpers;
+mod library_jobs;
 mod media_panels;
 mod message;
 mod pitch_monitor;
