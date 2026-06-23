@@ -14,7 +14,6 @@ impl SoundFxApp {
         let mut open_panel = self.show_record_panel;
         let mut close_request = false;
         let mut toggle_record = false;
-        let mut use_selected_sound = false;
         let refresh_inputs = false;
         let (_panel_bounds, panel_size, panel_pos) =
             self.centered_modal_placement(ctx, vec2(520.0, 420.0), vec2(320.0, 260.0), 0.0);
@@ -265,27 +264,6 @@ impl SoundFxApp {
                     if button.clicked() {
                         toggle_record = true;
                     }
-
-                    ui.add_space(8.0);
-                    let use_selected = ui
-                        .add_enabled_ui(
-                            !snapshot.running && self.selected_sound_index().is_some(),
-                            |ui| {
-                                ui.add_sized(
-                                    [164.0, 42.0],
-                                    Self::action_button(
-                                        RichText::new("Use selected sound").size(13.0),
-                                        false,
-                                        false,
-                                    ),
-                                )
-                            },
-                        )
-                        .inner;
-                    Self::decorate_button_response(ui, &use_selected);
-                    if use_selected.clicked() {
-                        use_selected_sound = true;
-                    }
                 });
             });
 
@@ -303,9 +281,6 @@ impl SoundFxApp {
 
         if toggle_record {
             self.toggle_recording(ctx);
-        }
-        if use_selected_sound {
-            self.open_selected_sound_for_record_export();
         }
     }
 

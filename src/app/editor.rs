@@ -683,6 +683,7 @@ impl SoundFxApp {
                             let preview_duration = sound.safe_duration();
                             self.trim_timeline_zoom = 1.0;
                             self.recording_draft = Some(RecordingDraft {
+                                mode: RecordingDraftMode::Recording,
                                 sound,
                                 source_path: path,
                                 source_is_temporary: true,
@@ -1166,6 +1167,12 @@ impl SoundFxApp {
         };
 
         let sound_id = sound_snapshot.id;
+        let draft_mode = self
+            .recording_draft
+            .as_ref()
+            .map(|draft| draft.mode)
+            .unwrap_or(RecordingDraftMode::Recording);
+        let is_video_export_mode = draft_mode == RecordingDraftMode::VideoExport;
         let is_playing = self
             .audio
             .as_ref()
@@ -1280,10 +1287,13 @@ impl SoundFxApp {
             .as_ref()
             .map(|draft| self.recording_waveform_samples(draft))
             .unwrap_or_default();
-        let export_progress = self
-            .active_record_video_export
-            .as_ref()
-            .map(|export| (export.progress, export.stage.clone()));
+        let export_progress = if is_video_export_mode {
+            self.active_record_video_export
+                .as_ref()
+                .map(|export| (export.progress, export.stage.clone()))
+        } else {
+            None
+        };
         let exporting_video = export_progress.is_some();
         let (_panel_bounds, panel_size, panel_pos) =
             self.centered_modal_placement(ctx, vec2(680.0, 560.0), vec2(360.0, 300.0), 0.0);
@@ -1707,109 +1717,112 @@ impl SoundFxApp {
                         });
                     });
 
-                ui.add_space(18.0);
-                Frame::new()
-                    .fill(Self::panel_fill())
-                    .stroke(Stroke::new(1.0, Self::subtle_border_color()))
-                    .corner_radius(22.0)
-                    .inner_margin(Margin::same(16))
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.allocate_ui_with_layout(
-                                vec2(44.0, 32.0),
-                                egui::Layout::left_to_right(Align::Center),
-                                |ui| {
-                                    ui.label(
-                                        RichText::new("Export")
-                                            .size(12.5)
-                                            .color(Self::muted_text_color()),
-                                    );
-                                },
-                            );
-                            ui.add_space(8.0);
-
-                            let animation = ui.add_sized(
-                                [108.0, 32.0],
-                                Self::action_button(
-                                    RichText::new("Animation").size(12.5),
-                                    self.record_export_video_animation,
-                                    false,
-                                ),
-                            );
-                            Self::decorate_button_response(ui, &animation);
-                            if animation.clicked() {
-                                self.record_export_video_animation =
-                                    !self.record_export_video_animation;
-                                ctx.request_repaint();
-                            }
-
-                            let sharp = ui.add_sized(
-                                [88.0, 32.0],
-                                Self::action_button(
-                                    RichText::new(self.t("record.sharp")).size(12.5),
-                                    self.record_export_video_sharps,
-                                    false,
-                                ),
-                            );
-                            Self::decorate_button_response(ui, &sharp);
-                            if sharp.clicked() {
-                                self.record_export_video_sharps = !self.record_export_video_sharps;
-                                ctx.request_repaint();
-                            }
-
-                            ui.add_space(10.0);
-                            ui.allocate_ui_with_layout(
-                                vec2(24.0, 32.0),
-                                egui::Layout::left_to_right(Align::Center),
-                                |ui| {
-                                    ui.label(
-                                        RichText::new("FPS")
-                                            .size(12.5)
-                                            .color(Self::muted_text_color()),
-                                    );
-                                },
-                            );
-                            for fps in RECORD_EXPORT_VIDEO_FPS_OPTIONS {
-                                let active = self.record_export_video_fps == fps;
-                                let response = ui.add_sized(
-                                    [74.0, 32.0],
-                                    Self::action_button(
-                                        RichText::new(format!("{fps}fps")).size(12.5),
-                                        active,
-                                        false,
-                                    ),
-                                );
-                                Self::decorate_button_response(ui, &response);
-                                if response.clicked() {
-                                    self.record_export_video_fps = fps;
-                                    ctx.request_repaint();
-                                }
-                            }
-                        });
-                    });
-
-                ui.add_space(12.0);
-                if let Some((progress, stage)) = export_progress.as_ref() {
+                if is_video_export_mode {
+                    ui.add_space(18.0);
                     Frame::new()
                         .fill(Self::panel_fill())
                         .stroke(Stroke::new(1.0, Self::subtle_border_color()))
                         .corner_radius(22.0)
                         .inner_margin(Margin::same(16))
                         .show(ui, |ui| {
-                            ui.label(
-                                RichText::new(stage.as_str())
-                                    .size(13.0)
-                                    .color(Self::strong_text_color()),
-                            );
-                            ui.add_space(8.0);
-                            ui.add(
-                                ProgressBar::new(*progress)
-                                    .desired_width(ui.available_width())
-                                    .fill(Color32::from_rgb(227, 82, 149))
-                                    .text(format!("{:.0}%", *progress * 100.0)),
-                            );
+                            ui.horizontal(|ui| {
+                                ui.allocate_ui_with_layout(
+                                    vec2(44.0, 32.0),
+                                    egui::Layout::left_to_right(Align::Center),
+                                    |ui| {
+                                        ui.label(
+                                            RichText::new("Export")
+                                                .size(12.5)
+                                                .color(Self::muted_text_color()),
+                                        );
+                                    },
+                                );
+                                ui.add_space(8.0);
+
+                                let animation = ui.add_sized(
+                                    [108.0, 32.0],
+                                    Self::action_button(
+                                        RichText::new("Animation").size(12.5),
+                                        self.record_export_video_animation,
+                                        false,
+                                    ),
+                                );
+                                Self::decorate_button_response(ui, &animation);
+                                if animation.clicked() {
+                                    self.record_export_video_animation =
+                                        !self.record_export_video_animation;
+                                    ctx.request_repaint();
+                                }
+
+                                let sharp = ui.add_sized(
+                                    [88.0, 32.0],
+                                    Self::action_button(
+                                        RichText::new(self.t("record.sharp")).size(12.5),
+                                        self.record_export_video_sharps,
+                                        false,
+                                    ),
+                                );
+                                Self::decorate_button_response(ui, &sharp);
+                                if sharp.clicked() {
+                                    self.record_export_video_sharps =
+                                        !self.record_export_video_sharps;
+                                    ctx.request_repaint();
+                                }
+
+                                ui.add_space(10.0);
+                                ui.allocate_ui_with_layout(
+                                    vec2(24.0, 32.0),
+                                    egui::Layout::left_to_right(Align::Center),
+                                    |ui| {
+                                        ui.label(
+                                            RichText::new("FPS")
+                                                .size(12.5)
+                                                .color(Self::muted_text_color()),
+                                        );
+                                    },
+                                );
+                                for fps in RECORD_EXPORT_VIDEO_FPS_OPTIONS {
+                                    let active = self.record_export_video_fps == fps;
+                                    let response = ui.add_sized(
+                                        [74.0, 32.0],
+                                        Self::action_button(
+                                            RichText::new(format!("{fps}fps")).size(12.5),
+                                            active,
+                                            false,
+                                        ),
+                                    );
+                                    Self::decorate_button_response(ui, &response);
+                                    if response.clicked() {
+                                        self.record_export_video_fps = fps;
+                                        ctx.request_repaint();
+                                    }
+                                }
+                            });
                         });
+
                     ui.add_space(12.0);
+                    if let Some((progress, stage)) = export_progress.as_ref() {
+                        Frame::new()
+                            .fill(Self::panel_fill())
+                            .stroke(Stroke::new(1.0, Self::subtle_border_color()))
+                            .corner_radius(22.0)
+                            .inner_margin(Margin::same(16))
+                            .show(ui, |ui| {
+                                ui.label(
+                                    RichText::new(stage.as_str())
+                                        .size(13.0)
+                                        .color(Self::strong_text_color()),
+                                );
+                                ui.add_space(8.0);
+                                ui.add(
+                                    ProgressBar::new(*progress)
+                                        .desired_width(ui.available_width())
+                                        .fill(Color32::from_rgb(227, 82, 149))
+                                        .text(format!("{:.0}%", *progress * 100.0)),
+                                );
+                            });
+                        ui.add_space(12.0);
+                    }
                 }
 
                 ui.horizontal_centered(|ui| {
@@ -1826,30 +1839,36 @@ impl SoundFxApp {
                         preview_toggle = true;
                     }
 
-                    let save = ui.add_sized(
-                        [132.0, 38.0],
-                        Self::action_button(RichText::new("Save audio").size(13.0), false, false),
-                    );
-                    Self::decorate_button_response(ui, &save);
-                    if save.clicked() {
-                        save_audio = true;
-                    }
-
-                    let video = ui
-                        .add_enabled_ui(!exporting_video, |ui| {
-                            ui.add_sized(
-                                [132.0, 38.0],
-                                Self::action_button(
-                                    RichText::new("Export SPN").size(13.0),
-                                    false,
-                                    false,
-                                ),
-                            )
-                        })
-                        .inner;
-                    Self::decorate_button_response(ui, &video);
-                    if video.clicked() {
-                        export_video = true;
+                    if is_video_export_mode {
+                        let video = ui
+                            .add_enabled_ui(!exporting_video, |ui| {
+                                ui.add_sized(
+                                    [132.0, 38.0],
+                                    Self::action_button(
+                                        RichText::new("Export SPN").size(13.0),
+                                        false,
+                                        false,
+                                    ),
+                                )
+                            })
+                            .inner;
+                        Self::decorate_button_response(ui, &video);
+                        if video.clicked() {
+                            export_video = true;
+                        }
+                    } else {
+                        let save = ui.add_sized(
+                            [132.0, 38.0],
+                            Self::action_button(
+                                RichText::new("Save audio").size(13.0),
+                                false,
+                                false,
+                            ),
+                        );
+                        Self::decorate_button_response(ui, &save);
+                        if save.clicked() {
+                            save_audio = true;
+                        }
                     }
 
                     let discard = ui
@@ -1857,7 +1876,12 @@ impl SoundFxApp {
                             ui.add_sized(
                                 [118.0, 38.0],
                                 Self::action_button(
-                                    RichText::new("Discard").size(13.0),
+                                    RichText::new(if is_video_export_mode {
+                                        "Close"
+                                    } else {
+                                        "Discard"
+                                    })
+                                    .size(13.0),
                                     false,
                                     false,
                                 ),
@@ -1908,10 +1932,10 @@ impl SoundFxApp {
         if changed {
             ctx.request_repaint();
         }
-        if export_video {
+        if export_video && is_video_export_mode {
             self.export_recording_review_video();
         }
-        if save_audio {
+        if save_audio && !is_video_export_mode {
             self.save_recording_review_to_library();
         } else if discard_request {
             self.close_recording_review(true);
@@ -1998,6 +2022,7 @@ impl SoundFxApp {
         let mut copy_request = false;
         let mut open_location_request = false;
         let mut commit_trim_request = false;
+        let mut open_spn_export_request = false;
         let mut seek_request = false;
         let mut playback_reapply_request = false;
         let mut normalize_request = false;
@@ -2078,7 +2103,7 @@ impl SoundFxApp {
             .inner_margin(Margin::same(14))
             .show(ui, |ui| {
                 let sound = &mut self.sounds[index];
-                let controls_width = 52.0 + 52.0 + 52.0 + 64.0 + 36.0;
+                let controls_width = 52.0 + 52.0 + 52.0 + 64.0 + 64.0 + 36.0;
                 let row_gap = 8.0;
                 let back_button_width = if self.editing_from_folder.is_some() {
                     42.0 + 8.0
@@ -2126,6 +2151,14 @@ impl SoundFxApp {
                         |ui| {
                             if Self::icon_action(ui, [52.0, 34.0], 0xe872, false, false).clicked() {
                                 delete_request = true;
+                            }
+                            let spn = ui.add_sized(
+                                [64.0, 34.0],
+                                Self::action_button(RichText::new("SPN").size(12.0), false, false),
+                            );
+                            Self::decorate_button_response(ui, &spn);
+                            if spn.clicked() {
+                                open_spn_export_request = true;
                             }
                             if Self::icon_action(ui, [52.0, 34.0], 0xe14e, false, false).clicked() {
                                 commit_trim_request = true;
@@ -2782,6 +2815,9 @@ impl SoundFxApp {
 
         if commit_trim_request {
             self.show_trim_commit_panel = true;
+        }
+        if open_spn_export_request {
+            self.open_selected_sound_for_record_export();
         }
     }
 

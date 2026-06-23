@@ -1,6 +1,13 @@
 use super::*;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RecordingDraftMode {
+    Recording,
+    VideoExport,
+}
+
 pub(crate) struct RecordingDraft {
+    pub(crate) mode: RecordingDraftMode,
     pub(crate) sound: SoundEffect,
     pub(crate) source_path: PathBuf,
     pub(crate) source_is_temporary: bool,

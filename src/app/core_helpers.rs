@@ -275,6 +275,7 @@ impl SoundFxApp {
         let source_is_temporary = source_path != selected_sound.asset_path(self.storage.root_dir());
         self.trim_timeline_zoom = 1.0;
         self.recording_draft = Some(RecordingDraft {
+            mode: RecordingDraftMode::VideoExport,
             sound: review_sound,
             source_path,
             source_is_temporary,
