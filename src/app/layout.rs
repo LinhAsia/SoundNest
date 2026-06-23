@@ -296,11 +296,17 @@ impl SoundFxApp {
                 }
 
                 if Self::icon_titlebar(ui, [42.0, 30.0], 0xe061, false, false).clicked() {
-                    if self.recording_draft.is_some() && !self.recorder.snapshot().running {
+                    let reopen_recording_review = self
+                        .recording_draft
+                        .as_ref()
+                        .is_some_and(|draft| draft.mode == RecordingDraftMode::Recording)
+                        && !self.recorder.snapshot().running;
+                    if reopen_recording_review {
                         self.show_record_panel = false;
                         self.show_record_review_panel = true;
                     } else {
                         self.refresh_record_capture_devices();
+                        self.show_record_review_panel = false;
                         self.show_record_panel = true;
                     }
                 }
