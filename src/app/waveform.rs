@@ -61,7 +61,7 @@ impl SoundFxApp {
         buckets: usize,
     ) -> Vec<f32> {
         let cache_key = format!(
-            "{}:{}:{}:{}:{}:{}:{}:{}",
+            "{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
             sound.id,
             sound.asset_file,
             sound.vocal_asset_file.as_deref().unwrap_or(""),
@@ -70,6 +70,14 @@ impl SoundFxApp {
             sound.vocal_only,
             (sound.trim_start_secs * 1000.0).round() as i32,
             (sound.trim_end_secs * 1000.0).round() as i32,
+            sound
+                .cut_start_secs
+                .map(|value| (value * 1000.0).round() as i32)
+                .unwrap_or(-1),
+            sound
+                .cut_end_secs
+                .map(|value| (value * 1000.0).round() as i32)
+                .unwrap_or(-1),
         );
         let cache_key = format!("{cache_key}:{buckets}");
         if let Some(existing) = self
@@ -99,19 +107,25 @@ impl SoundFxApp {
         }
 
         let total_duration = sound.safe_duration();
-        let trim_start = sound.trim_start_secs.clamp(0.0, total_duration);
-        let trim_end = sound
-            .trim_end_secs
-            .clamp(trim_start + 0.001, total_duration);
         let source_len = samples.len();
-        if source_len <= 1 || (trim_start <= 0.001 && trim_end >= total_duration - 0.001) {
+        let ranges = sound.trim_ranges();
+        if source_len <= 1
+            || (ranges.len() == 1 && ranges[0].0 <= 0.001 && ranges[0].1 >= total_duration - 0.001)
+        {
             return samples.to_vec();
         }
-
-        let start_index = ((trim_start / total_duration) * source_len as f32).floor() as usize;
-        let mut end_index = ((trim_end / total_duration) * source_len as f32).ceil() as usize;
-        end_index = end_index.clamp(start_index.saturating_add(1), source_len);
-        let segment = &samples[start_index.min(source_len - 1)..end_index];
+        let mut stitched = Vec::new();
+        for (trim_start, trim_end) in ranges {
+            let start_index = ((trim_start / total_duration) * source_len as f32).floor() as usize;
+            let mut end_index = ((trim_end / total_duration) * source_len as f32).ceil() as usize;
+            end_index = end_index.clamp(start_index.saturating_add(1), source_len);
+            stitched.extend_from_slice(&samples[start_index.min(source_len - 1)..end_index]);
+        }
+        let segment = if stitched.is_empty() {
+            samples
+        } else {
+            &stitched
+        };
         if segment.len() >= source_len {
             return segment.to_vec();
         }
@@ -145,15 +159,21 @@ impl SoundFxApp {
         }
 
         let total_duration = sound.safe_duration();
-        let trim_start = sound.trim_start_secs.clamp(0.0, total_duration);
-        let trim_end = sound
-            .trim_end_secs
-            .clamp(trim_start + 0.001, total_duration);
         let source_len = samples.len();
-        let start_index = ((trim_start / total_duration) * source_len as f32).floor() as usize;
-        let mut end_index = ((trim_end / total_duration) * source_len as f32).ceil() as usize;
-        end_index = end_index.clamp(start_index.saturating_add(1), source_len);
-        let segment = &samples[start_index.min(source_len.saturating_sub(1))..end_index];
+        let mut stitched = Vec::new();
+        for (trim_start, trim_end) in sound.trim_ranges() {
+            let start_index = ((trim_start / total_duration) * source_len as f32).floor() as usize;
+            let mut end_index = ((trim_end / total_duration) * source_len as f32).ceil() as usize;
+            end_index = end_index.clamp(start_index.saturating_add(1), source_len);
+            stitched.extend_from_slice(
+                &samples[start_index.min(source_len.saturating_sub(1))..end_index],
+            );
+        }
+        let segment = if stitched.is_empty() {
+            samples
+        } else {
+            &stitched
+        };
         Self::compact_library_waveform(segment, buckets)
     }
 

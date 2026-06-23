@@ -27,12 +27,21 @@ pub(super) fn committed_trimmed_sound_name(sound: &SoundEffect) -> String {
     } else {
         base_name
     };
-    format!(
-        "{} [trim {}-{}]",
-        base_name,
-        format_time(sound.trim_start_secs),
-        format_time(sound.trim_end_secs)
-    )
+    if let (Some(cut_start), Some(cut_end)) = (sound.cut_start_secs, sound.cut_end_secs) {
+        format!(
+            "{} [cut {}-{}]",
+            base_name,
+            format_time(cut_start),
+            format_time(cut_end)
+        )
+    } else {
+        format!(
+            "{} [trim {}-{}]",
+            base_name,
+            format_time(sound.trim_start_secs),
+            format_time(sound.trim_end_secs)
+        )
+    }
 }
 
 pub(super) fn sound_asset_file_name(name: &str, sound_id: Uuid, extension: &str) -> String {

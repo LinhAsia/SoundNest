@@ -109,7 +109,7 @@ pub struct AudioEngine {
     current_id: Option<Uuid>,
     current_file_path: Option<PathBuf>,
     current_total_duration_secs: f32,
-    current_trim_start_secs: f32,
+    current_sound: Option<SoundEffect>,
     current_start_offset_secs: f32,
     current_speed: f32,
 }
@@ -127,7 +127,7 @@ impl AudioEngine {
             current_id: None,
             current_file_path: None,
             current_total_duration_secs: 0.0,
-            current_trim_start_secs: 0.0,
+            current_sound: None,
             current_start_offset_secs: 0.0,
             current_speed: 1.0,
         })
@@ -179,7 +179,7 @@ impl AudioEngine {
         self.current_id = Some(sound.id);
         self.current_file_path = None;
         self.current_total_duration_secs = total_duration_secs;
-        self.current_trim_start_secs = sound.trim_start_secs;
+        self.current_sound = Some(sound.clone());
         self.current_start_offset_secs = start_offset_secs;
         self.current_speed = speed;
         self.sink = Some(sink);
@@ -207,8 +207,9 @@ impl AudioEngine {
 
         let speed = sound.speed.clamp(0.25, 2.0);
         let total_duration_secs = sound.trimmed_length().max(0.05);
-        let original_offset_secs =
-            (start_position_secs - sound.trim_start_secs).clamp(0.0, total_duration_secs);
+        let original_offset_secs = sound
+            .timeline_secs_to_output_secs(start_position_secs)
+            .clamp(0.0, total_duration_secs);
         let file_offset_secs = (original_offset_secs / speed).clamp(0.0, total_duration_secs);
         let total_frames = cached.samples.len() / channels as usize;
         let start_frame = ((file_offset_secs * sample_rate as f32).floor() as usize)
@@ -230,7 +231,7 @@ impl AudioEngine {
         self.current_id = Some(sound.id);
         self.current_file_path = Some(asset_path.to_path_buf());
         self.current_total_duration_secs = total_duration_secs;
-        self.current_trim_start_secs = sound.trim_start_secs;
+        self.current_sound = Some(sound.clone());
         self.current_start_offset_secs = original_offset_secs;
         self.current_speed = speed;
         self.sink = Some(sink);
@@ -278,7 +279,7 @@ impl AudioEngine {
         self.current_id = None;
         self.current_file_path = Some(asset_path.to_path_buf());
         self.current_total_duration_secs = total_duration_secs;
-        self.current_trim_start_secs = 0.0;
+        self.current_sound = None;
         self.current_start_offset_secs = start_offset_secs;
         self.current_speed = 1.0;
         self.sink = Some(sink);
@@ -292,7 +293,7 @@ impl AudioEngine {
         self.current_id = None;
         self.current_file_path = None;
         self.current_total_duration_secs = 0.0;
-        self.current_trim_start_secs = 0.0;
+        self.current_sound = None;
         self.current_start_offset_secs = 0.0;
         self.current_speed = 1.0;
     }
@@ -333,7 +334,12 @@ impl AudioEngine {
         let total_duration = self.current_total_duration_secs.max(0.05);
         let elapsed = sink.get_pos().as_secs_f32() * self.current_speed.max(0.25);
         let played = (self.current_start_offset_secs + elapsed).clamp(0.0, total_duration);
-        Some(self.current_trim_start_secs + played)
+        Some(
+            self.current_sound
+                .as_ref()
+                .map(|sound| sound.output_secs_to_timeline_secs(played))
+                .unwrap_or(played),
+        )
     }
 
     pub fn playback_progress_for_file(&self, path: &Path) -> Option<f32> {

@@ -23,6 +23,10 @@ pub struct SoundEffect {
     pub trim_start_secs: f32,
     pub trim_end_secs: f32,
     #[serde(default)]
+    pub cut_start_secs: Option<f32>,
+    #[serde(default)]
+    pub cut_end_secs: Option<f32>,
+    #[serde(default)]
     pub vocal_only: bool,
     #[serde(default)]
     pub vocal_asset_file: Option<String>,
@@ -99,6 +103,73 @@ impl VideoAsset {
 }
 
 impl SoundEffect {
+    pub fn trim_ranges(&self) -> Vec<(f32, f32)> {
+        let duration = self.safe_duration();
+        let trim_start = self.trim_start_secs.clamp(0.0, duration);
+        let trim_end = self.trim_end_secs.clamp(trim_start + 0.001, duration);
+        let mut ranges = vec![(trim_start, trim_end)];
+        if let (Some(cut_start), Some(cut_end)) = (self.cut_start_secs, self.cut_end_secs) {
+            let cut_start = cut_start.clamp(trim_start, trim_end);
+            let cut_end = cut_end.clamp(trim_start, trim_end);
+            if cut_end - cut_start > 0.001 {
+                ranges.clear();
+                if cut_start - trim_start > 0.001 {
+                    ranges.push((trim_start, cut_start));
+                }
+                if trim_end - cut_end > 0.001 {
+                    ranges.push((cut_end, trim_end));
+                }
+                if ranges.is_empty() {
+                    ranges.push((trim_start, trim_end));
+                }
+            }
+        }
+        ranges
+    }
+
+    pub fn has_cutout(&self) -> bool {
+        if let (Some(cut_start), Some(cut_end)) = (self.cut_start_secs, self.cut_end_secs) {
+            return cut_end - cut_start > 0.001;
+        }
+        false
+    }
+
+    pub fn clear_cutout(&mut self) {
+        self.cut_start_secs = None;
+        self.cut_end_secs = None;
+    }
+
+    pub fn timeline_secs_to_output_secs(&self, timeline_secs: f32) -> f32 {
+        let mut played = 0.0;
+        for (start, end) in self.trim_ranges() {
+            let length = (end - start).max(0.0);
+            if timeline_secs <= start {
+                return played;
+            }
+            if timeline_secs < end {
+                return played + (timeline_secs - start);
+            }
+            played += length;
+        }
+        played
+    }
+
+    pub fn output_secs_to_timeline_secs(&self, output_secs: f32) -> f32 {
+        let mut remaining = output_secs.max(0.0);
+        let ranges = self.trim_ranges();
+        for (start, end) in &ranges {
+            let length = (*end - *start).max(0.0);
+            if remaining <= length {
+                return *start + remaining;
+            }
+            remaining -= length;
+        }
+        ranges
+            .last()
+            .map(|(_, end)| *end)
+            .unwrap_or(self.trim_end_secs)
+    }
+
     pub fn asset_path(&self, storage_dir: &Path) -> PathBuf {
         storage_dir.join("sounds").join(&self.asset_file)
     }
@@ -136,7 +207,11 @@ impl SoundEffect {
     }
 
     pub fn trimmed_length(&self) -> f32 {
-        (self.trim_end_secs - self.trim_start_secs).max(0.05)
+        self.trim_ranges()
+            .into_iter()
+            .map(|(start, end)| (end - start).max(0.0))
+            .sum::<f32>()
+            .max(0.05)
     }
 
     pub fn clamp_trim(&mut self) {
@@ -149,6 +224,17 @@ impl SoundEffect {
             self.trim_end_secs = (self.trim_start_secs + 0.05).min(duration);
             self.trim_start_secs = (self.trim_end_secs - 0.05).max(0.0);
         }
+
+        if let (Some(cut_start), Some(cut_end)) = (self.cut_start_secs, self.cut_end_secs) {
+            let clamped_start = cut_start.clamp(self.trim_start_secs, self.trim_end_secs);
+            let clamped_end = cut_end.clamp(self.trim_start_secs, self.trim_end_secs);
+            if clamped_end - clamped_start > 0.001 {
+                self.cut_start_secs = Some(clamped_start);
+                self.cut_end_secs = Some(clamped_end);
+            } else {
+                self.clear_cutout();
+            }
+        }
     }
 
     pub fn needs_processed_export(&self) -> bool {
@@ -157,6 +243,7 @@ impl SoundEffect {
             || (self.speed - 1.0).abs() > EPSILON
             || self.trim_start_secs.abs() > EPSILON
             || (self.trim_end_secs - self.safe_duration()).abs() > 0.02
+            || self.has_cutout()
             || self.reverb_enabled
             || self.telephone_enabled
             || self.distortion_enabled

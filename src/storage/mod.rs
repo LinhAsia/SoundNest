@@ -137,6 +137,8 @@ impl Storage {
             speed: 1.0,
             trim_start_secs: 0.0,
             trim_end_secs: analysis.duration_secs,
+            cut_start_secs: None,
+            cut_end_secs: None,
             vocal_only: false,
             vocal_asset_file: None,
             music_only: false,
@@ -435,6 +437,14 @@ impl Storage {
         let speed = (sound.speed.clamp(0.25, 2.0) * 1000.0).round() as u32;
         let trim_start = (sound.trim_start_secs.max(0.0) * 1000.0).round() as u32;
         let trim_end = (sound.trim_end_secs.max(0.0) * 1000.0).round() as u32;
+        let cut_start = sound
+            .cut_start_secs
+            .map(|value| (value.max(0.0) * 1000.0).round() as u32)
+            .unwrap_or(0);
+        let cut_end = sound
+            .cut_end_secs
+            .map(|value| (value.max(0.0) * 1000.0).round() as u32)
+            .unwrap_or(0);
         let stem = if sound.music_only {
             "-music"
         } else if sound.vocal_only {
@@ -457,11 +467,13 @@ impl Storage {
             "".to_string()
         };
         format!(
-            "-proc-v{:04}-s{:04}-a{:06}-b{:06}{}{}{}{}{}{}{}{}",
+            "-proc-v{:04}-s{:04}-a{:06}-b{:06}-c{:06}-d{:06}{}{}{}{}{}{}{}{}",
             volume,
             speed,
             trim_start,
             trim_end,
+            cut_start,
+            cut_end,
             stem,
             reverb,
             telephone,
@@ -492,6 +504,8 @@ impl Storage {
             speed: 1.0,
             trim_start_secs: 0.0,
             trim_end_secs: analysis.duration_secs,
+            cut_start_secs: None,
+            cut_end_secs: None,
             vocal_only: false,
             vocal_asset_file: None,
             music_only: false,
@@ -612,6 +626,8 @@ impl Storage {
         updated.speed = 1.0;
         updated.trim_start_secs = 0.0;
         updated.trim_end_secs = updated.duration_secs;
+        updated.cut_start_secs = None;
+        updated.cut_end_secs = None;
         updated.vocal_only = false;
         updated.vocal_asset_file = None;
         updated.music_only = false;

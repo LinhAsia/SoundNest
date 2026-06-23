@@ -8,6 +8,8 @@ use std::path::Path;
 
 use super::SoundEffect;
 
+const EXPORT_POP_FADE_MS: f32 = 18.0;
+
 pub(super) struct AudioAnalysis {
     pub(super) duration_secs: f32,
     pub(super) waveform: Vec<f32>,
@@ -95,22 +97,6 @@ pub(super) fn write_processed_wav(
     let total_frames = decoded.samples.len() / channels as usize;
 
     let actual_duration = total_frames as f32 / sample_rate as f32;
-    let trim_start = sound.trim_start_secs.clamp(0.0, actual_duration);
-    let trim_end = if sound.trim_end_secs >= sound.safe_duration() - 0.02 {
-        actual_duration
-    } else {
-        sound.trim_end_secs.clamp(0.0, actual_duration)
-    };
-
-    let start_frame = ((trim_start * sample_rate as f32).floor() as usize).min(total_frames);
-    let end_frame = if trim_end >= actual_duration - 0.02 {
-        total_frames
-    } else {
-        ((trim_end * sample_rate as f32).ceil() as usize)
-            .min(total_frames)
-            .max(start_frame)
-    };
-
     let spec = WavSpec {
         channels,
         sample_rate: ((sample_rate as f32 * sound.speed.clamp(0.25, 2.0)).round() as u32).max(1),
@@ -121,9 +107,32 @@ pub(super) fn write_processed_wav(
     let mut writer =
         WavWriter::create(target_path, spec).context("unable to create exported wav file")?;
     let volume = sound.volume.clamp(0.0, 5.0);
-    let start_sample = start_frame * channels as usize;
-    let end_sample = end_frame * channels as usize;
-    let mut processed = decoded.samples[start_sample..end_sample].to_vec();
+    let mut processed = Vec::new();
+    for (range_start, range_end) in sound.trim_ranges() {
+        let range_end = if range_end >= actual_duration - 0.02 {
+            actual_duration
+        } else {
+            range_end.clamp(0.0, actual_duration)
+        };
+        let start_frame = ((range_start * sample_rate as f32).floor() as usize).min(total_frames);
+        let end_frame = if range_end >= actual_duration - 0.02 {
+            total_frames
+        } else {
+            ((range_end * sample_rate as f32).ceil() as usize)
+                .min(total_frames)
+                .max(start_frame)
+        };
+        let start_sample = start_frame * channels as usize;
+        let end_sample = end_frame * channels as usize;
+        if end_sample > start_sample {
+            processed.extend_from_slice(&decoded.samples[start_sample..end_sample]);
+        }
+    }
+    if processed.is_empty() {
+        processed
+            .extend_from_slice(&decoded.samples[..decoded.samples.len().min(channels as usize)]);
+    }
+    soften_sample_edges(&mut processed, channels, sample_rate, EXPORT_POP_FADE_MS);
     apply_sound_effects(&mut processed, channels, sample_rate, sound);
 
     for sample in &processed {
@@ -138,6 +147,35 @@ pub(super) fn write_processed_wav(
         .finalize()
         .context("unable to finalize exported wav file")?;
     Ok(())
+}
+
+fn soften_sample_edges(samples: &mut [f32], channels: u16, sample_rate: u32, fade_ms: f32) {
+    if samples.is_empty() || channels == 0 || sample_rate == 0 {
+        return;
+    }
+
+    let total_frames = samples.len() / channels as usize;
+    if total_frames < 2 {
+        return;
+    }
+
+    let fade_frames =
+        ((sample_rate as f32 * (fade_ms / 1000.0)).round() as usize).clamp(1, total_frames / 2);
+    if fade_frames == 0 {
+        return;
+    }
+
+    let denom = fade_frames.saturating_sub(1).max(1) as f32;
+    for frame in 0..fade_frames {
+        let fade_in = frame as f32 / denom;
+        let fade_out = (fade_frames.saturating_sub(1) - frame) as f32 / denom;
+        let start_base = frame * channels as usize;
+        let end_base = (total_frames - 1 - frame) * channels as usize;
+        for channel in 0..channels as usize {
+            samples[start_base + channel] *= fade_in;
+            samples[end_base + channel] *= fade_out;
+        }
+    }
 }
 
 pub fn apply_sound_effects(

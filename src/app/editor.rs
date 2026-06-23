@@ -2916,6 +2916,7 @@ impl SoundFxApp {
                 ui.label("S: preview from the left trim");
                 ui.label("Q: move the left trim to the mouse");
                 ui.label("W: move the right trim to the mouse");
+                ui.label("Right click: delete left / middle / right region");
                 ui.label("Ctrl + Z: undo trim");
                 ui.label("Ctrl + Shift + Z: redo trim");
                 ui.label("A / D: pan timeline left or right");
@@ -2985,6 +2986,24 @@ impl SoundFxApp {
                     let end_t = sound.trim_end_secs / duration;
                     let start_x = rect.left() + rect.width() * start_t.clamp(0.0, 1.0);
                     let end_x = rect.left() + rect.width() * end_t.clamp(0.0, 1.0);
+                    let cut_rect = if let (Some(cut_start), Some(cut_end)) =
+                        (sound.cut_start_secs, sound.cut_end_secs)
+                    {
+                        let cut_start_t = cut_start / duration;
+                        let cut_end_t = cut_end / duration;
+                        Some(Rect::from_min_max(
+                            Pos2::new(
+                                rect.left() + rect.width() * cut_start_t.clamp(0.0, 1.0),
+                                rect.top() + 10.0,
+                            ),
+                            Pos2::new(
+                                rect.left() + rect.width() * cut_end_t.clamp(0.0, 1.0),
+                                rect.bottom() - 10.0,
+                            ),
+                        ))
+                    } else {
+                        None
+                    };
 
                     Self::paint_waveform_bars(
                         &painter,
@@ -3008,6 +3027,17 @@ impl SoundFxApp {
                             Color32::from_rgba_premultiplied(227, 82, 149, 24)
                         },
                     );
+                    if let Some(cut_rect) = cut_rect {
+                        painter.rect_filled(
+                            cut_rect,
+                            12.0,
+                            if dark_theme {
+                                Color32::from_rgba_premultiplied(214, 51, 132, 72)
+                            } else {
+                                Color32::from_rgba_premultiplied(214, 51, 132, 52)
+                            },
+                        );
+                    }
 
                     let handle_stroke = Stroke::new(2.0, Color32::from_rgb(214, 51, 132));
                     painter.line_segment(
@@ -3058,10 +3088,51 @@ impl SoundFxApp {
                         .then(|| ui.ctx().input(|input| input.pointer.hover_pos()))
                         .flatten()
                         .filter(|pos| viewport_rect.contains(*pos));
+                    #[derive(Clone, Copy, PartialEq, Eq)]
+                    enum TrimDeleteRegion {
+                        Left,
+                        Middle,
+                        Right,
+                    }
                     let pointer_time = pointer_pos.map(|pointer| {
                         let ratio = ((pointer.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
                         ratio * duration
                     });
+                    let hovered_delete_region = pointer_pos.and_then(|pointer| {
+                        if pointer.x < start_x && sound.trim_start_secs > 0.001 {
+                            Some(TrimDeleteRegion::Left)
+                        } else if pointer.x > end_x && sound.trim_end_secs < duration - 0.001 {
+                            Some(TrimDeleteRegion::Right)
+                        } else if pointer.x >= start_x && pointer.x <= end_x {
+                            Some(TrimDeleteRegion::Middle)
+                        } else {
+                            None
+                        }
+                    });
+                    if let Some(region) = hovered_delete_region {
+                        let region_rect = match region {
+                            TrimDeleteRegion::Left => Some(Rect::from_min_max(
+                                Pos2::new(rect.left(), rect.top() + 10.0),
+                                Pos2::new(start_x.max(rect.left() + 2.0), rect.bottom() - 10.0),
+                            )),
+                            TrimDeleteRegion::Middle => Some(selection),
+                            TrimDeleteRegion::Right => Some(Rect::from_min_max(
+                                Pos2::new(end_x.min(rect.right() - 2.0), rect.top() + 10.0),
+                                Pos2::new(rect.right(), rect.bottom() - 10.0),
+                            )),
+                        };
+                        if let Some(region_rect) = region_rect {
+                            painter.rect_filled(
+                                region_rect,
+                                14.0,
+                                if dark_theme {
+                                    Color32::from_rgba_premultiplied(255, 120, 170, 24)
+                                } else {
+                                    Color32::from_rgba_premultiplied(214, 51, 132, 20)
+                                },
+                            );
+                        }
+                    }
                     let playhead_outline = if dark_theme {
                         Color32::from_rgba_premultiplied(8, 13, 19, 224)
                     } else {
@@ -3220,6 +3291,7 @@ impl SoundFxApp {
                         if let Some(pointer_time) = pointer_time {
                             if move_left {
                                 begin_trim_history(ui.ctx(), sound);
+                                sound.clear_cutout();
                                 sound.trim_start_secs =
                                     pointer_time.min(sound.trim_end_secs - 0.05);
                                 sound.clamp_trim();
@@ -3230,6 +3302,7 @@ impl SoundFxApp {
                             }
                             if move_right {
                                 begin_trim_history(ui.ctx(), sound);
+                                sound.clear_cutout();
                                 sound.trim_end_secs =
                                     pointer_time.max(sound.trim_start_secs + 0.05);
                                 sound.clamp_trim();
@@ -3255,11 +3328,44 @@ impl SoundFxApp {
                     }
 
                     if interactive
+                        && response.secondary_clicked()
+                        && let Some(region) = hovered_delete_region
+                    {
+                        let before = TrimSnapshot::from_sound(sound);
+                        match region {
+                            TrimDeleteRegion::Left => {
+                                sound.clear_cutout();
+                                sound.trim_end_secs = duration;
+                            }
+                            TrimDeleteRegion::Middle => {
+                                sound.trim_start_secs = 0.0;
+                                sound.trim_end_secs = duration;
+                                sound.cut_start_secs = Some(start_t * duration);
+                                sound.cut_end_secs = Some(end_t * duration);
+                            }
+                            TrimDeleteRegion::Right => {
+                                sound.clear_cutout();
+                                sound.trim_start_secs = 0.0;
+                            }
+                        }
+                        sound.clamp_trim();
+                        changed = true;
+                        preview_commit_requested = true;
+                        trim_history_commit = Some(before);
+                        ui.ctx().data_mut(|data| {
+                            data.remove::<TrimSnapshot>(trim_history_snapshot_id);
+                            data.remove::<bool>(trim_adjusting_id);
+                            data.remove::<bool>(trim_hotkey_adjusting_id);
+                        });
+                    }
+
+                    if interactive
                         && duration > 0.0
                         && let Some(pointer) = start_response.interact_pointer_pos()
                         && (start_response.clicked() || start_response.dragged())
                     {
                         begin_trim_history(ui.ctx(), sound);
+                        sound.clear_cutout();
                         let ratio = ((pointer.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
                         let next = ratio * duration;
                         sound.trim_start_secs = next.min(sound.trim_end_secs - 0.05);
@@ -3281,6 +3387,7 @@ impl SoundFxApp {
                         && (end_response.clicked() || end_response.dragged())
                     {
                         begin_trim_history(ui.ctx(), sound);
+                        sound.clear_cutout();
                         let ratio = ((pointer.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
                         let next = ratio * duration;
                         sound.trim_end_secs = next.max(sound.trim_start_secs + 0.05);
