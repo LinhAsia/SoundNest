@@ -123,6 +123,7 @@ mod library;
 mod library_filtering;
 mod library_folder_views;
 mod library_helpers;
+mod library_import_panel;
 mod library_jobs;
 mod library_row_helpers;
 mod media_panels;
