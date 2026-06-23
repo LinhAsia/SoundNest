@@ -121,6 +121,7 @@ mod importing;
 mod layout;
 mod library;
 mod library_filtering;
+mod library_folder_views;
 mod library_helpers;
 mod library_jobs;
 mod library_row_helpers;
