@@ -2,6 +2,8 @@ use super::*;
 #[cfg(windows)]
 use clipboard_win::Getter;
 
+const TRIM_HISTORY_LIMIT: usize = 128;
+
 impl SoundFxApp {
     pub(super) fn sync_editor_tags_input(&mut self) {
         let Some(index) = self.selected_sound_index() else {
@@ -22,6 +24,7 @@ impl SoundFxApp {
         };
 
         let sound = self.sounds.remove(index);
+        self.clear_trim_history_for_sound(sound.id);
         if let Some(audio) = self.audio.as_mut() {
             if audio.is_playing(sound.id) {
                 audio.stop();
@@ -58,6 +61,115 @@ impl SoundFxApp {
 
     pub(super) fn duplicate_selected_trimmed_sound(&mut self, ctx: &Context) {
         self.start_trim_commit_job(ctx, true);
+    }
+
+    fn push_trim_history_entry(stack: &mut Vec<TrimSnapshot>, snapshot: TrimSnapshot) {
+        stack.push(snapshot);
+        if stack.len() > TRIM_HISTORY_LIMIT {
+            stack.remove(0);
+        }
+    }
+
+    fn clear_trim_history_for_sound(&mut self, sound_id: Uuid) {
+        self.trim_undo_stack
+            .retain(|snapshot| snapshot.sound_id != sound_id);
+        self.trim_redo_stack
+            .retain(|snapshot| snapshot.sound_id != sound_id);
+    }
+
+    fn push_trim_undo_snapshot(&mut self, before: TrimSnapshot, after: TrimSnapshot) {
+        if before != after {
+            Self::push_trim_history_entry(&mut self.trim_undo_stack, before);
+            self.trim_redo_stack.clear();
+        }
+    }
+
+    fn apply_selected_trim_snapshot(&mut self, snapshot: TrimSnapshot, ctx: &Context) -> bool {
+        let Some(index) = self.selected_sound_index() else {
+            return false;
+        };
+        let (sound_id, sound_duration, clamped_cursor) = {
+            let sound = &mut self.sounds[index];
+            if sound.id != snapshot.sound_id || snapshot.matches_sound(sound) {
+                return false;
+            }
+
+            snapshot.apply_to(sound);
+            let current_cursor = self
+                .preview_cursor
+                .and_then(|(preview_sound_id, secs)| (preview_sound_id == sound.id).then_some(secs))
+                .unwrap_or(sound.trim_start_secs);
+            let clamped_cursor = current_cursor.clamp(sound.trim_start_secs, sound.trim_end_secs);
+            (sound.id, sound.safe_duration(), clamped_cursor)
+        };
+
+        self.set_preview_cursor_secs(sound_id, clamped_cursor, sound_duration);
+        if self
+            .audio
+            .as_ref()
+            .is_some_and(|audio| audio.is_playing(sound_id))
+        {
+            self.stop_preview();
+        }
+        self.schedule_processed_export(sound_id);
+        self.mark_dirty(ctx);
+        ctx.request_repaint();
+        true
+    }
+
+    pub(super) fn handle_trim_undo_redo(&mut self, ctx: &Context) {
+        if self.is_transition_active()
+            || self.show_record_review_panel
+            || self.has_modal_panel()
+            || ctx.wants_keyboard_input()
+        {
+            return;
+        }
+
+        let Some(index) = self.selected_sound_index() else {
+            return;
+        };
+        let sound_id = self.sounds[index].id;
+        let undo_modifiers = egui::Modifiers {
+            ctrl: true,
+            ..Default::default()
+        };
+        let redo_modifiers = egui::Modifiers {
+            ctrl: true,
+            shift: true,
+            ..Default::default()
+        };
+
+        if ctx.input_mut(|input| input.consume_key(redo_modifiers, egui::Key::Z)) {
+            let Some(position) = self
+                .trim_redo_stack
+                .iter()
+                .rposition(|snapshot| snapshot.sound_id == sound_id)
+            else {
+                return;
+            };
+            let current = TrimSnapshot::from_sound(&self.sounds[index]);
+            let snapshot = self.trim_redo_stack.remove(position);
+            if self.apply_selected_trim_snapshot(snapshot, ctx) {
+                Self::push_trim_history_entry(&mut self.trim_undo_stack, current);
+            }
+            return;
+        }
+
+        if ctx.input_mut(|input| input.consume_key(undo_modifiers, egui::Key::Z)) {
+            let Some(position) = self
+                .trim_undo_stack
+                .iter()
+                .rposition(|snapshot| snapshot.sound_id == sound_id)
+            else {
+                return;
+            };
+            let current = TrimSnapshot::from_sound(&self.sounds[index]);
+            let snapshot = self.trim_undo_stack.remove(position);
+            if self.apply_selected_trim_snapshot(snapshot, ctx) {
+                Self::push_trim_history_entry(&mut self.trim_redo_stack, current);
+            }
+        }
     }
 
     pub(super) fn start_trim_commit_job(&mut self, ctx: &Context, keep_old: bool) {
@@ -1229,17 +1341,21 @@ impl SoundFxApp {
                     .corner_radius(30.0)
                     .inner_margin(Margin::same(22))
                     .show(ui, |ui| {
-                        let (timeline_changed, timeline_seek_request, timeline_preview_commit) =
-                            Self::draw_trim_timeline(
-                                ui,
-                                &mut draft.sound,
-                                &waveform_samples,
-                                &mut preview_cursor_secs,
-                                &mut trim_timeline_zoom,
-                                !is_playing,
-                                true,
-                                false,
-                            );
+                        let (
+                            timeline_changed,
+                            timeline_seek_request,
+                            timeline_preview_commit,
+                            _timeline_trim_history_commit,
+                        ) = Self::draw_trim_timeline(
+                            ui,
+                            &mut draft.sound,
+                            &waveform_samples,
+                            &mut preview_cursor_secs,
+                            &mut trim_timeline_zoom,
+                            !is_playing,
+                            true,
+                            false,
+                        );
                         changed |= timeline_changed;
                         seek_request |= timeline_seek_request;
                         if timeline_preview_commit {
@@ -1805,6 +1921,12 @@ impl SoundFxApp {
     }
 
     pub(super) fn draw_editor(&mut self, ui: &mut Ui, ctx: &Context) {
+        if self.selected_sound_index().is_none() {
+            self.draw_empty_editor(ui);
+            return;
+        }
+
+        self.handle_trim_undo_redo(ctx);
         let Some(index) = self.selected_sound_index() else {
             self.draw_empty_editor(ui);
             return;
@@ -1885,6 +2007,7 @@ impl SoundFxApp {
         let mut stop_music_job = false;
         let mut changed = false;
         let mut processed_export_dirty = false;
+        let mut trim_history_commit: Option<TrimSnapshot> = None;
         let mut tags_changed = false;
         let mut vocal_reapply_request = false;
         let mut trim_timeline_zoom = self.trim_timeline_zoom;
@@ -2091,23 +2214,28 @@ impl SoundFxApp {
                     .corner_radius(30.0)
                     .inner_margin(Margin::same(22))
                     .show(ui, |ui| {
-                        let (timeline_changed, timeline_seek_request, timeline_preview_commit) =
-                            Self::draw_trim_timeline(
-                                ui,
-                                sound,
-                                &waveform_samples,
-                                &mut preview_cursor_secs,
-                                &mut trim_timeline_zoom,
-                                !is_playing,
-                                editor_timeline_interactive,
-                                editor_audio_loading,
-                            );
+                        let (
+                            timeline_changed,
+                            timeline_seek_request,
+                            timeline_preview_commit,
+                            timeline_trim_history_commit,
+                        ) = Self::draw_trim_timeline(
+                            ui,
+                            sound,
+                            &waveform_samples,
+                            &mut preview_cursor_secs,
+                            &mut trim_timeline_zoom,
+                            !is_playing,
+                            editor_timeline_interactive,
+                            editor_audio_loading,
+                        );
                         changed |= timeline_changed;
                         seek_request |= timeline_seek_request;
                         if timeline_preview_commit {
                             seek_request = true;
                             processed_export_dirty = true;
                         }
+                        trim_history_commit = timeline_trim_history_commit;
                     });
 
                 ui.add_space(18.0);
@@ -2592,6 +2720,10 @@ impl SoundFxApp {
         let sound_id = self.sounds[index].id;
         let sound_duration = self.sounds[index].safe_duration();
         self.trim_timeline_zoom = trim_timeline_zoom;
+        if let Some(snapshot) = trim_history_commit {
+            let current = TrimSnapshot::from_sound(&self.sounds[index]);
+            self.push_trim_undo_snapshot(snapshot, current);
+        }
         if tags_changed {
             let tags = Self::parse_tags(&self.editor_tags_input);
             self.sounds[index].tags = tags;
@@ -2704,7 +2836,7 @@ impl SoundFxApp {
         clamp_cursor_to_trim: bool,
         interactive: bool,
         show_loading_indicator: bool,
-    ) -> (bool, bool, bool) {
+    ) -> (bool, bool, bool, Option<TrimSnapshot>) {
         sound.clamp_trim();
         let duration = sound.safe_duration();
         *preview_cursor_secs = if clamp_cursor_to_trim {
@@ -2748,6 +2880,8 @@ impl SoundFxApp {
                 ui.label("S: preview from the left trim");
                 ui.label("Q: move the left trim to the mouse");
                 ui.label("W: move the right trim to the mouse");
+                ui.label("Ctrl + Z: undo trim");
+                ui.label("Ctrl + Shift + Z: redo trim");
                 ui.label("A / D: pan timeline left or right");
                 ui.label("Ctrl + mouse wheel: zoom around the hover playhead");
             });
@@ -2765,6 +2899,7 @@ impl SoundFxApp {
         let zoom_scroll_offset_id = egui::Id::new((sound.id, "trim-zoom-offset"));
         let trim_adjusting_id = egui::Id::new((sound.id, "trim-adjusting"));
         let trim_hotkey_adjusting_id = egui::Id::new((sound.id, "trim-hotkey-adjusting"));
+        let trim_history_snapshot_id = egui::Id::new((sound.id, "trim-history-snapshot"));
         let stored_zoom_scroll_offset = ui
             .ctx()
             .data(|data| data.get_temp::<f32>(zoom_scroll_offset_id));
@@ -2774,6 +2909,7 @@ impl SoundFxApp {
         let mut changed = false;
         let mut seek_requested = false;
         let mut preview_commit_requested = false;
+        let mut trim_history_commit = None;
 
         ui.allocate_ui_with_layout(
             vec2(viewport_width, timeline_size.y + 10.0),
@@ -2988,6 +3124,30 @@ impl SoundFxApp {
                         ui.ctx().request_repaint();
                     }
 
+                    let begin_trim_history = |ctx: &Context, sound: &SoundEffect| {
+                        if ctx
+                            .data(|data| data.get_temp::<TrimSnapshot>(trim_history_snapshot_id))
+                            .is_none()
+                        {
+                            ctx.data_mut(|data| {
+                                data.insert_temp(
+                                    trim_history_snapshot_id,
+                                    TrimSnapshot::from_sound(sound),
+                                );
+                            });
+                        }
+                    };
+                    let take_trim_history = |ctx: &Context| {
+                        let snapshot = ctx
+                            .data(|data| data.get_temp::<TrimSnapshot>(trim_history_snapshot_id));
+                        if snapshot.is_some() {
+                            ctx.data_mut(|data| {
+                                data.remove::<TrimSnapshot>(trim_history_snapshot_id);
+                            });
+                        }
+                        snapshot
+                    };
+
                     if interactive && pointer_pos.is_some() && !ui.ctx().wants_keyboard_input() {
                         let zoom_delta = ui.input(|input| {
                             if input.modifiers.ctrl {
@@ -3023,6 +3183,7 @@ impl SoundFxApp {
 
                         if let Some(pointer_time) = pointer_time {
                             if move_left {
+                                begin_trim_history(ui.ctx(), sound);
                                 sound.trim_start_secs =
                                     pointer_time.min(sound.trim_end_secs - 0.05);
                                 sound.clamp_trim();
@@ -3032,6 +3193,7 @@ impl SoundFxApp {
                                 });
                             }
                             if move_right {
+                                begin_trim_history(ui.ctx(), sound);
                                 sound.trim_end_secs =
                                     pointer_time.max(sound.trim_start_secs + 0.05);
                                 sound.clamp_trim();
@@ -3050,6 +3212,7 @@ impl SoundFxApp {
                                 .unwrap_or(false)
                         {
                             preview_commit_requested = true;
+                            trim_history_commit = take_trim_history(ui.ctx());
                             ui.ctx()
                                 .data_mut(|data| data.remove::<bool>(trim_hotkey_adjusting_id));
                         }
@@ -3060,6 +3223,7 @@ impl SoundFxApp {
                         && let Some(pointer) = start_response.interact_pointer_pos()
                         && (start_response.clicked() || start_response.dragged())
                     {
+                        begin_trim_history(ui.ctx(), sound);
                         let ratio = ((pointer.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
                         let next = ratio * duration;
                         sound.trim_start_secs = next.min(sound.trim_end_secs - 0.05);
@@ -3071,6 +3235,7 @@ impl SoundFxApp {
                             .data_mut(|data| data.remove::<bool>(playhead_drag_id));
                         if start_response.clicked() {
                             preview_commit_requested = true;
+                            trim_history_commit = take_trim_history(ui.ctx());
                             ui.ctx()
                                 .data_mut(|data| data.remove::<bool>(trim_adjusting_id));
                         }
@@ -3079,6 +3244,7 @@ impl SoundFxApp {
                         && let Some(pointer) = end_response.interact_pointer_pos()
                         && (end_response.clicked() || end_response.dragged())
                     {
+                        begin_trim_history(ui.ctx(), sound);
                         let ratio = ((pointer.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
                         let next = ratio * duration;
                         sound.trim_end_secs = next.max(sound.trim_start_secs + 0.05);
@@ -3090,6 +3256,7 @@ impl SoundFxApp {
                             .data_mut(|data| data.remove::<bool>(playhead_drag_id));
                         if end_response.clicked() {
                             preview_commit_requested = true;
+                            trim_history_commit = take_trim_history(ui.ctx());
                             ui.ctx()
                                 .data_mut(|data| data.remove::<bool>(trim_adjusting_id));
                         }
@@ -3132,6 +3299,7 @@ impl SoundFxApp {
                             .unwrap_or(false)
                     {
                         preview_commit_requested = true;
+                        trim_history_commit = take_trim_history(ui.ctx());
                         ui.ctx()
                             .data_mut(|data| data.remove::<bool>(trim_adjusting_id));
                     }
@@ -3145,6 +3313,7 @@ impl SoundFxApp {
                             .unwrap_or(false)
                         {
                             preview_commit_requested = true;
+                            trim_history_commit = take_trim_history(ui.ctx());
                             ui.ctx()
                                 .data_mut(|data| data.remove::<bool>(trim_adjusting_id));
                         }
@@ -3166,10 +3335,25 @@ impl SoundFxApp {
                             *preview_cursor_secs = clamped_cursor;
                             if trim_adjusting_active {
                                 preview_commit_requested = true;
+                                if trim_history_commit.is_none() {
+                                    trim_history_commit = take_trim_history(ui.ctx());
+                                }
                             } else {
                                 seek_requested = true;
                             }
                         }
+                    }
+
+                    if trim_history_commit.is_none()
+                        && !ui.input(|input| {
+                            input.pointer.primary_down()
+                                || input.key_down(egui::Key::Q)
+                                || input.key_down(egui::Key::W)
+                        })
+                    {
+                        ui.ctx().data_mut(|data| {
+                            data.remove::<TrimSnapshot>(trim_history_snapshot_id);
+                        });
                     }
                 });
                 let scroll_offset = requested_scroll_offset
@@ -3213,7 +3397,12 @@ impl SoundFxApp {
             );
         });
 
-        (changed, seek_requested, preview_commit_requested)
+        (
+            changed,
+            seek_requested,
+            preview_commit_requested,
+            trim_history_commit,
+        )
     }
 
     pub(super) fn render_trim_commit_panel(&mut self, ctx: &Context) {

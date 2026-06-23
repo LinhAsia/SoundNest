@@ -123,6 +123,39 @@ pub(super) enum DownloadSiteKind {
     GoogleDrive,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct TrimSnapshot {
+    pub(crate) sound_id: Uuid,
+    pub(crate) trim_start_secs: f32,
+    pub(crate) trim_end_secs: f32,
+}
+
+impl TrimSnapshot {
+    pub(crate) fn from_sound(sound: &SoundEffect) -> Self {
+        Self {
+            sound_id: sound.id,
+            trim_start_secs: sound.trim_start_secs,
+            trim_end_secs: sound.trim_end_secs,
+        }
+    }
+
+    pub(crate) fn matches_sound(self, sound: &SoundEffect) -> bool {
+        const EPSILON: f32 = 0.000_5;
+        self.sound_id == sound.id
+            && (self.trim_start_secs - sound.trim_start_secs).abs() <= EPSILON
+            && (self.trim_end_secs - sound.trim_end_secs).abs() <= EPSILON
+    }
+
+    pub(crate) fn apply_to(self, sound: &mut SoundEffect) {
+        if self.sound_id != sound.id {
+            return;
+        }
+        sound.trim_start_secs = self.trim_start_secs;
+        sound.trim_end_secs = self.trim_end_secs;
+        sound.clamp_trim();
+    }
+}
+
 pub struct SoundFxApp {
     pub(super) storage: Storage,
     pub(super) audio: Option<AudioEngine>,
@@ -282,6 +315,8 @@ pub struct SoundFxApp {
     pub(super) pending_preview_after_preload: Option<(Uuid, Option<f32>)>,
     pub(super) normalize_inflight: HashSet<Uuid>,
     pub(super) trim_commit_inflight: HashSet<Uuid>,
+    pub(super) trim_undo_stack: Vec<TrimSnapshot>,
+    pub(super) trim_redo_stack: Vec<TrimSnapshot>,
     pub(super) processed_export_inflight: HashSet<PathBuf>,
     pub(super) processed_export_tx: Sender<ProcessedExportMessage>,
     pub(super) processed_export_rx: Receiver<ProcessedExportMessage>,
@@ -617,6 +652,8 @@ impl SoundFxApp {
             pending_preview_after_preload: None,
             normalize_inflight: HashSet::new(),
             trim_commit_inflight: HashSet::new(),
+            trim_undo_stack: Vec::new(),
+            trim_redo_stack: Vec::new(),
             processed_export_inflight: HashSet::new(),
             processed_export_tx,
             processed_export_rx,
