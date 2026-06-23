@@ -52,18 +52,14 @@ impl SoundFxApp {
                 });
 
                 ui.add_space(12.0);
-                Frame::new()
-                    .fill(Self::surface_fill())
-                    .stroke(Stroke::new(1.0, Self::border_color()))
-                    .corner_radius(18.0)
-                    .inner_margin(Margin::symmetric(14, 10))
-                    .show(ui, |ui| {
-                        ui.add(
-                            TextEdit::singleline(&mut self.record_name)
-                                .desired_width(f32::INFINITY)
-                                .hint_text("recording"),
-                        );
-                    });
+                Self::with_input_widget_visuals(ui, |ui| {
+                    ui.add_sized(
+                        [ui.available_width(), 40.0],
+                        TextEdit::singleline(&mut self.record_name)
+                            .desired_width(f32::INFINITY)
+                            .hint_text("recording"),
+                    );
+                });
 
                 ui.add_space(12.0);
                 ui.add_enabled_ui(!snapshot.running, |ui| {
@@ -184,49 +180,42 @@ impl SoundFxApp {
 
                 ui.add_space(10.0);
                 ui.add_enabled_ui(!snapshot.running, |ui| {
-                    Frame::new()
-                        .fill(Self::surface_fill())
-                        .stroke(Stroke::new(1.0, Self::border_color()))
-                        .corner_radius(18.0)
-                        .inner_margin(Margin::symmetric(12, 8))
-                        .show(ui, |ui| {
-                            ui.set_width(ui.available_width());
-                            if self.record_input_source == PitchInputSource::Microphone {
-                                Self::with_dark_combo_visuals(ui, |ui| {
-                                    ComboBox::from_id_salt("record-input-device")
-                                        .width(ui.available_width() - 4.0)
-                                        .selected_text(
-                                            RichText::new(
-                                                self.selected_record_input_device
-                                                    .as_deref()
-                                                    .map(|name| {
-                                                        Self::truncate_middle_ascii(name, 28)
-                                                    })
-                                                    .unwrap_or_else(|| "No mic".to_owned()),
-                                            )
-                                            .color(Self::strong_text_color()),
-                                        )
-                                        .show_ui(ui, |ui| {
-                                            for name in &self.record_capture_devices {
-                                                ui.selectable_value(
-                                                    &mut self.selected_record_input_device,
-                                                    Some(name.clone()),
-                                                    Self::truncate_middle_ascii(name, 38),
-                                                );
-                                            }
-                                        });
+                    ui.set_width(ui.available_width());
+                    if self.record_input_source == PitchInputSource::Microphone {
+                        Self::with_dark_combo_visuals(ui, |ui| {
+                            ComboBox::from_id_salt("record-input-device")
+                                .width(ui.available_width())
+                                .selected_text(
+                                    RichText::new(
+                                        self.selected_record_input_device
+                                            .as_deref()
+                                            .map(|name| Self::truncate_middle_ascii(name, 28))
+                                            .unwrap_or_else(|| "No mic".to_owned()),
+                                    )
+                                    .color(Self::strong_text_color()),
+                                )
+                                .show_ui(ui, |ui| {
+                                    for name in &self.record_capture_devices {
+                                        ui.selectable_value(
+                                            &mut self.selected_record_input_device,
+                                            Some(name.clone()),
+                                            Self::truncate_middle_ascii(name, 38),
+                                        );
+                                    }
                                 });
-                            } else {
-                                ui.add_sized(
-                                    [ui.available_width(), 20.0],
-                                    egui::Label::new(
-                                        RichText::new("System output")
-                                            .size(13.0)
-                                            .color(Self::muted_text_color()),
-                                    ),
-                                );
-                            }
                         });
+                    } else {
+                        Self::with_input_widget_visuals(ui, |ui| {
+                            ui.add_sized(
+                                [ui.available_width(), 36.0],
+                                egui::Label::new(
+                                    RichText::new("System output")
+                                        .size(13.0)
+                                        .color(Self::muted_text_color()),
+                                ),
+                            );
+                        });
+                    }
                 });
 
                 ui.add_space(14.0);
@@ -687,87 +676,31 @@ impl SoundFxApp {
                         .color(Self::muted_text_color()),
                 );
                 ui.add_space(10.0);
-                Frame::new()
-                    .fill(Self::panel_fill())
-                    .stroke(Stroke::new(1.0, Self::subtle_border_color()))
-                    .corner_radius(18.0)
-                    .inner_margin(Margin::symmetric(12, 8))
-                    .show(ui, |ui| {
-                        ui.scope(|ui| {
-                            if Self::dark_theme_enabled() {
-                                let visuals = &mut ui.style_mut().visuals;
-                                visuals.extreme_bg_color = Color32::from_rgb(28, 24, 33);
-                                visuals.faint_bg_color = Color32::from_rgb(33, 28, 39);
-                                visuals.widgets.inactive.bg_fill = Color32::from_rgb(28, 24, 33);
-                                visuals.widgets.inactive.weak_bg_fill =
-                                    Color32::from_rgb(28, 24, 33);
-                                visuals.widgets.inactive.bg_stroke.color =
-                                    Color32::from_rgb(88, 70, 96);
-                                visuals.widgets.hovered.bg_fill = Color32::from_rgb(43, 35, 48);
-                                visuals.widgets.hovered.weak_bg_fill =
-                                    Color32::from_rgb(43, 35, 48);
-                                visuals.widgets.hovered.bg_stroke.color =
-                                    Color32::from_rgb(230, 94, 150);
-                                visuals.widgets.active.bg_fill = Color32::from_rgb(53, 41, 58);
-                                visuals.widgets.active.weak_bg_fill = Color32::from_rgb(53, 41, 58);
-                                visuals.widgets.active.bg_stroke.color =
-                                    Color32::from_rgb(230, 94, 150);
-                                visuals.selection.bg_fill = Color32::from_rgb(227, 82, 149);
-                                visuals.selection.stroke.color = Color32::WHITE;
-                                visuals.override_text_color =
-                                    Some(Color32::from_rgb(246, 233, 241));
-                            } else {
-                                let visuals = &mut ui.style_mut().visuals;
-                                visuals.extreme_bg_color = Color32::from_rgb(255, 251, 254);
-                                visuals.faint_bg_color = Color32::from_rgb(247, 240, 246);
-                                visuals.widgets.inactive.bg_fill = Color32::from_rgb(255, 251, 254);
-                                visuals.widgets.inactive.weak_bg_fill =
-                                    Color32::from_rgb(255, 251, 254);
-                                visuals.widgets.inactive.bg_stroke.color =
-                                    Color32::from_rgb(227, 214, 223);
-                                visuals.widgets.hovered.bg_fill = Color32::from_rgb(255, 244, 250);
-                                visuals.widgets.hovered.weak_bg_fill =
-                                    Color32::from_rgb(255, 244, 250);
-                                visuals.widgets.hovered.bg_stroke.color =
-                                    Color32::from_rgb(230, 94, 150);
-                                visuals.widgets.active.bg_fill = Color32::from_rgb(255, 238, 247);
-                                visuals.widgets.active.weak_bg_fill =
-                                    Color32::from_rgb(255, 238, 247);
-                                visuals.widgets.active.bg_stroke.color =
-                                    Color32::from_rgb(230, 94, 150);
-                                visuals.selection.bg_fill =
-                                    Color32::from_rgba_premultiplied(227, 82, 149, 48);
-                                visuals.selection.stroke.color = Color32::from_rgb(79, 58, 72);
-                                visuals.override_text_color = Some(Color32::from_rgb(52, 44, 51));
+                Self::with_dark_combo_visuals(ui, |ui| {
+                    ComboBox::from_id_salt(combo_id)
+                        .width(ui.available_width())
+                        .selected_text(
+                            RichText::new(
+                                candidate
+                                    .and_then(|id| {
+                                        sounds.iter().find(|sound| sound.id == id).map(|sound| {
+                                            Self::truncate_middle_ascii(&sound.name, 28)
+                                        })
+                                    })
+                                    .unwrap_or_else(|| "Choose sound".to_owned()),
+                            )
+                            .color(Self::strong_text_color()),
+                        )
+                        .show_ui(ui, |ui| {
+                            for sound in sounds {
+                                ui.selectable_value(
+                                    candidate,
+                                    Some(sound.id),
+                                    Self::truncate_middle_ascii(&sound.name, 34),
+                                );
                             }
-
-                            ComboBox::from_id_salt(combo_id)
-                                .width(ui.available_width() - 4.0)
-                                .selected_text(
-                                    RichText::new(
-                                        candidate
-                                            .and_then(|id| {
-                                                sounds.iter().find(|sound| sound.id == id).map(
-                                                    |sound| {
-                                                        Self::truncate_middle_ascii(&sound.name, 28)
-                                                    },
-                                                )
-                                            })
-                                            .unwrap_or_else(|| "Choose sound".to_owned()),
-                                    )
-                                    .color(Self::strong_text_color()),
-                                )
-                                .show_ui(ui, |ui| {
-                                    for sound in sounds {
-                                        ui.selectable_value(
-                                            candidate,
-                                            Some(sound.id),
-                                            Self::truncate_middle_ascii(&sound.name, 34),
-                                        );
-                                    }
-                                });
                         });
-                    });
+                });
                 ui.add_space(10.0);
                 ui.horizontal(|ui| {
                     let save = ui.add_sized(

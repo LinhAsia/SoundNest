@@ -32,6 +32,54 @@ impl SoundFxApp {
         }
     }
 
+    pub(crate) fn input_stroke_color() -> Color32 {
+        if Self::dark_theme_enabled() {
+            Color32::from_rgb(88, 70, 96)
+        } else {
+            Color32::from_rgb(214, 201, 212)
+        }
+    }
+
+    pub(crate) fn input_hover_stroke_color() -> Color32 {
+        if Self::dark_theme_enabled() {
+            Color32::from_rgb(230, 94, 150)
+        } else {
+            Color32::from_rgb(214, 51, 132)
+        }
+    }
+
+    pub(crate) fn with_input_widget_visuals<R>(
+        ui: &mut Ui,
+        add_contents: impl FnOnce(&mut Ui) -> R,
+    ) -> R {
+        ui.scope(|ui| {
+            let visuals = &mut ui.style_mut().visuals;
+            let fill = Self::input_fill();
+            let border = Self::input_stroke_color();
+            let hover = Self::input_hover_stroke_color();
+
+            visuals.extreme_bg_color = fill;
+            visuals.faint_bg_color = fill;
+            visuals.widgets.noninteractive.bg_fill = fill;
+            visuals.widgets.noninteractive.weak_bg_fill = fill;
+            visuals.widgets.noninteractive.bg_stroke.color = border;
+            visuals.widgets.inactive.bg_fill = fill;
+            visuals.widgets.inactive.weak_bg_fill = fill;
+            visuals.widgets.inactive.bg_stroke.color = border;
+            visuals.widgets.hovered.bg_fill = fill;
+            visuals.widgets.hovered.weak_bg_fill = fill;
+            visuals.widgets.hovered.bg_stroke.color = hover;
+            visuals.widgets.active.bg_fill = fill;
+            visuals.widgets.active.weak_bg_fill = fill;
+            visuals.widgets.active.bg_stroke.color = hover;
+            visuals.selection.bg_fill = Color32::from_rgb(227, 82, 149);
+            visuals.selection.stroke.color = Color32::WHITE;
+            visuals.override_text_color = Some(Self::strong_text_color());
+            add_contents(ui)
+        })
+        .inner
+    }
+
     pub(crate) fn with_slider_visuals<R>(
         ui: &mut Ui,
         add_contents: impl FnOnce(&mut Ui) -> R,
@@ -239,30 +287,7 @@ impl SoundFxApp {
         ui: &mut Ui,
         add_contents: impl FnOnce(&mut Ui) -> R,
     ) -> R {
-        ui.scope(|ui| {
-            if Self::dark_theme_enabled() {
-                let visuals = &mut ui.style_mut().visuals;
-                visuals.extreme_bg_color = Color32::from_rgb(28, 24, 33);
-                visuals.faint_bg_color = Color32::from_rgb(33, 28, 39);
-                visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(28, 24, 33);
-                visuals.widgets.noninteractive.weak_bg_fill = Color32::from_rgb(28, 24, 33);
-                visuals.widgets.noninteractive.bg_stroke.color = Color32::from_rgb(88, 70, 96);
-                visuals.widgets.inactive.bg_fill = Color32::from_rgb(28, 24, 33);
-                visuals.widgets.inactive.weak_bg_fill = Color32::from_rgb(28, 24, 33);
-                visuals.widgets.inactive.bg_stroke.color = Color32::from_rgb(88, 70, 96);
-                visuals.widgets.hovered.bg_fill = Color32::from_rgb(43, 35, 48);
-                visuals.widgets.hovered.weak_bg_fill = Color32::from_rgb(43, 35, 48);
-                visuals.widgets.hovered.bg_stroke.color = Color32::from_rgb(230, 94, 150);
-                visuals.widgets.active.bg_fill = Color32::from_rgb(53, 41, 58);
-                visuals.widgets.active.weak_bg_fill = Color32::from_rgb(53, 41, 58);
-                visuals.widgets.active.bg_stroke.color = Color32::from_rgb(230, 94, 150);
-                visuals.selection.bg_fill = Color32::from_rgb(227, 82, 149);
-                visuals.selection.stroke.color = Color32::WHITE;
-                visuals.override_text_color = Some(Color32::from_rgb(246, 233, 241));
-            }
-            add_contents(ui)
-        })
-        .inner
+        Self::with_input_widget_visuals(ui, add_contents)
     }
 
     pub(crate) fn shadow_color() -> Color32 {

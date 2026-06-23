@@ -870,12 +870,14 @@ impl SoundFxApp {
                                 .color(Self::muted_text_color()),
                         );
                         ui.add_space(4.0);
-                        let name_response = ui.add_sized(
-                            [column_width, 30.0],
-                            TextEdit::singleline(&mut self.tts_output_name)
-                                .hint_text("gemini tts")
-                                .desired_width(f32::INFINITY),
-                        );
+                        let name_response = Self::with_input_widget_visuals(ui, |ui| {
+                            ui.add_sized(
+                                [column_width, 30.0],
+                                TextEdit::singleline(&mut self.tts_output_name)
+                                    .hint_text("gemini tts")
+                                    .desired_width(f32::INFINITY),
+                            )
+                        });
                         draft_changed |= name_response.changed();
                     });
                 });
@@ -944,15 +946,19 @@ impl SoundFxApp {
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = action_gap;
                             let preset_name_hint = self.t("download.preset_name");
-                            let preset_response = ui.add_sized(
-                                [
-                                    (column_width - action_button_width * 2.0 - action_gap * 2.0)
-                                        .max(84.0),
-                                    30.0,
-                                ],
-                                TextEdit::singleline(&mut self.tts_preset_name)
-                                    .hint_text(preset_name_hint),
-                            );
+                            let preset_response = Self::with_input_widget_visuals(ui, |ui| {
+                                ui.add_sized(
+                                    [
+                                        (column_width
+                                            - action_button_width * 2.0
+                                            - action_gap * 2.0)
+                                            .max(84.0),
+                                        30.0,
+                                    ],
+                                    TextEdit::singleline(&mut self.tts_preset_name)
+                                        .hint_text(preset_name_hint),
+                                )
+                            });
                             draft_changed |= preset_response.changed();
 
                             let save = ui.add_sized(
@@ -1001,22 +1007,26 @@ impl SoundFxApp {
                 );
                 ui.add_space(6.0);
                 let direction_hint = self.t("download.direction_hint");
-                let direction_response = ui.add_sized(
-                    [ui.available_width(), 96.0],
-                    TextEdit::multiline(&mut self.tts_direction_prompt)
-                        .desired_width(f32::INFINITY)
-                        .hint_text(direction_hint),
-                );
+                let direction_response = Self::with_input_widget_visuals(ui, |ui| {
+                    ui.add_sized(
+                        [ui.available_width(), 96.0],
+                        TextEdit::multiline(&mut self.tts_direction_prompt)
+                            .desired_width(f32::INFINITY)
+                            .hint_text(direction_hint),
+                    )
+                });
                 draft_changed |= direction_response.changed();
 
                 ui.add_space(10.0);
                 let enter_text_hint = self.t("download.enter_text");
-                let text_response = ui.add_sized(
-                    [ui.available_width(), 130.0],
-                    TextEdit::multiline(&mut self.tts_text)
-                        .desired_width(f32::INFINITY)
-                        .hint_text(enter_text_hint),
-                );
+                let text_response = Self::with_input_widget_visuals(ui, |ui| {
+                    ui.add_sized(
+                        [ui.available_width(), 130.0],
+                        TextEdit::multiline(&mut self.tts_text)
+                            .desired_width(f32::INFINITY)
+                            .hint_text(enter_text_hint),
+                    )
+                });
                 draft_changed |= text_response.changed();
             });
 

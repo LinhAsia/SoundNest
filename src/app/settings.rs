@@ -180,12 +180,15 @@ impl SoundFxApp {
             });
         });
         ui.add_space(8.0);
-        let response = ui.add(
-            TextEdit::singleline(api_key)
-                .desired_width(f32::INFINITY)
-                .hint_text("AIza...")
-                .password(!*visible),
-        );
+        let response = Self::with_input_widget_visuals(ui, |ui| {
+            ui.add_sized(
+                [ui.available_width(), 32.0],
+                TextEdit::singleline(api_key)
+                    .desired_width(f32::INFINITY)
+                    .hint_text("AIza...")
+                    .password(!*visible),
+            )
+        });
         if response.changed() {
             changed = true;
         }
