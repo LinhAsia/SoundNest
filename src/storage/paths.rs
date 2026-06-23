@@ -5,16 +5,11 @@ use super::SoundEffect;
 
 pub(super) const WAVEFORM_BUCKETS: usize = 320;
 pub(super) const DEFAULT_STARTUP_SOUND_NAME: &str = "spectrum start";
-pub(super) const DEFAULT_EXIT_SOUND_NAME: &str = "spectrum end";
 #[cfg(windows)]
 pub(super) const WINDOWS_STORAGE_ROOT: &str = r"D:\Data\soundfx manager";
 pub(super) const DEFAULT_STARTUP_SOUND_BYTES: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/assets/default-startup.wav"
-));
-pub(super) const DEFAULT_EXIT_SOUND_BYTES: &[u8] = include_bytes!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/assets/default-exit.wav"
 ));
 
 pub fn format_time(seconds: f32) -> String {

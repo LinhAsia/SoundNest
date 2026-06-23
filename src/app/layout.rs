@@ -293,9 +293,6 @@ impl SoundFxApp {
                     if self.settings_startup_candidate.is_none() {
                         self.settings_startup_candidate = self.selected;
                     }
-                    if self.settings_exit_candidate.is_none() {
-                        self.settings_exit_candidate = self.selected;
-                    }
                 }
 
                 if Self::icon_titlebar(ui, [42.0, 30.0], 0xe061, false, false).clicked() {

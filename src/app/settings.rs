@@ -412,11 +412,8 @@ impl SoundFxApp {
         let mut open_panel = self.show_settings_panel;
         let mut close_request = false;
         let mut save_startup = false;
-        let mut save_exit = false;
         let mut clear_startup = false;
-        let mut clear_exit = false;
         let mut reset_startup = false;
-        let mut reset_exit = false;
         let mut animation_changed = false;
         let mut install_stream_driver = false;
         let mut uninstall_stream_driver = false;
@@ -480,62 +477,6 @@ impl SoundFxApp {
                     });
                 });
                 ui.add_space(12.0);
-                let startup_toggle = ui.add_sized(
-                    [ui.available_width(), 34.0],
-                    Self::action_button(
-                        RichText::new(self.t("settings.startup_sound")).size(13.0),
-                        self.settings_show_startup_sound,
-                        false,
-                    ),
-                );
-                Self::decorate_button_response(ui, &startup_toggle);
-                if startup_toggle.clicked() {
-                    self.settings_show_startup_sound = !self.settings_show_startup_sound;
-                }
-                if self.settings_show_startup_sound {
-                    ui.add_space(10.0);
-                    Self::draw_settings_sound_row(
-                        ui,
-                        &self.sounds,
-                        &self.t("settings.startup_sound"),
-                        &mut self.settings_startup_candidate,
-                        &self.startup_sound_name,
-                        "settings-startup-combo",
-                        &mut save_startup,
-                        &mut clear_startup,
-                        &mut reset_startup,
-                    );
-                }
-
-                ui.add_space(12.0);
-                let exit_toggle = ui.add_sized(
-                    [ui.available_width(), 34.0],
-                    Self::action_button(
-                        RichText::new(self.t("settings.exit_sound")).size(13.0),
-                        self.settings_show_exit_sound,
-                        false,
-                    ),
-                );
-                Self::decorate_button_response(ui, &exit_toggle);
-                if exit_toggle.clicked() {
-                    self.settings_show_exit_sound = !self.settings_show_exit_sound;
-                }
-                if self.settings_show_exit_sound {
-                    ui.add_space(10.0);
-                    Self::draw_settings_sound_row(
-                        ui,
-                        &self.sounds,
-                        &self.t("settings.exit_sound"),
-                        &mut self.settings_exit_candidate,
-                        &self.exit_sound_name,
-                        "settings-exit-combo",
-                        &mut save_exit,
-                        &mut clear_exit,
-                        &mut reset_exit,
-                    );
-                }
-
-                ui.add_space(14.0);
                 Frame::new()
                     .fill(Self::surface_fill())
                     .stroke(Stroke::new(1.0, Self::border_color()))
@@ -551,6 +492,20 @@ impl SoundFxApp {
                         );
                         if response.changed() {
                             animation_changed = true;
+                        }
+                        if self.app_transition_animation {
+                            ui.add_space(12.0);
+                            Self::draw_settings_sound_row(
+                                ui,
+                                &self.sounds,
+                                &self.t("settings.startup_sound"),
+                                &mut self.settings_startup_candidate,
+                                &self.startup_sound_name,
+                                "settings-startup-combo",
+                                &mut save_startup,
+                                &mut clear_startup,
+                                &mut reset_startup,
+                            );
                         }
                     });
 
@@ -650,6 +605,19 @@ impl SoundFxApp {
             let _ = self
                 .storage
                 .save_app_transition_animation(self.app_transition_animation);
+            if self.app_transition_animation {
+                self.startup.phase = TransitionPhase::Intro;
+                self.startup.duration_sec = self
+                    .startup
+                    .sound_duration_sec
+                    .max(DEFAULT_INTRO_DURATION_SEC);
+            } else {
+                self.startup.phase = TransitionPhase::Live;
+                self.startup.started_at = None;
+                self.startup.live_started_at = None;
+                self.startup.duration_sec = 0.0;
+                self.startup_sound_played = true;
+            }
         }
         if selected_language != self.localization.current_code() {
             self.localization.set_current_code(&selected_language);
@@ -670,20 +638,17 @@ impl SoundFxApp {
         {
             match self.storage.save_startup_sound(sound) {
                 Ok(()) => {
+                    let resolved = self.storage.resolved_startup_sound_path().ok().flatten();
                     self.startup_sound_name = Some(sound.name.clone());
-                    self.clear_status();
-                }
-                Err(error) => self.set_error_status(error),
-            }
-        }
-
-        if save_exit
-            && let Some(sound_id) = self.settings_exit_candidate
-            && let Some(sound) = self.sounds.iter().find(|sound| sound.id == sound_id)
-        {
-            match self.storage.save_exit_sound(sound) {
-                Ok(()) => {
-                    self.exit_sound_name = Some(sound.name.clone());
+                    let visual =
+                        Self::load_transition_sound_visual(&self.storage, resolved.clone());
+                    self.startup.sound_waveform = visual.0;
+                    self.startup.sound_duration_sec = visual.1;
+                    self.startup.duration_sec = Self::custom_transition_duration_secs_opt(
+                        &self.storage,
+                        resolved.as_deref(),
+                        DEFAULT_INTRO_DURATION_SEC,
+                    );
                     self.clear_status();
                 }
                 Err(error) => self.set_error_status(error),
@@ -692,14 +657,12 @@ impl SoundFxApp {
 
         if clear_startup {
             match self.storage.clear_startup_sound() {
-                Ok(()) => self.startup_sound_name = None,
-                Err(error) => self.set_error_status(error),
-            }
-        }
-
-        if clear_exit {
-            match self.storage.clear_exit_sound() {
-                Ok(()) => self.exit_sound_name = None,
+                Ok(()) => {
+                    self.startup_sound_name = None;
+                    self.startup.sound_waveform.clear();
+                    self.startup.sound_duration_sec = 0.0;
+                    self.startup.duration_sec = DEFAULT_INTRO_DURATION_SEC;
+                }
                 Err(error) => self.set_error_status(error),
             }
         }
@@ -718,25 +681,6 @@ impl SoundFxApp {
                         resolved.as_deref(),
                         DEFAULT_INTRO_DURATION_SEC,
                     );
-                    self.clear_status();
-                }
-                Err(error) => self.set_error_status(error),
-            }
-        }
-
-        if reset_exit {
-            match self.storage.reset_exit_sound() {
-                Ok(()) => {
-                    let resolved = self.storage.resolved_exit_sound_path().ok().flatten();
-                    self.exit_sound_name = self.storage.load_exit_sound_name().ok().flatten();
-                    let duration = Self::custom_transition_duration_secs_opt(
-                        &self.storage,
-                        resolved.as_deref(),
-                        DEFAULT_OUTRO_DURATION_SEC,
-                    );
-                    if self.startup.phase == TransitionPhase::Outro {
-                        self.startup.duration_sec = duration;
-                    }
                     self.clear_status();
                 }
                 Err(error) => self.set_error_status(error),

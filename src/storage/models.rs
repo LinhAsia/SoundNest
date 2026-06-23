@@ -224,9 +224,7 @@ pub(super) struct PreferencesFile {
     #[serde(default)]
     pub(super) pitch_hotkeys: Option<Vec<String>>,
     pub(super) startup_sound_name: Option<String>,
-    pub(super) exit_sound_name: Option<String>,
     pub(super) startup_sound_cleared: Option<bool>,
-    pub(super) exit_sound_cleared: Option<bool>,
     pub(super) gemini_api_key: Option<String>,
     #[serde(default)]
     pub(super) tts_prompt_presets: Vec<GeminiTtsPromptPreset>,

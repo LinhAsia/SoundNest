@@ -29,8 +29,7 @@ impl SoundFxApp {
                 let center = rect.center();
                 let intro_monochrome = self.dark_theme && phase == TransitionPhase::Intro;
                 let intro_light_fade = !self.dark_theme && phase == TransitionPhase::Intro;
-                let light_outro = !self.dark_theme && phase == TransitionPhase::Outro;
-                let light_transition = intro_light_fade || light_outro;
+                let light_transition = intro_light_fade;
                 let light_intro_base = Color32::from_rgb(206, 198, 211);
                 let light_intro_berry = Color32::from_rgb(188, 152, 174);
                 let light_intro_magenta = Color32::from_rgb(171, 120, 149);
@@ -85,30 +84,22 @@ impl SoundFxApp {
                     };
                 let t = match phase {
                     TransitionPhase::Intro => Self::ease_in_out_cubic(progress),
-                    TransitionPhase::Outro => 1.0 - Self::ease_in_out_cubic(progress),
                     TransitionPhase::Live => 1.0,
                 };
-                let layer_alpha = match phase {
-                    TransitionPhase::Intro => 1.0,
-                    TransitionPhase::Outro => 1.0,
-                    TransitionPhase::Live => 1.0,
-                };
+                let layer_alpha = 1.0;
                 let ornament_alpha = match phase {
                     TransitionPhase::Intro => {
                         1.0 - Self::ease_in_out_cubic(((progress - 0.18) / 0.18).clamp(0.0, 1.0))
                     }
-                    TransitionPhase::Outro => 1.0,
                     TransitionPhase::Live => 1.0,
                 };
                 let ui_match: f32 = match phase {
                     TransitionPhase::Intro => 0.0,
-                    TransitionPhase::Outro => 0.0,
                     TransitionPhase::Live => 1.0,
                 };
                 let aura = ((1.0 - t) * (0.75 + audio_level * 0.5)).clamp(0.0, 1.0);
                 let mut overlay = match phase {
                     TransitionPhase::Intro => (1.0 - t * 0.7).clamp(0.0, 1.0),
-                    TransitionPhase::Outro => Self::ease_in_out_cubic(progress),
                     TransitionPhase::Live => 0.0,
                 };
                 if intro_light_fade {
@@ -129,10 +120,6 @@ impl SoundFxApp {
                     TransitionPhase::Intro => {
                         let square_seed = ((t - 0.08) / 0.66).clamp(0.0, 1.0);
                         square_seed * square_seed * (3.0 - 2.0 * square_seed)
-                    }
-                    TransitionPhase::Outro => {
-                        let release = 1.0 - (1.0 - (progress / 0.82).clamp(0.0, 1.0)).powi(3);
-                        (1.0 - release).clamp(0.0, 1.0)
                     }
                     TransitionPhase::Live => 1.0,
                 };
@@ -313,12 +300,10 @@ impl SoundFxApp {
                     let pulse = 1.0 + audio_level * 0.14 + (time * 2.2).sin() * 0.03;
                     let phase_scale = match phase {
                         TransitionPhase::Intro => egui::lerp(0.84..=1.02, t),
-                        TransitionPhase::Outro => egui::lerp(1.0..=0.86, progress),
                         TransitionPhase::Live => 1.0,
                     };
                     let blob_alpha = match phase {
                         TransitionPhase::Intro => egui::lerp(1.0..=0.9, t),
-                        TransitionPhase::Outro => egui::lerp(1.0..=0.0, progress),
                         TransitionPhase::Live => 1.0,
                     };
                     let outer_points = Self::squircle_points(

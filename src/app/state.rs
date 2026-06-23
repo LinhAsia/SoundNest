@@ -257,13 +257,9 @@ pub struct SoundFxApp {
     pub(super) app_transition_animation: bool,
     pub(super) localization: Localization,
     pub(super) startup_sound_name: Option<String>,
-    pub(super) exit_sound_name: Option<String>,
     pub(super) gemini_api_key: String,
     pub(super) gemini_api_key_visible: bool,
     pub(super) settings_startup_candidate: Option<Uuid>,
-    pub(super) settings_exit_candidate: Option<Uuid>,
-    pub(super) settings_show_startup_sound: bool,
-    pub(super) settings_show_exit_sound: bool,
     pub(super) library_audio_query: String,
     pub(super) library_audio_tag_filter: Option<String>,
     pub(super) library_audio_tags_expanded: bool,
@@ -357,7 +353,6 @@ pub struct SoundFxApp {
 pub(crate) enum TransitionPhase {
     Intro,
     Live,
-    Outro,
 }
 
 pub(crate) struct StartupSplashState {
@@ -468,7 +463,6 @@ impl SoundFxApp {
             localization.set_current_code(&language_code);
         }
         let startup_sound_name = storage.load_startup_sound_name().ok().flatten();
-        let exit_sound_name = storage.load_exit_sound_name().ok().flatten();
         let gemini_api_key = storage
             .load_gemini_api_key()
             .ok()
@@ -565,10 +559,18 @@ impl SoundFxApp {
             pitch_overlay_native_visuals_applied: false,
             pitch_overlay_pos: None,
             startup: StartupSplashState {
-                phase: TransitionPhase::Intro,
+                phase: if app_transition_animation {
+                    TransitionPhase::Intro
+                } else {
+                    TransitionPhase::Live
+                },
                 started_at: None,
                 live_started_at: None,
-                duration_sec: DEFAULT_INTRO_DURATION_SEC,
+                duration_sec: if app_transition_animation {
+                    DEFAULT_INTRO_DURATION_SEC
+                } else {
+                    0.0
+                },
                 close_sent: false,
                 sound_waveform: Vec::new(),
                 sound_duration_sec: 0.0,
@@ -587,13 +589,9 @@ impl SoundFxApp {
             app_transition_animation,
             localization,
             startup_sound_name,
-            exit_sound_name,
             gemini_api_key,
             gemini_api_key_visible: false,
             settings_startup_candidate: None,
-            settings_exit_candidate: None,
-            settings_show_startup_sound: false,
-            settings_show_exit_sound: false,
             library_audio_query: String::new(),
             library_audio_tag_filter: None,
             library_audio_tags_expanded: false,

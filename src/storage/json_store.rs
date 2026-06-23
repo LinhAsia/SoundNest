@@ -4,10 +4,7 @@ use std::path::{Path, PathBuf};
 
 use super::analyze_audio_file;
 use super::models::{LibraryFile, PreferencesFile, VideoLibraryFile};
-use super::paths::{
-    DEFAULT_EXIT_SOUND_BYTES, DEFAULT_EXIT_SOUND_NAME, DEFAULT_STARTUP_SOUND_BYTES,
-    DEFAULT_STARTUP_SOUND_NAME,
-};
+use super::paths::{DEFAULT_STARTUP_SOUND_BYTES, DEFAULT_STARTUP_SOUND_NAME};
 use super::{
     Folder, GeminiTtsDraftPreferences, GeminiTtsPromptPreset, SoundEffect, Storage, VideoAsset,
 };
@@ -374,26 +371,8 @@ impl Storage {
         Ok(Some(DEFAULT_STARTUP_SOUND_NAME.to_owned()))
     }
 
-    pub fn load_exit_sound_name(&self) -> Result<Option<String>> {
-        let preferences = self.load_preferences()?;
-        if let Some(name) = preferences
-            .exit_sound_name
-            .filter(|_| self.exit_sound_path().exists())
-        {
-            return Ok(Some(name));
-        }
-        if preferences.exit_sound_cleared.unwrap_or(false) {
-            return Ok(None);
-        }
-        Ok(Some(DEFAULT_EXIT_SOUND_NAME.to_owned()))
-    }
-
     pub fn startup_sound_path(&self) -> PathBuf {
         self.settings_sounds_dir.join("startup.wav")
-    }
-
-    pub fn exit_sound_path(&self) -> PathBuf {
-        self.settings_sounds_dir.join("exit.wav")
     }
 
     pub fn resolved_startup_sound_path(&self) -> Result<Option<PathBuf>> {
@@ -410,31 +389,10 @@ impl Storage {
         Ok(Some(bundled_path))
     }
 
-    pub fn resolved_exit_sound_path(&self) -> Result<Option<PathBuf>> {
-        let preferences = self.load_preferences()?;
-        if preferences.exit_sound_cleared.unwrap_or(false) {
-            return Ok(None);
-        }
-        let custom_path = self.exit_sound_path();
-        if custom_path.exists() {
-            return Ok(Some(custom_path));
-        }
-        let bundled_path = self.bundled_sounds_dir.join("default-exit.wav");
-        self.ensure_bundled_sound(&bundled_path, DEFAULT_EXIT_SOUND_BYTES)?;
-        Ok(Some(bundled_path))
-    }
-
     pub fn save_startup_sound(&self, sound: &SoundEffect) -> Result<()> {
         self.save_special_sound(sound, &self.startup_sound_path(), |preferences, name| {
             preferences.startup_sound_name = Some(name);
             preferences.startup_sound_cleared = Some(false);
-        })
-    }
-
-    pub fn save_exit_sound(&self, sound: &SoundEffect) -> Result<()> {
-        self.save_special_sound(sound, &self.exit_sound_path(), |preferences, name| {
-            preferences.exit_sound_name = Some(name);
-            preferences.exit_sound_cleared = Some(false);
         })
     }
 
@@ -449,17 +407,6 @@ impl Storage {
         self.save_preferences(&preferences)
     }
 
-    pub fn clear_exit_sound(&self) -> Result<()> {
-        let path = self.exit_sound_path();
-        if path.exists() {
-            fs::remove_file(path).context("unable to remove exit sound")?;
-        }
-        let mut preferences = self.load_preferences()?;
-        preferences.exit_sound_name = None;
-        preferences.exit_sound_cleared = Some(true);
-        self.save_preferences(&preferences)
-    }
-
     pub fn reset_startup_sound(&self) -> Result<()> {
         let path = self.startup_sound_path();
         if path.exists() {
@@ -468,17 +415,6 @@ impl Storage {
         let mut preferences = self.load_preferences()?;
         preferences.startup_sound_name = None;
         preferences.startup_sound_cleared = Some(false);
-        self.save_preferences(&preferences)
-    }
-
-    pub fn reset_exit_sound(&self) -> Result<()> {
-        let path = self.exit_sound_path();
-        if path.exists() {
-            fs::remove_file(path).context("unable to remove exit sound override")?;
-        }
-        let mut preferences = self.load_preferences()?;
-        preferences.exit_sound_name = None;
-        preferences.exit_sound_cleared = Some(false);
         self.save_preferences(&preferences)
     }
 

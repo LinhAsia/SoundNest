@@ -134,11 +134,6 @@ impl eframe::App for SoundFxApp {
             return;
         }
 
-        if let Some((TransitionPhase::Outro, progress)) = transition {
-            self.render_transition_layer(ctx, progress, TransitionPhase::Outro);
-            return;
-        }
-
         let live_ui_reveal = self.live_ui_reveal_progress(ctx);
         let live_ui_overlay_alpha = if self.dark_theme {
             1.0 - live_ui_reveal
