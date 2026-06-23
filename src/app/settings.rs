@@ -605,13 +605,7 @@ impl SoundFxApp {
             let _ = self
                 .storage
                 .save_app_transition_animation(self.app_transition_animation);
-            if self.app_transition_animation {
-                self.startup.phase = TransitionPhase::Intro;
-                self.startup.duration_sec = self
-                    .startup
-                    .sound_duration_sec
-                    .max(DEFAULT_INTRO_DURATION_SEC);
-            } else {
+            if !self.app_transition_animation {
                 self.startup.phase = TransitionPhase::Live;
                 self.startup.started_at = None;
                 self.startup.live_started_at = None;
