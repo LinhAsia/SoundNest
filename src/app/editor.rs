@@ -1140,20 +1140,53 @@ impl SoundFxApp {
     }
 
     fn refresh_trim_timeline_preview_after_edit(&mut self, sound_id: Uuid) {
-        if self
+        let Some(timeline_state) = self
             .trim_timeline_state
             .as_ref()
-            .is_none_or(|state| state.sound_id != sound_id)
-        {
+            .filter(|state| state.sound_id == sound_id)
+        else {
             return;
-        }
-        let preview_active = self
+        };
+        let fallback_playhead_secs = timeline_state.playhead_secs.max(0.0);
+        let (preview_active, was_paused, current_playhead_secs) = self
             .audio
             .as_ref()
-            .is_some_and(|audio| self.trim_timeline_preview_path.as_ref().is_some_and(|path| audio.is_playing_file(path)));
+            .map(|audio| {
+                let preview_active = self
+                    .trim_timeline_preview_path
+                    .as_ref()
+                    .is_some_and(|path| audio.is_playing_file(path));
+                let direct_sound_active = audio.is_playing(sound_id);
+                let active = preview_active || direct_sound_active;
+                let current_playhead_secs = if preview_active {
+                    self.trim_timeline_preview_path
+                        .as_ref()
+                        .and_then(|path| audio.playback_position_secs_for_file(path))
+                        .unwrap_or(fallback_playhead_secs)
+                } else if direct_sound_active {
+                    audio.playback_position_secs(sound_id)
+                        .unwrap_or(fallback_playhead_secs)
+                } else {
+                    fallback_playhead_secs
+                };
+                (active, active && audio.is_paused(), current_playhead_secs)
+            })
+            .unwrap_or((false, false, fallback_playhead_secs));
+
+        if let Some(state) = self.trim_timeline_state.as_mut()
+            && state.sound_id == sound_id
+        {
+            state.playhead_secs = current_playhead_secs.max(0.0);
+        }
         self.trim_timeline_preview_dirty = true;
-        if preview_active {
+        if !preview_active {
             return;
+        }
+
+        self.stop_preview();
+        self.preview_timeline_mix_from_position(sound_id, current_playhead_secs.max(0.0));
+        if was_paused && let Some(audio) = self.audio.as_mut() {
+            audio.pause();
         }
     }
 
