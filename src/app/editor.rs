@@ -3063,6 +3063,34 @@ impl SoundFxApp {
                         ui.make_persistent_id((sound.id, "trim-end")),
                         Sense::click_and_drag(),
                     );
+                    if start_response.hovered() || start_response.dragged() {
+                        painter.circle_stroke(
+                            Pos2::new(start_x, rect.center().y),
+                            11.0,
+                            Stroke::new(1.5, Color32::from_rgb(255, 182, 214)),
+                        );
+                        painter.line_segment(
+                            [
+                                Pos2::new(start_x, rect.top() + 6.0),
+                                Pos2::new(start_x, rect.bottom() - 6.0),
+                            ],
+                            Stroke::new(3.0, Color32::from_rgba_premultiplied(255, 182, 214, 96)),
+                        );
+                    }
+                    if end_response.hovered() || end_response.dragged() {
+                        painter.circle_stroke(
+                            Pos2::new(end_x, rect.center().y),
+                            11.0,
+                            Stroke::new(1.5, Color32::from_rgb(255, 182, 214)),
+                        );
+                        painter.line_segment(
+                            [
+                                Pos2::new(end_x, rect.top() + 6.0),
+                                Pos2::new(end_x, rect.bottom() - 6.0),
+                            ],
+                            Stroke::new(3.0, Color32::from_rgba_premultiplied(255, 182, 214, 96)),
+                        );
+                    }
 
                     let pointer_pos = interactive
                         .then(|| ui.ctx().input(|input| input.pointer.hover_pos()))
@@ -3121,23 +3149,30 @@ impl SoundFxApp {
                             TrimDeleteRegion::Right => Some(right_region_rect),
                         };
                         if let Some(region_rect) = region_rect {
-                            painter.rect_filled(
-                                region_rect,
-                                14.0,
-                                if dark_theme {
-                                    Color32::from_rgba_premultiplied(255, 120, 170, 52)
-                                } else {
-                                    Color32::from_rgba_premultiplied(214, 51, 132, 42)
-                                },
+                            let hint_color = if dark_theme {
+                                Color32::from_rgba_premultiplied(255, 120, 170, 180)
+                            } else {
+                                Color32::from_rgba_premultiplied(214, 51, 132, 168)
+                            };
+                            let top_y = region_rect.top() + 7.0;
+                            let bottom_y = region_rect.bottom() - 7.0;
+                            let left_x = region_rect.left() + 8.0;
+                            let right_x = region_rect.right() - 8.0;
+                            painter.line_segment(
+                                [Pos2::new(left_x, top_y), Pos2::new(right_x, top_y)],
+                                Stroke::new(1.25, hint_color),
                             );
-                            painter.rect_stroke(
-                                region_rect,
-                                14.0,
-                                Stroke::new(1.5, Color32::from_rgb(255, 120, 170)),
-                                StrokeKind::Inside,
+                            painter.line_segment(
+                                [Pos2::new(left_x, bottom_y), Pos2::new(right_x, bottom_y)],
+                                Stroke::new(1.25, hint_color),
                             );
+                            let center = region_rect.center();
+                            painter.circle_filled(center, 2.2, hint_color);
                         }
                         ui.ctx().set_cursor_icon(egui::CursorIcon::ContextMenu);
+                    }
+                    if interactive && (start_response.hovered() || end_response.hovered()) {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
                     }
                     let playhead_outline = if dark_theme {
                         Color32::from_rgba_premultiplied(8, 13, 19, 224)
