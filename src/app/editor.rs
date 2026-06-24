@@ -4292,29 +4292,27 @@ impl SoundFxApp {
         }
 
         let pointer_pos = ctx.input(|input| input.pointer.hover_pos());
-        let mut ctrl_wheel = 0.0f32;
-        if pointer_pos.is_some_and(|pointer| ui.max_rect().contains(pointer)) {
-            ctx.input_mut(|input| {
-                input.events.retain(|event| {
-                    match event {
-                        egui::Event::MouseWheel { delta, modifiers, .. } if modifiers.ctrl => {
-                            ctrl_wheel += delta.y;
-                            false
-                        }
-                        _ => true,
-                    }
-                });
-            });
-        }
-        if ctrl_wheel.abs() > 0.0 {
+        let pointer_over_timeline = pointer_pos.is_some_and(|pointer| ui.max_rect().contains(pointer));
+        let ctrl_scroll_y = if pointer_over_timeline {
+            ctx.input(|input| {
+                if input.modifiers.ctrl || input.modifiers.command || input.modifiers.mac_cmd {
+                    input.raw_scroll_delta.y
+                } else {
+                    0.0
+                }
+            })
+        } else {
+            0.0
+        };
+        if ctrl_scroll_y.abs() > f32::EPSILON {
             let current_offset = stored_scroll_offset.unwrap_or(0.0);
             let current_content_width = timeline_world_width + 120.0;
             let visible_x = pointer_pos
                 .map(|pointer| (pointer.x - ui.clip_rect().left()).clamp(0.0, viewport_width))
                 .unwrap_or(viewport_width * 0.5);
             let anchor_content_x = current_offset + visible_x;
-            let factor = if ctrl_wheel > 0.0 { 1.12 } else { 1.0 / 1.12 };
-            zoom = (zoom * factor).clamp(1.0, 8.0);
+            let zoom_factor = if ctrl_scroll_y > 0.0 { 1.12 } else { 1.0 / 1.12 };
+            zoom = (zoom * zoom_factor).clamp(1.0, 8.0);
             let next_content_width = (total_duration * timeline_pixels_per_sec * zoom).max(viewport_width)
                 + 120.0;
             let anchor_ratio = (anchor_content_x / current_content_width.max(1.0)).clamp(0.0, 1.0);
@@ -4322,6 +4320,10 @@ impl SoundFxApp {
             requested_scroll_offset = Some(
                 next_offset.clamp(0.0, (next_content_width - viewport_width).max(0.0)),
             );
+            ctx.input_mut(|input| {
+                input.smooth_scroll_delta = Vec2::ZERO;
+                input.raw_scroll_delta = Vec2::ZERO;
+            });
             ctx.request_repaint();
         }
 
