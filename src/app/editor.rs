@@ -447,6 +447,34 @@ impl SoundFxApp {
         (next_start, None)
     }
 
+    fn trim_timeline_snap_playhead(
+        desired_secs: f32,
+        snap_points: &[f32],
+        snap_enabled: bool,
+        snap_threshold_secs: f32,
+    ) -> (f32, Option<f32>) {
+        let next_secs = desired_secs.max(0.0);
+        if !snap_enabled {
+            return (next_secs, None);
+        }
+
+        let mut best: Option<(f32, f32)> = None;
+        for snap_point in snap_points.iter().copied() {
+            let distance = (snap_point - next_secs).abs();
+            if best.is_none_or(|(best_distance, _)| distance < best_distance) {
+                best = Some((distance, snap_point));
+            }
+        }
+
+        if let Some((distance, snapped_secs)) = best
+            && distance <= snap_threshold_secs.max(0.05)
+        {
+            return (snapped_secs.max(0.0), Some(snapped_secs.max(0.0)));
+        }
+
+        (next_secs, None)
+    }
+
     fn trim_timeline_row_has_clip_at_time(
         row: &TrimTimelineRow,
         time_secs: f32,
@@ -5190,6 +5218,8 @@ impl SoundFxApp {
         let mut global_snap_x = None;
         let mut timeline_playhead_secs = state_snapshot.playhead_secs.max(0.0);
         let timeline_playhead_drag_id = Self::trim_timeline_playhead_drag_id(sound_id);
+        let timeline_snap_points = Self::trim_timeline_collect_snap_points(&state_snapshot.rows, None);
+        let timeline_snap_enabled = state_snapshot.snap_enabled;
         let tick_step = if visible_duration > 90.0 {
             15.0
         } else if visible_duration > 45.0 {
@@ -5265,10 +5295,21 @@ impl SoundFxApp {
                 || ruler_response.dragged()
                 || ruler_response.is_pointer_button_down_on())
         {
-            let secs = (view_start_secs
+            let desired_secs = (view_start_secs
                 + ((pointer.x - ruler_rect.left()) / ruler_rect.width()).clamp(0.0, 1.0)
                     * visible_duration)
                 .clamp(0.0, workspace_duration.max(0.05));
+            let (secs, snapped_point) = Self::trim_timeline_snap_playhead(
+                desired_secs,
+                &timeline_snap_points,
+                timeline_snap_enabled,
+                snap_threshold_secs,
+            );
+            if let Some(snap_point) = snapped_point {
+                let snap_ratio =
+                    ((snap_point - view_start_secs) / visible_duration).clamp(0.0, 1.0);
+                global_snap_x = Some(shared_timeline_left + snap_ratio * shared_timeline_width);
+            }
             timeline_playhead_secs = secs;
             if let Some(state) = self.trim_timeline_state.as_mut() {
                 state.playhead_secs = secs;
@@ -5390,10 +5431,21 @@ impl SoundFxApp {
                 && let Some(pointer) = timeline_click_response.interact_pointer_pos()
             {
                 ui.ctx().memory_mut(|memory| memory.stop_text_input());
-                let secs = (view_start_secs
+                let desired_secs = (view_start_secs
                     + ((pointer.x - timeline_rect.left()) / timeline_rect.width()).clamp(0.0, 1.0)
                         * visible_duration)
                     .max(0.0);
+                let (secs, snapped_point) = Self::trim_timeline_snap_playhead(
+                    desired_secs,
+                    &timeline_snap_points,
+                    timeline_snap_enabled,
+                    snap_threshold_secs,
+                );
+                if let Some(snap_point) = snapped_point {
+                    let snap_ratio =
+                        ((snap_point - view_start_secs) / visible_duration).clamp(0.0, 1.0);
+                    global_snap_x = Some(shared_timeline_left + snap_ratio * shared_timeline_width);
+                }
                 timeline_playhead_secs = secs;
                 self.set_trim_timeline_playhead(sound_id, secs);
                 if let Some(state) = self.trim_timeline_state.as_mut() {
