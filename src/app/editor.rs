@@ -2184,6 +2184,7 @@ impl SoundFxApp {
         let mut stop_music_job = false;
         let mut save_mix_replace_request = false;
         let mut save_mix_copy_request = false;
+        let mut toggle_timeline_mix_request = false;
         let mut changed = false;
         let mut processed_export_dirty = false;
         let mut trim_history_commit: Option<TrimSnapshot> = None;
@@ -2243,6 +2244,11 @@ impl SoundFxApp {
         let tags_hint = self.t("editor.tags_hint");
         let tags_available_label = self.t("editor.tags_available");
         let available_tags = self.distinct_sound_tags();
+        self.sync_trim_timeline_state_for(sound_id);
+        let timeline_mix_enabled = self
+            .trim_timeline_state
+            .as_ref()
+            .is_some_and(|state| state.sound_id == sound_id && state.enabled);
 
         Frame::new()
             .fill(Self::surface_fill())
@@ -2257,7 +2263,7 @@ impl SoundFxApp {
             .inner_margin(Margin::same(14))
             .show(ui, |ui| {
                 let sound = &mut self.sounds[index];
-                let controls_width = 52.0 + 52.0 + 52.0 + 64.0 + 64.0 + 36.0;
+                let controls_width = 52.0 + 52.0 + 52.0 + 64.0 + 64.0 + 92.0 + 36.0;
                 let row_gap = 8.0;
                 let back_button_width = if self.editing_from_folder.is_some() {
                     42.0 + 8.0
@@ -2305,6 +2311,18 @@ impl SoundFxApp {
                         |ui| {
                             if Self::icon_action(ui, [52.0, 34.0], 0xe872, false, false).clicked() {
                                 delete_request = true;
+                            }
+                            let timeline_button = ui.add_sized(
+                                [92.0, 34.0],
+                                Self::action_button(
+                                    RichText::new("Timeline").size(11.5),
+                                    timeline_mix_enabled,
+                                    false,
+                                ),
+                            );
+                            Self::decorate_button_response(ui, &timeline_button);
+                            if timeline_button.clicked() {
+                                toggle_timeline_mix_request = true;
                             }
                             let spn = ui.add_sized(
                                 [64.0, 34.0],
@@ -2904,17 +2922,33 @@ impl SoundFxApp {
                 }
             });
 
-        ui.add_space(14.0);
-        Frame::new()
-            .fill(Self::panel_fill())
-            .stroke(Stroke::new(1.0, Self::subtle_border_color()))
-            .corner_radius(26.0)
-            .inner_margin(Margin::same(18))
-            .show(ui, |ui| {
-                let (save_replace, save_copy) = self.render_trim_composer(ui, ctx, sound_id);
-                save_mix_replace_request |= save_replace;
-                save_mix_copy_request |= save_copy;
-            });
+        if toggle_timeline_mix_request {
+            self.sync_trim_timeline_state_for(sound_id);
+            if let Some(state) = self.trim_timeline_state.as_mut() {
+                state.enabled = !state.enabled;
+                if !state.enabled {
+                    self.trim_timeline_drop_target = None;
+                }
+            }
+        }
+
+        let timeline_mix_enabled = self
+            .trim_timeline_state
+            .as_ref()
+            .is_some_and(|state| state.sound_id == sound_id && state.enabled);
+        if timeline_mix_enabled {
+            ui.add_space(14.0);
+            Frame::new()
+                .fill(Self::panel_fill())
+                .stroke(Stroke::new(1.0, Self::subtle_border_color()))
+                .corner_radius(26.0)
+                .inner_margin(Margin::same(18))
+                .show(ui, |ui| {
+                    let (save_replace, save_copy) = self.render_trim_composer(ui, ctx, sound_id);
+                    save_mix_replace_request |= save_replace;
+                    save_mix_copy_request |= save_copy;
+                });
+        }
 
         let sound_id = self.sounds[index].id;
         let sound_duration = self.sounds[index].safe_duration();
@@ -3815,13 +3849,21 @@ impl SoundFxApp {
             return (false, false);
         };
 
-        let mut next_enabled = state_snapshot.enabled;
+        let next_enabled = state_snapshot.enabled;
         let mut add_row = false;
         let mut reset_rows = false;
         let mut remove_row = None;
         let mut remove_clip = None;
         let mut save_replace = false;
         let mut save_copy = false;
+
+        if !next_enabled {
+            self.trim_timeline_drop_target = None;
+            if let Some(state) = self.trim_timeline_state.as_mut() {
+                state.enabled = false;
+            }
+            return (false, false);
+        }
 
         ui.horizontal(|ui| {
             ui.label(
@@ -3830,74 +3872,45 @@ impl SoundFxApp {
                     .color(Self::strong_text_color())
                     .strong(),
             );
-            ui.add_space(8.0);
-            let toggle = ui.add_sized(
-                [108.0, 30.0],
-                Self::action_button(RichText::new("Enable").size(11.5), next_enabled, false),
-            );
-            Self::decorate_button_response(ui, &toggle);
-            if toggle.clicked() {
-                next_enabled = !next_enabled;
-            }
-
             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                if next_enabled {
-                    let save_copy_button = ui.add_sized(
-                        [92.0, 30.0],
-                        Self::action_button(RichText::new("Save copy").size(11.5), false, false),
-                    );
-                    Self::decorate_button_response(ui, &save_copy_button);
-                    if save_copy_button.clicked() {
-                        save_copy = true;
-                    }
+                let save_copy_button = ui.add_sized(
+                    [92.0, 30.0],
+                    Self::action_button(RichText::new("Save copy").size(11.5), false, false),
+                );
+                Self::decorate_button_response(ui, &save_copy_button);
+                if save_copy_button.clicked() {
+                    save_copy = true;
+                }
 
-                    let save_replace_button = ui.add_sized(
-                        [96.0, 30.0],
-                        Self::action_button(
-                            RichText::new("Save mix").size(11.5),
-                            false,
-                            false,
-                        ),
-                    );
-                    Self::decorate_button_response(ui, &save_replace_button);
-                    if save_replace_button.clicked() {
-                        save_replace = true;
-                    }
+                let save_replace_button = ui.add_sized(
+                    [96.0, 30.0],
+                    Self::action_button(RichText::new("Save mix").size(11.5), false, false),
+                );
+                Self::decorate_button_response(ui, &save_replace_button);
+                if save_replace_button.clicked() {
+                    save_replace = true;
+                }
 
-                    let reset_button = ui.add_sized(
-                        [74.0, 30.0],
-                        Self::action_button(RichText::new("Reset").size(11.5), false, false),
-                    );
-                    Self::decorate_button_response(ui, &reset_button);
-                    if reset_button.clicked() {
-                        reset_rows = true;
-                    }
+                let reset_button = ui.add_sized(
+                    [74.0, 30.0],
+                    Self::action_button(RichText::new("Reset").size(11.5), false, false),
+                );
+                Self::decorate_button_response(ui, &reset_button);
+                if reset_button.clicked() {
+                    reset_rows = true;
+                }
 
-                    let add_row_button = ui.add_sized(
-                        [76.0, 30.0],
-                        Self::action_button(RichText::new("+ Row").size(11.5), false, false),
-                    );
-                    Self::decorate_button_response(ui, &add_row_button);
-                    if add_row_button.clicked() {
-                        add_row = true;
-                    }
+                let add_row_button = ui.add_sized(
+                    [76.0, 30.0],
+                    Self::action_button(RichText::new("+ Row").size(11.5), false, false),
+                );
+                Self::decorate_button_response(ui, &add_row_button);
+                if add_row_button.clicked() {
+                    add_row = true;
                 }
             });
         });
         ui.add_space(8.0);
-
-        if !next_enabled {
-            self.trim_timeline_drop_target = None;
-            if let Some(state) = self.trim_timeline_state.as_mut() {
-                state.enabled = false;
-            }
-            ui.label(
-                RichText::new("Turn this on to stack extra sounds and save them as one sound.")
-                    .size(11.5)
-                    .color(Self::muted_text_color()),
-            );
-            return (false, false);
-        }
 
         let pending_drag_sound = self
             .pending_sound_drag
