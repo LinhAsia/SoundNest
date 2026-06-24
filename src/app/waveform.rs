@@ -221,13 +221,8 @@ impl SoundFxApp {
             preview.push(peak.powf(0.82));
         }
 
-        let max_level = preview
-            .iter()
-            .copied()
-            .fold(0.0_f32, f32::max)
-            .max(f32::EPSILON);
         for value in &mut preview {
-            *value = (*value / max_level).clamp(0.0, 1.0);
+            *value = value.clamp(0.0, 1.0);
             if *value > 0.0 {
                 *value = (0.14 + *value * 0.86).clamp(0.14, 1.0);
             }

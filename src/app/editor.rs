@@ -1237,25 +1237,32 @@ impl SoundFxApp {
                         .is_some_and(|audio| audio.is_playing_file(path))
                 });
             let is_paused = self.audio.as_ref().is_some_and(|audio| audio.is_paused());
+            let timeline_restart_secs = self
+                .trim_timeline_state
+                .as_ref()
+                .filter(|state| state.sound_id == sound_id)
+                .map(|state| {
+                    let total_duration = self.trim_timeline_total_duration(state);
+                    if state.playhead_secs >= total_duration - 0.05 {
+                        0.0
+                    } else {
+                        state.playhead_secs.max(0.0)
+                    }
+                })
+                .unwrap_or(0.0);
             if is_playing && !is_paused {
                 if let Some(audio) = self.audio.as_mut() {
                     audio.pause();
                 }
             } else if is_playing && is_paused {
                 if self.trim_timeline_preview_dirty {
-                    let resume_secs = self
-                        .trim_timeline_state
-                        .as_ref()
-                        .filter(|state| state.sound_id == sound_id)
-                        .map(|state| state.playhead_secs)
-                        .unwrap_or(0.0);
                     self.stop_preview();
-                    self.preview_timeline_mix_from_position(sound_id, resume_secs);
+                    self.preview_timeline_mix_from_position(sound_id, timeline_restart_secs);
                 } else if let Some(audio) = self.audio.as_mut() {
                     audio.resume();
                 }
-            } else if let Some(state) = self.trim_timeline_state.as_ref() {
-                self.preview_timeline_mix_from_position(sound_id, state.playhead_secs);
+            } else if self.timeline_mode_active_for_selected().is_some() {
+                self.preview_timeline_mix_from_position(sound_id, timeline_restart_secs);
             }
             ctx.request_repaint();
         }
