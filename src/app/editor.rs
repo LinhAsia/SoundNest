@@ -274,6 +274,36 @@ impl SoundFxApp {
         reduced
     }
 
+    fn trim_timeline_resolve_row_start(
+        row: &TrimTimelineRow,
+        moving_clip_id: Option<Uuid>,
+        desired_start_secs: f32,
+        clip_duration_secs: f32,
+    ) -> f32 {
+        let mut next_start = desired_start_secs.max(0.0);
+        let clip_duration = clip_duration_secs.max(0.05);
+        let mut sorted_clips = row
+            .clips
+            .iter()
+            .filter(|clip| Some(clip.id) != moving_clip_id)
+            .collect::<Vec<_>>();
+        sorted_clips.sort_by(|left, right| left.start_secs.total_cmp(&right.start_secs));
+
+        for other in sorted_clips {
+            let other_start = other.start_secs.max(0.0);
+            let other_end = other_start + (other.clip_end_secs - other.clip_start_secs).max(0.05);
+            let next_end = next_start + clip_duration;
+            if next_end <= other_start + 0.000_5 {
+                break;
+            }
+            if next_start < other_end && next_end > other_start {
+                next_start = other_end;
+            }
+        }
+
+        next_start.max(0.0)
+    }
+
     fn collect_trim_timeline_render_clips(
         &self,
         sound_id: Uuid,
@@ -342,13 +372,23 @@ impl SoundFxApp {
             .map(SoundEffect::trimmed_length)
             .unwrap_or(0.25);
 
+        let inserted_clip_id = Uuid::new_v4();
         state.rows[target.row_index].clips.push(TrimTimelineClip {
-            id: Uuid::new_v4(),
+            id: inserted_clip_id,
             source_sound_id: drag_sound_id,
             start_secs: target.start_secs.max(0.0),
             clip_start_secs: 0.0,
             clip_end_secs,
         });
+        let resolved_start = Self::trim_timeline_resolve_row_start(
+            &state.rows[target.row_index],
+            Some(inserted_clip_id),
+            target.start_secs.max(0.0),
+            clip_end_secs,
+        );
+        if let Some(clip) = state.rows[target.row_index].clips.last_mut() {
+            clip.start_secs = resolved_start;
+        }
         state.rows[target.row_index]
             .clips
             .sort_by(|left, right| left.start_secs.total_cmp(&right.start_secs));
@@ -4254,13 +4294,13 @@ impl SoundFxApp {
         let pointer_pos = ctx.input(|input| input.pointer.hover_pos());
         let ctrl_wheel = ctx.input(|input| {
             if input.modifiers.ctrl {
-                input.raw_scroll_delta.y
+                input.raw_scroll_delta.y + input.smooth_scroll_delta.y
             } else {
                 0.0
             }
         });
         if ctrl_wheel.abs() > 0.0
-            && pointer_pos.is_some_and(|pointer| ui.clip_rect().contains(pointer))
+            && pointer_pos.is_some_and(|pointer| ui.max_rect().contains(pointer))
         {
             let current_offset = stored_scroll_offset.unwrap_or(0.0);
             let current_content_width = timeline_world_width + 120.0;
@@ -4583,9 +4623,15 @@ impl SoundFxApp {
                         }
                     }
                     let moving_clip = state.rows[row_index].clips.remove(clip_index);
-                    let mut moved = moving_clip.clone();
-                    moved.start_secs = next_start.max(0.0);
                     let insert_row = target_row.min(state.rows.len().saturating_sub(1));
+                    let resolved_start = Self::trim_timeline_resolve_row_start(
+                        &state.rows[insert_row],
+                        Some(moving_clip.id),
+                        next_start,
+                        (moving_clip.clip_end_secs - moving_clip.clip_start_secs).max(0.05),
+                    );
+                    let mut moved = moving_clip.clone();
+                    moved.start_secs = resolved_start.max(0.0);
                     state.rows[insert_row].clips.push(moved);
                     state.rows[insert_row]
                         .clips
