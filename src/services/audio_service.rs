@@ -405,6 +405,17 @@ impl AudioEngine {
         Some((played / total_duration).clamp(0.0, 1.0))
     }
 
+    pub fn playback_position_secs_for_file(&self, path: &Path) -> Option<f32> {
+        if self.current_file_path.as_deref() != Some(path) {
+            return None;
+        }
+
+        let sink = self.sink.as_ref()?;
+        let total_duration = self.current_total_duration_secs.max(0.05);
+        let elapsed = sink.get_pos().as_secs_f32();
+        Some((self.current_start_offset_secs + elapsed).clamp(0.0, total_duration))
+    }
+
     pub fn has_active_playback(&self) -> bool {
         self.sink.is_some()
     }
