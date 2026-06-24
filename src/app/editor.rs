@@ -3377,7 +3377,7 @@ impl SoundFxApp {
         } else {
             (*preview_cursor_secs).clamp(0.0, duration)
         };
-        *zoom = (*zoom).clamp(1.0, 8.0);
+        *zoom = (*zoom).clamp(0.1, 8.0);
         let playhead_drag_id = Self::trim_playhead_drag_id(sound.id);
 
         ui.horizontal(|ui| {
@@ -3811,7 +3811,7 @@ impl SoundFxApp {
                                 .map(|pointer| (pointer.x - rect.left()).clamp(0.0, rect.width()))
                                 .unwrap_or((cursor_ratio * rect.width()).clamp(0.0, rect.width()));
                             let factor = if zoom_delta > 0.0 { 1.12 } else { 1.0 / 1.12 };
-                            *zoom = (*zoom * factor).clamp(1.0, 8.0);
+                            *zoom = (*zoom * factor).clamp(0.1, 8.0);
                             let next_timeline_width = (viewport_width * *zoom).max(viewport_width);
                             let next_anchor_content_x =
                                 (anchor_content_x / rect.width().max(1.0)) * next_timeline_width;
@@ -4312,7 +4312,7 @@ impl SoundFxApp {
                 .unwrap_or(viewport_width * 0.5);
             let anchor_content_x = current_offset + visible_x;
             let zoom_factor = if ctrl_scroll_y > 0.0 { 1.12 } else { 1.0 / 1.12 };
-            zoom = (zoom * zoom_factor).clamp(1.0, 8.0);
+            zoom = (zoom * zoom_factor).clamp(0.1, 8.0);
             let next_content_width = (total_duration * timeline_pixels_per_sec * zoom).max(viewport_width)
                 + 120.0;
             let anchor_ratio = (anchor_content_x / current_content_width.max(1.0)).clamp(0.0, 1.0);
