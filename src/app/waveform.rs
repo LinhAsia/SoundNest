@@ -390,7 +390,7 @@ impl SoundFxApp {
 
         let column_count = waveform.len().max(1);
         let step = rect.width() / column_count as f32;
-        let column_width = (step * 0.72).clamp(1.2, 4.0).min(rect.width().max(1.0));
+        let column_width = (step * 0.42).clamp(0.8, 2.2).min(rect.width().max(1.0));
         let stride = if column_count <= 1 {
             0.0
         } else {

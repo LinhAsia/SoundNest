@@ -371,6 +371,10 @@ impl SoundFxApp {
         reduced
     }
 
+    fn trim_timeline_waveform_bars(width: f32) -> usize {
+        ((width / 4.2).round() as usize).clamp(24, 168)
+    }
+
     fn trim_timeline_resolve_row_start(
         row: &TrimTimelineRow,
         moving_clip_id: Option<Uuid>,
@@ -5585,7 +5589,7 @@ impl SoundFxApp {
                     clip.clip_start_secs + (visible_clip_start - clip_time_start).max(0.0);
                 let visible_local_end =
                     clip.clip_end_secs - (clip_time_end - visible_clip_end).max(0.0);
-                let waveform_bars = ((clip_rect.width() / 7.0).round() as usize).clamp(16, 96);
+                let waveform_bars = Self::trim_timeline_waveform_bars(clip_rect.width());
                 let preview = Self::timeline_clip_waveform_preview_from_samples(
                     sound,
                     &self.sound_waveform_samples(sound),
@@ -5818,6 +5822,7 @@ impl SoundFxApp {
                         .enumerate()
                         .find_map(|(candidate_row, _)| {
                             let top = viewport_rect.top()
+                                + rows_top_padding
                                 + candidate_row as f32 * (row_height + row_spacing);
                             let rect = Rect::from_min_max(
                                 Pos2::new(timeline_rect.left(), top),
@@ -5827,7 +5832,9 @@ impl SoundFxApp {
                         })
                         .unwrap_or(row_index);
                     let target_row_top =
-                        viewport_rect.top() + target_row as f32 * (row_height + row_spacing);
+                        viewport_rect.top()
+                            + rows_top_padding
+                            + target_row as f32 * (row_height + row_spacing);
                     let target_timeline_rect = Rect::from_min_max(
                         Pos2::new(timeline_rect.left(), target_row_top),
                         Pos2::new(timeline_rect.right(), target_row_top + row_height),
@@ -5981,7 +5988,7 @@ impl SoundFxApp {
                     ((animation_rect.height() - 8.0).max(0.0) * 0.28).min(16.0) * progress,
                 ));
                 let waveform_bars =
-                    ((rendered_animation_rect.width() / 7.0).round() as usize).clamp(16, 96);
+                    Self::trim_timeline_waveform_bars(rendered_animation_rect.width());
                 let preview = Self::timeline_clip_waveform_preview_from_samples(
                     sound,
                     &self.sound_waveform_samples(sound),
@@ -6088,7 +6095,10 @@ impl SoundFxApp {
                         Stroke::new(1.25, Color32::from_rgba_premultiplied(255, 112, 181, 196)),
                         StrokeKind::Outside,
                     );
-                    let ghost_waveform = self.trim_timeline_track_waveform(drag_sound, 64);
+                    let ghost_waveform = self.trim_timeline_track_waveform(
+                        drag_sound,
+                        Self::trim_timeline_waveform_bars(ghost_rect.width()),
+                    );
                     if ghost_rect.width() >= 18.0 {
                         let waveform_inset_x = 1.0;
                         let ghost_title_rect = Rect::from_min_max(
