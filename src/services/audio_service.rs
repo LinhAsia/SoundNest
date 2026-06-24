@@ -327,6 +327,22 @@ impl AudioEngine {
         self.current_speed = 1.0;
     }
 
+    pub fn pause(&mut self) {
+        if let Some(sink) = self.sink.as_ref() {
+            sink.pause();
+        }
+    }
+
+    pub fn resume(&mut self) {
+        if let Some(sink) = self.sink.as_ref() {
+            sink.play();
+        }
+    }
+
+    pub fn is_paused(&self) -> bool {
+        self.sink.as_ref().is_some_and(|sink| sink.is_paused())
+    }
+
     pub fn tick(&mut self) {
         let finished = self.sink.as_ref().is_some_and(|sink| sink.empty());
         if finished {
