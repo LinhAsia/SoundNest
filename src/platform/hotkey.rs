@@ -507,13 +507,27 @@ mod windows_impl {
     unsafe fn key_down(vk: i32) -> bool {
         (unsafe { GetAsyncKeyState(vk) } as u16 & 0x8000) != 0
     }
+
+    pub fn physical_hotkey_down(hotkey: Hotkey) -> bool {
+        let Ok(vk) = super::virtual_key_code(hotkey.key) else {
+            return false;
+        };
+        unsafe { key_down(vk as i32) && check_modifiers(hotkey.ctrl, hotkey.alt, hotkey.shift, hotkey.win) }
+    }
 }
 
 #[cfg(windows)]
 pub use windows_impl::GlobalHotkeyManager;
+#[cfg(windows)]
+pub use windows_impl::physical_hotkey_down;
 
 #[cfg(not(windows))]
 pub struct GlobalHotkeyManager;
+
+#[cfg(not(windows))]
+pub fn physical_hotkey_down(_hotkey: Hotkey) -> bool {
+    false
+}
 
 #[cfg(not(windows))]
 impl GlobalHotkeyManager {

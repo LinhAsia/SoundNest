@@ -1066,7 +1066,21 @@ impl SoundFxApp {
                         && !input.modifiers.shift
                         && !input.modifiers.alt)
             });
-        let command_v = ctx.input_mut(|input| input.consume_key(ctrl_modifiers, egui::Key::V))
+        let physical_ctrl_v_down = platform::hotkey::physical_hotkey_down(Hotkey {
+            ctrl: true,
+            alt: false,
+            shift: false,
+            win: false,
+            key: egui::Key::V,
+        });
+        let physical_ctrl_v_pressed = ctx.data_mut(|data| {
+            let hotkey_id = Self::trim_timeline_physical_paste_hotkey_id(sound_id);
+            let was_down = data.get_temp::<bool>(hotkey_id).unwrap_or(false);
+            data.insert_temp(hotkey_id, physical_ctrl_v_down);
+            physical_ctrl_v_down && !was_down
+        });
+        let command_v = physical_ctrl_v_pressed
+            || ctx.input_mut(|input| input.consume_key(ctrl_modifiers, egui::Key::V))
             || ctx.input(|input| {
                 input.events
                     .iter()
@@ -1866,6 +1880,10 @@ impl SoundFxApp {
 
     pub(super) fn trim_timeline_playhead_drag_id(sound_id: Uuid) -> egui::Id {
         egui::Id::new((sound_id, "trim-timeline-playhead-drag"))
+    }
+
+    pub(super) fn trim_timeline_physical_paste_hotkey_id(sound_id: Uuid) -> egui::Id {
+        egui::Id::new((sound_id, "trim-timeline-physical-paste-hotkey"))
     }
 
     pub(super) fn trim_timeline_clip_drag_snapshot_id(
