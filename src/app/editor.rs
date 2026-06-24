@@ -4263,15 +4263,6 @@ impl SoundFxApp {
         let mut next_drop_target = None;
         let base_visible_secs = 12.0f32;
 
-        if pending_drag_sound.is_some() {
-            ui.label(
-                RichText::new("Drag a sound from the left list and drop it on a row below.")
-                    .size(11.0)
-                    .color(Self::muted_text_color()),
-            );
-            ui.add_space(6.0);
-        }
-
         let row_height = 96.0;
         let row_spacing = 8.0;
         let row_count = state_snapshot.rows.len().max(1);
@@ -4485,13 +4476,6 @@ impl SoundFxApp {
             let playhead_x = timeline_rect.left()
                 + ((state_snapshot.playhead_secs.max(0.0) - view_start_secs) / visible_duration)
                     * timeline_rect.width();
-            painter.line_segment(
-                [
-                    Pos2::new(playhead_x, timeline_rect.top() + 6.0),
-                    Pos2::new(playhead_x, timeline_rect.bottom() - 6.0),
-                ],
-                Stroke::new(1.5, Color32::from_rgb(108, 231, 255)),
-            );
 
             let timeline_click_response = ui.interact(
                 timeline_rect,
@@ -4596,12 +4580,12 @@ impl SoundFxApp {
                 );
                 if clip_rect.width() >= 18.0 {
                     let title_rect = Rect::from_min_max(
-                        clip_rect.left_top() + vec2(10.0, 6.0),
-                        Pos2::new((clip_rect.right() - 10.0).max(clip_rect.left() + 10.0), clip_rect.top() + 24.0),
+                        clip_rect.left_top() + vec2(8.0, 4.0),
+                        Pos2::new((clip_rect.right() - 8.0).max(clip_rect.left() + 8.0), clip_rect.top() + 18.0),
                     );
                     let waveform_rect = Rect::from_min_max(
-                        Pos2::new(clip_rect.left() + 10.0, clip_rect.top() + 28.0),
-                        Pos2::new((clip_rect.right() - 10.0).max(clip_rect.left() + 10.0), clip_rect.bottom() - 10.0),
+                        Pos2::new(clip_rect.left() + 8.0, clip_rect.top() + 18.0),
+                        Pos2::new((clip_rect.right() - 8.0).max(clip_rect.left() + 8.0), clip_rect.bottom() - 8.0),
                     );
                     Self::paint_timeline_waveform_columns(
                         &painter,
@@ -4841,12 +4825,12 @@ impl SoundFxApp {
                     let ghost_waveform = self.trim_timeline_track_waveform(drag_sound, 64);
                     if ghost_rect.width() >= 18.0 {
                         let ghost_title_rect = Rect::from_min_max(
-                            ghost_rect.left_top() + vec2(10.0, 6.0),
-                            Pos2::new((ghost_rect.right() - 10.0).max(ghost_rect.left() + 10.0), ghost_rect.top() + 24.0),
+                            ghost_rect.left_top() + vec2(8.0, 4.0),
+                            Pos2::new((ghost_rect.right() - 8.0).max(ghost_rect.left() + 8.0), ghost_rect.top() + 18.0),
                         );
                         let ghost_waveform_rect = Rect::from_min_max(
-                            Pos2::new(ghost_rect.left() + 10.0, ghost_rect.top() + 28.0),
-                            Pos2::new((ghost_rect.right() - 10.0).max(ghost_rect.left() + 10.0), ghost_rect.bottom() - 10.0),
+                            Pos2::new(ghost_rect.left() + 8.0, ghost_rect.top() + 18.0),
+                            Pos2::new((ghost_rect.right() - 8.0).max(ghost_rect.left() + 8.0), ghost_rect.bottom() - 8.0),
                         );
                         Self::paint_timeline_waveform_columns(
                             &painter,
@@ -4879,6 +4863,19 @@ impl SoundFxApp {
                 }
                 ctx.set_cursor_icon(egui::CursorIcon::Copy);
             }
+
+            painter.line_segment(
+                [
+                    Pos2::new(playhead_x, timeline_rect.top() + 6.0),
+                    Pos2::new(playhead_x, timeline_rect.bottom() - 6.0),
+                ],
+                Stroke::new(1.75, Color32::from_rgb(108, 231, 255)),
+            );
+            painter.circle_filled(
+                Pos2::new(playhead_x, timeline_rect.top() + 9.0),
+                3.0,
+                Color32::from_rgb(108, 231, 255),
+            );
         }
 
         if let Some(state) = self.trim_timeline_state.as_mut() {
