@@ -182,7 +182,7 @@ impl SoundFxApp {
         samples: &[f32],
         clip_start_secs: f32,
         clip_end_secs: f32,
-        buckets: usize,
+        _buckets: usize,
     ) -> Vec<f32> {
         let preview = Self::trimmed_waveform_preview_from_samples(sound, samples);
         if preview.is_empty() {
@@ -192,7 +192,11 @@ impl SoundFxApp {
         let clip_duration = sound.trimmed_length().max(0.05);
         let start_ratio = (clip_start_secs / clip_duration).clamp(0.0, 1.0);
         let end_ratio = (clip_end_secs / clip_duration).clamp(start_ratio, 1.0);
-        Self::resample_timeline_waveform(&preview, start_ratio, end_ratio, buckets)
+        let start_index = ((preview.len() as f32) * start_ratio).floor() as usize;
+        let mut end_index = ((preview.len() as f32) * end_ratio).ceil() as usize;
+        let start_index = start_index.min(preview.len().saturating_sub(1));
+        end_index = end_index.clamp(start_index + 1, preview.len());
+        preview[start_index..end_index].to_vec()
     }
 
     pub(super) fn compact_timeline_waveform(samples: &[f32], buckets: usize) -> Vec<f32> {
@@ -398,13 +402,13 @@ impl SoundFxApp {
 
         let column_count = waveform.len().max(1);
         let step = rect.width() / column_count as f32;
-        let column_width = (step * 0.42).clamp(0.8, 2.2).min(rect.width().max(1.0));
+        let column_width = (step * 0.42).clamp(1.0, 2.2).min(rect.width().max(1.0));
         let stride = if column_count <= 1 {
             0.0
         } else {
             ((rect.width() - column_width).max(0.0)) / (column_count - 1) as f32
         };
-        let baseline = rect.bottom() - 4.0;
+        let baseline = (rect.bottom() - 4.0).round();
         let min_height = 6.0;
         let max_height = (rect.height() - 8.0).max(min_height);
         let wave_color = if highlight {
@@ -419,15 +423,18 @@ impl SoundFxApp {
                 rect.left()
             } else {
                 rect.left() + index as f32 * stride
-            };
+            }
+            .round();
             let right = if index + 1 >= column_count {
                 rect.right()
             } else {
                 (left + column_width).min(rect.right())
-            };
+            }
+            .round()
+            .max(left + 1.0);
             let height = (min_height + amplitude * max_height).min(max_height + min_height);
             let wave_rect = Rect::from_min_max(
-                Pos2::new(left, baseline - height),
+                Pos2::new(left, (baseline - height).round()),
                 Pos2::new(right, baseline),
             );
             painter.rect_filled(wave_rect, 1.5, wave_color);

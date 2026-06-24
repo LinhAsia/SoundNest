@@ -5803,49 +5803,53 @@ impl SoundFxApp {
                         timeline_state_changed = true;
                     }
                 }
-                if !clip_is_deleting
-                    && selected_clip
-                    && clip_rect.contains(ctx.input(|input| input.pointer.hover_pos()).unwrap_or(clip_rect.center()))
-                    && let Some(pointer) = ctx.input(|input| input.pointer.hover_pos())
-                {
-                    let pointer_time = view_start_secs
-                        + ((pointer.x - timeline_rect.left()) / timeline_rect.width()).clamp(0.0, 1.0)
-                            * visible_duration;
-                    let local_time =
-                        clip.clip_start_secs + (pointer_time - clip.start_secs).clamp(0.0, clip_duration);
+                if !clip_is_deleting && selected_clip {
+                    let playhead_time = timeline_playhead_secs.max(0.0);
+                    let clip_playhead_x = timeline_rect.left()
+                        + ((playhead_time - view_start_secs) / visible_duration).clamp(0.0, 1.0)
+                            * timeline_rect.width();
+                    let playhead_inside_clip =
+                        playhead_time >= clip_time_start && playhead_time <= clip_time_end;
+                    if playhead_inside_clip {
+                        let local_time = clip.clip_start_secs
+                            + (playhead_time - clip.start_secs).clamp(0.0, clip_duration);
+                        let hint_x = clip_playhead_x.clamp(clip_rect.left(), clip_rect.right());
                     painter.line_segment(
                         [
-                            Pos2::new(pointer.x, clip_rect.top() + 6.0),
-                            Pos2::new(pointer.x, clip_rect.bottom() - 6.0),
+                            Pos2::new(hint_x, clip_rect.top() + 6.0),
+                            Pos2::new(hint_x, clip_rect.bottom() - 6.0),
                         ],
                         Stroke::new(1.0, Color32::from_rgba_premultiplied(108, 231, 255, 150)),
                     );
                     painter.circle_filled(
-                        Pos2::new(pointer.x, clip_rect.top() + 10.0),
+                        Pos2::new(hint_x, clip_rect.top() + 10.0),
                         2.4,
                         Color32::from_rgba_premultiplied(108, 231, 255, 180),
                     );
-                    if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Q))
-                    {
-                        self.trim_timeline_trim_clip_edge_at_local_time(
-                            ctx,
-                            sound_id,
-                            row_index,
-                            clip_index,
-                            local_time,
-                            true,
-                        );
-                    }
-                    if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::W))
-                    {
-                        self.trim_timeline_trim_clip_edge_at_local_time(
-                            ctx,
-                            sound_id,
-                            row_index,
-                            clip_index,
-                            local_time,
-                            false,
-                        );
+                        if ctx.input_mut(|input| {
+                            input.consume_key(egui::Modifiers::NONE, egui::Key::Q)
+                        }) {
+                            self.trim_timeline_trim_clip_edge_at_local_time(
+                                ctx,
+                                sound_id,
+                                row_index,
+                                clip_index,
+                                local_time,
+                                true,
+                            );
+                        }
+                        if ctx.input_mut(|input| {
+                            input.consume_key(egui::Modifiers::NONE, egui::Key::W)
+                        }) {
+                            self.trim_timeline_trim_clip_edge_at_local_time(
+                                ctx,
+                                sound_id,
+                                row_index,
+                                clip_index,
+                                local_time,
+                                false,
+                            );
+                        }
                     }
                 }
                 if !clip_is_deleting && removable && (clip_response.secondary_clicked() || right_sweep_delete) {
