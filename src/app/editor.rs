@@ -660,6 +660,14 @@ impl SoundFxApp {
         self.trim_timeline_redo_stack.clear();
     }
 
+    fn push_trim_timeline_undo_snapshot_changed(&mut self, before: TrimTimelineState) {
+        self.trim_timeline_undo_stack.push(before);
+        if self.trim_timeline_undo_stack.len() > TRIM_HISTORY_LIMIT {
+            self.trim_timeline_undo_stack.remove(0);
+        }
+        self.trim_timeline_redo_stack.clear();
+    }
+
     fn trim_timeline_selected_clip_from_state(
         state: &TrimTimelineState,
     ) -> Option<(usize, usize, TrimTimelineClip)> {
@@ -751,7 +759,6 @@ impl SoundFxApp {
         let clip_duration =
             (copied_clip.clip_end_secs - copied_clip.clip_start_secs).max(0.05);
         let inserted_clip_id = Uuid::new_v4();
-        let mut did_change = false;
         if let Some(state) = self.trim_timeline_state.as_mut() {
             if !state.enabled || state.sound_id != sound_id {
                 return false;
@@ -775,14 +782,9 @@ impl SoundFxApp {
                 .clips
                 .sort_by(|left, right| left.start_secs.total_cmp(&right.start_secs));
             state.selected_clip_id = Some(inserted_clip_id);
-            did_change = before != *state;
         }
 
-        if !did_change {
-            return false;
-        }
-
-        self.push_trim_timeline_undo_snapshot(before);
+        self.push_trim_timeline_undo_snapshot_changed(before);
         self.refresh_trim_timeline_preview_after_edit(sound_id);
         self.mark_dirty(ctx);
         ctx.request_repaint();
@@ -827,7 +829,6 @@ impl SoundFxApp {
         };
 
         let mut animation = None;
-        let mut did_change = false;
         if let Some(state) = self.trim_timeline_state.as_mut() {
             if !state.enabled || state.sound_id != sound_id {
                 return false;
@@ -857,11 +858,6 @@ impl SoundFxApp {
                 target_clip.clip_end_secs = next_cut;
             }
             state.selected_clip_id = Some(original_clip.id);
-            did_change = before != *state;
-        }
-
-        if !did_change {
-            return false;
         }
 
         if let Some((removed_start, removed_end, original_clip)) = animation {
@@ -873,7 +869,7 @@ impl SoundFxApp {
                 removed_end,
             );
         }
-        self.push_trim_timeline_undo_snapshot(before);
+        self.push_trim_timeline_undo_snapshot_changed(before);
         self.refresh_trim_timeline_preview_after_edit(sound_id);
         self.mark_dirty(ctx);
         ctx.request_repaint();
@@ -933,7 +929,6 @@ impl SoundFxApp {
         let timeline_split_secs =
             clip.start_secs + (cut_local_time - clip.clip_start_secs).max(0.0);
         let new_clip_id = Uuid::new_v4();
-        let mut did_change = false;
         if let Some(state) = self.trim_timeline_state.as_mut() {
             let Some(row) = state.rows.get_mut(row_index) else {
                 return false;
@@ -952,14 +947,9 @@ impl SoundFxApp {
             row.clips
                 .sort_by(|left, right| left.start_secs.total_cmp(&right.start_secs));
             state.selected_clip_id = Some(new_clip_id);
-            did_change = before != *state;
         }
 
-        if !did_change {
-            return false;
-        }
-
-        self.push_trim_timeline_undo_snapshot(before);
+        self.push_trim_timeline_undo_snapshot_changed(before);
         self.refresh_trim_timeline_preview_after_edit(sound_id);
         self.mark_dirty(ctx);
         ctx.request_repaint();
