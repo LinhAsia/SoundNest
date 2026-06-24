@@ -4479,13 +4479,6 @@ impl SoundFxApp {
                     StrokeKind::Outside,
                 );
             }
-            painter.line_segment(
-                [
-                    Pos2::new(timeline_rect.left() + 10.0, timeline_rect.bottom() - 14.0),
-                    Pos2::new(timeline_rect.right() - 10.0, timeline_rect.bottom() - 14.0),
-                ],
-                Stroke::new(1.0, Self::subtle_border_color()),
-            );
             let tick_step = if visible_duration > 90.0 {
                 15.0
             } else if visible_duration > 45.0 {
@@ -4563,10 +4556,10 @@ impl SoundFxApp {
                 let clip_right = timeline_rect.left()
                     + ((visible_clip_end - view_start_secs) / visible_duration) * timeline_rect.width();
                 let clip_rect = Rect::from_min_max(
-                    Pos2::new(clip_left, timeline_rect.top() + 8.0),
+                    Pos2::new(clip_left, timeline_rect.top() + 1.0),
                     Pos2::new(
                         clip_right.max(clip_left + 1.5).min(timeline_rect.right()),
-                        timeline_rect.bottom() - 8.0,
+                        timeline_rect.bottom() - 1.0,
                     ),
                 );
                 let min_hit_width = 18.0;
@@ -4577,7 +4570,7 @@ impl SoundFxApp {
                         clip_rect.center(),
                         vec2(min_hit_width.min(timeline_rect.width()), clip_rect.height()),
                     )
-                    .intersect(timeline_rect.shrink2(vec2(0.0, 8.0)))
+                    .intersect(timeline_rect.shrink2(vec2(0.0, 1.0)))
                 };
                 let removable = true;
                 let clip_response = ui.interact(
@@ -4627,12 +4620,12 @@ impl SoundFxApp {
                 );
                 if clip_rect.width() >= 18.0 {
                     let title_rect = Rect::from_min_max(
-                        clip_rect.left_top() + vec2(8.0, 4.0),
-                        Pos2::new((clip_rect.right() - 8.0).max(clip_rect.left() + 8.0), clip_rect.top() + 18.0),
+                        clip_rect.left_top() + vec2(8.0, 2.0),
+                        Pos2::new((clip_rect.right() - 8.0).max(clip_rect.left() + 8.0), clip_rect.top() + 15.0),
                     );
                     let waveform_rect = Rect::from_min_max(
-                        Pos2::new(clip_rect.left() + 8.0, clip_rect.top() + 18.0),
-                        Pos2::new((clip_rect.right() - 8.0).max(clip_rect.left() + 8.0), clip_rect.bottom() - 8.0),
+                        Pos2::new(clip_rect.left() + 8.0, clip_rect.top() + 15.0),
+                        Pos2::new((clip_rect.right() - 8.0).max(clip_rect.left() + 8.0), clip_rect.bottom() - 4.0),
                     );
                     Self::paint_timeline_waveform_columns(
                         &painter,
