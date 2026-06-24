@@ -2540,8 +2540,7 @@ impl SoundFxApp {
         let mut start_music_job = false;
         let mut stop_vocal_job = false;
         let mut stop_music_job = false;
-        let mut save_mix_replace_request = false;
-        let mut save_mix_copy_request = false;
+        let mut save_mix_request = false;
         let mut toggle_timeline_mix_request = false;
         let mut changed = false;
         let mut processed_export_dirty = false;
@@ -2778,10 +2777,8 @@ impl SoundFxApp {
                         .corner_radius(30.0)
                         .inner_margin(Margin::same(22))
                         .show(ui, |ui| {
-                            let (save_replace, save_copy) =
-                                self.render_trim_composer(ui, ctx, sound_id);
-                            save_mix_replace_request |= save_replace;
-                            save_mix_copy_request |= save_copy;
+                            let save_request = self.render_trim_composer(ui, ctx, sound_id);
+                            save_mix_request |= save_request;
                         });
                 } else {
                     Frame::new()
@@ -3358,10 +3355,7 @@ impl SoundFxApp {
             self.start_normalize_job(sound_id);
         }
 
-        if save_mix_replace_request {
-            self.start_trim_commit_job(ctx, false);
-        }
-        if save_mix_copy_request {
+        if save_mix_request {
             self.start_trim_commit_job(ctx, true);
         }
 
@@ -4199,10 +4193,10 @@ impl SoundFxApp {
         ui: &mut Ui,
         ctx: &Context,
         sound_id: Uuid,
-    ) -> (bool, bool) {
+    ) -> bool {
         self.sync_trim_timeline_state_for(sound_id);
         let Some(state_snapshot) = self.trim_timeline_state.as_ref().cloned() else {
-            return (false, false);
+            return false;
         };
 
         let next_enabled = state_snapshot.enabled;
@@ -4210,8 +4204,7 @@ impl SoundFxApp {
         let mut reset_rows = false;
         let mut remove_row = None;
         let mut remove_clip = None;
-        let mut save_replace = false;
-        let mut save_copy = false;
+        let mut save_request = false;
         let mut timeline_state_changed = false;
         let mut zoom = self.trim_timeline_zoom;
 
@@ -4220,7 +4213,7 @@ impl SoundFxApp {
             if let Some(state) = self.trim_timeline_state.as_mut() {
                 state.enabled = false;
             }
-            return (false, false);
+            return false;
         }
 
         ui.horizontal(|ui| {
@@ -4242,22 +4235,13 @@ impl SoundFxApp {
                 {
                     state.snap_enabled = !state.snap_enabled;
                 }
-                let save_copy_button = ui.add_sized(
-                    [92.0, 30.0],
-                    Self::action_button(RichText::new("Save copy").size(11.5), false, false),
+                let save_button = ui.add_sized(
+                    [82.0, 30.0],
+                    Self::action_button(RichText::new("Save").size(11.5), false, false),
                 );
-                Self::decorate_button_response(ui, &save_copy_button);
-                if save_copy_button.clicked() {
-                    save_copy = true;
-                }
-
-                let save_replace_button = ui.add_sized(
-                    [96.0, 30.0],
-                    Self::action_button(RichText::new("Save mix").size(11.5), false, false),
-                );
-                Self::decorate_button_response(ui, &save_replace_button);
-                if save_replace_button.clicked() {
-                    save_replace = true;
+                Self::decorate_button_response(ui, &save_button);
+                if save_button.clicked() {
+                    save_request = true;
                 }
 
                 let reset_button = ui.add_sized(
@@ -4302,7 +4286,7 @@ impl SoundFxApp {
         let base_visible_secs = 12.0f32;
 
         let row_height = 96.0;
-        let row_spacing = 8.0;
+        let row_spacing = 0.0;
         let row_count = state_snapshot.rows.len().max(1);
         let viewport_width = ui.available_width().max(320.0);
         let viewport_height =
@@ -4982,7 +4966,7 @@ impl SoundFxApp {
         self.trim_timeline_view_start_secs = view_start_secs;
         self.trim_timeline_drop_target = next_drop_target;
 
-        (save_replace, save_copy)
+        save_request
     }
 
     pub(super) fn render_trim_commit_panel(&mut self, ctx: &Context) {
