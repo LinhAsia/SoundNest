@@ -1178,18 +1178,34 @@ impl SoundFxApp {
             data.insert_temp(hotkey_id, physical_ctrl_v_down);
             physical_ctrl_v_down && !was_down
         });
-        let command_v = physical_ctrl_v_pressed
+        let logical_command_v_down = ctx.input(|input| {
+            input.key_down(egui::Key::V)
+                && (input.modifiers.ctrl || input.modifiers.command || input.modifiers.mac_cmd)
+                && !input.modifiers.shift
+                && !input.modifiers.alt
+        });
+        let command_v_raw = physical_ctrl_v_pressed
             || ctx.input_mut(|input| input.consume_key(ctrl_modifiers, egui::Key::V))
             || ctx.input(|input| {
-                input.events
-                    .iter()
-                    .any(|event| matches!(event, egui::Event::Paste(_)))
-                    || (input.key_pressed(egui::Key::V)
-                        && (input.modifiers.command || input.modifiers.mac_cmd)
-                        && !input.modifiers.ctrl
-                        && !input.modifiers.shift
-                        && !input.modifiers.alt)
+                input.key_pressed(egui::Key::V)
+                    && (input.modifiers.command || input.modifiers.mac_cmd)
+                    && !input.modifiers.ctrl
+                    && !input.modifiers.shift
+                    && !input.modifiers.alt
             });
+        let command_v = ctx.data_mut(|data| {
+            let latch_id = Self::trim_timeline_paste_shortcut_latch_id(sound_id);
+            let latched = data.get_temp::<bool>(latch_id).unwrap_or(false);
+            if !(physical_ctrl_v_down || logical_command_v_down) {
+                data.insert_temp(latch_id, false);
+            }
+            if command_v_raw && !latched {
+                data.insert_temp(latch_id, true);
+                true
+            } else {
+                false
+            }
+        });
         let split_shortcut =
             ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::B));
 
@@ -1990,6 +2006,10 @@ impl SoundFxApp {
 
     pub(super) fn trim_timeline_physical_paste_hotkey_id(sound_id: Uuid) -> egui::Id {
         egui::Id::new((sound_id, "trim-timeline-physical-paste-hotkey"))
+    }
+
+    pub(super) fn trim_timeline_paste_shortcut_latch_id(sound_id: Uuid) -> egui::Id {
+        egui::Id::new((sound_id, "trim-timeline-paste-shortcut-latch"))
     }
 
     pub(super) fn trim_timeline_clip_drag_snapshot_id(
