@@ -4292,16 +4292,21 @@ impl SoundFxApp {
         }
 
         let pointer_pos = ctx.input(|input| input.pointer.hover_pos());
-        let ctrl_wheel = ctx.input(|input| {
-            if input.modifiers.ctrl {
-                input.raw_scroll_delta.y + input.smooth_scroll_delta.y
-            } else {
-                0.0
-            }
-        });
-        if ctrl_wheel.abs() > 0.0
-            && pointer_pos.is_some_and(|pointer| ui.max_rect().contains(pointer))
-        {
+        let mut ctrl_wheel = 0.0f32;
+        if pointer_pos.is_some_and(|pointer| ui.max_rect().contains(pointer)) {
+            ctx.input_mut(|input| {
+                input.events.retain(|event| {
+                    match event {
+                        egui::Event::MouseWheel { delta, modifiers, .. } if modifiers.ctrl => {
+                            ctrl_wheel += delta.y;
+                            false
+                        }
+                        _ => true,
+                    }
+                });
+            });
+        }
+        if ctrl_wheel.abs() > 0.0 {
             let current_offset = stored_scroll_offset.unwrap_or(0.0);
             let current_content_width = timeline_world_width + 120.0;
             let visible_x = pointer_pos
