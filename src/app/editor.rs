@@ -4186,7 +4186,12 @@ impl SoundFxApp {
                     .corner_radius(30.0)
                     .inner_margin(Margin::same(22))
                     .show(ui, |ui| {
-                        save_mix_request |= self.render_trim_composer(ui, ctx, sound_id);
+                        ScrollArea::vertical()
+                            .id_salt(("trim-timeline-workspace-scroll", sound_id))
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                save_mix_request |= self.render_trim_composer(ui, ctx, sound_id);
+                            });
                     });
             });
 
@@ -5202,7 +5207,8 @@ impl SoundFxApp {
                 ),
                 Sense::hover(),
             );
-        let viewport_painter = ui.painter().with_clip_rect(viewport_rect);
+        let viewport_clip_rect = viewport_rect.intersect(ui.clip_rect());
+        let viewport_painter = ui.painter().with_clip_rect(viewport_clip_rect);
         viewport_painter.rect_filled(viewport_rect, 0.0, Self::surface_fill());
         viewport_painter.rect_stroke(
             viewport_rect,
@@ -5443,6 +5449,9 @@ impl SoundFxApp {
                 Pos2::new(viewport_rect.left(), row_top),
                 vec2(viewport_rect.width(), row_height),
             );
+            if !row_rect.expand2(vec2(0.0, row_height)).intersects(viewport_clip_rect) {
+                continue;
+            }
             let painter = viewport_painter.clone();
 
             let label_rect = Rect::from_min_max(
