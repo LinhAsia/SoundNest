@@ -5463,7 +5463,14 @@ impl SoundFxApp {
                 if clip_is_deleting {
                     ctx.request_repaint();
                 }
-                if clip_response.dragged() {
+                let right_button_down = ctx.input(|input| input.pointer.secondary_down());
+                let hover_pos = ctx.input(|input| input.pointer.hover_pos());
+                let right_sweep_delete = !clip_is_deleting
+                    && removable
+                    && right_button_down
+                    && hover_pos.is_some_and(|pointer| clip_hit_rect.contains(pointer));
+
+                if clip_response.dragged_by(egui::PointerButton::Primary) {
                     ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
                 } else if clip_response.hovered() {
                     ctx.set_cursor_icon(egui::CursorIcon::Grab);
@@ -5488,7 +5495,7 @@ impl SoundFxApp {
                     }
                 }
                 if !clip_is_deleting
-                    && clip_response.drag_started()
+                    && clip_response.drag_started_by(egui::PointerButton::Primary)
                     && let Some(pointer) = clip_response.interact_pointer_pos()
                 {
                     ui.ctx().memory_mut(|memory| memory.stop_text_input());
@@ -5550,12 +5557,12 @@ impl SoundFxApp {
                         );
                     }
                 }
-                if !clip_is_deleting && removable && clip_response.secondary_clicked() {
+                if !clip_is_deleting && removable && (clip_response.secondary_clicked() || right_sweep_delete) {
                     self.trim_timeline_begin_clip_delete_animation(ctx, clip.id);
                 }
                 if !clip_is_deleting
                     && removable
-                    && clip_response.dragged()
+                    && clip_response.dragged_by(egui::PointerButton::Primary)
                     && let Some(pointer) = clip_response.interact_pointer_pos()
                     && let Some(state) = self.trim_timeline_state.as_mut()
                 {
@@ -5628,7 +5635,9 @@ impl SoundFxApp {
                         .sort_by(|left, right| left.start_secs.total_cmp(&right.start_secs));
                     state.selected_clip_id = Some(clip.id);
                 }
-                if !clip_is_deleting && clip_response.drag_stopped() {
+                if !clip_is_deleting
+                    && clip_response.drag_stopped_by(egui::PointerButton::Primary)
+                {
                     let before = ui
                         .ctx()
                         .data(|data| data.get_temp::<TrimTimelineState>(drag_snapshot_id));
