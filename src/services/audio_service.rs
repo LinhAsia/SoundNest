@@ -152,21 +152,46 @@ impl AudioEngine {
             .expect("cached audio should exist after ensure_cached_audio");
         let channels = cached.channels;
         let sample_rate = cached.sample_rate;
-        let (trim_start_sample, trim_end_sample) =
-            trim_sample_range(sound, channels, sample_rate, cached.samples.len())?;
         let speed = sound.speed.clamp(0.25, 2.0);
-        let total_duration_secs = (trim_end_sample - trim_start_sample) as f32
-            / channels.max(1) as f32
-            / sample_rate.max(1) as f32;
-        let total_frames = (trim_end_sample - trim_start_sample) / channels as usize;
-        let start_offset_secs =
-            (start_position_secs - sound.trim_start_secs).clamp(0.0, total_duration_secs.max(0.0));
+        let total_frames = cached.samples.len() / channels as usize;
+        let actual_duration = total_frames as f32 / sample_rate.max(1) as f32;
+        let mut preview_samples = Vec::new();
+        for (range_start, range_end) in sound.trim_ranges() {
+            let range_end = if range_end >= actual_duration - 0.02 {
+                actual_duration
+            } else {
+                range_end.clamp(0.0, actual_duration)
+            };
+            let start_frame =
+                ((range_start * sample_rate as f32).floor() as usize).min(total_frames);
+            let end_frame = if range_end >= actual_duration - 0.02 {
+                total_frames
+            } else {
+                ((range_end * sample_rate as f32).ceil() as usize)
+                    .min(total_frames)
+                    .max(start_frame)
+            };
+            let start_sample = start_frame * channels as usize;
+            let end_sample = end_frame * channels as usize;
+            if end_sample > start_sample {
+                preview_samples.extend_from_slice(&cached.samples[start_sample..end_sample]);
+            }
+        }
+        if preview_samples.is_empty() {
+            bail!("audio file is empty");
+        }
+        let total_duration_secs =
+            preview_samples.len() as f32 / channels.max(1) as f32 / sample_rate.max(1) as f32;
+        let start_offset_secs = sound
+            .timeline_secs_to_output_secs(start_position_secs)
+            .clamp(0.0, total_duration_secs.max(0.0));
+        let preview_total_frames = preview_samples.len() / channels as usize;
         let start_frame = ((start_offset_secs * sample_rate as f32).floor() as usize)
-            .min(total_frames.saturating_sub(1));
+            .min(preview_total_frames.saturating_sub(1));
         let start_offset_secs = start_frame as f32 / sample_rate as f32;
-        let start_sample = trim_start_sample + start_frame * channels as usize;
+        let start_sample = start_frame * channels as usize;
 
-        let mut preview_samples = cached.samples[start_sample..trim_end_sample].to_vec();
+        preview_samples = preview_samples[start_sample..].to_vec();
         apply_sound_effects(&mut preview_samples, channels, sample_rate, sound);
         let preview = SamplesBuffer::new(channels, sample_rate, preview_samples)
             .speed(speed)
@@ -411,38 +436,6 @@ pub fn play_file_blocking(asset_path: &Path) -> Result<()> {
     sink.append(SamplesBuffer::new(channels, sample_rate, samples));
     sink.sleep_until_end();
     Ok(())
-}
-
-fn trim_sample_range(
-    sound: &SoundEffect,
-    channels: u16,
-    sample_rate: u32,
-    sample_len: usize,
-) -> Result<(usize, usize)> {
-    if sample_len == 0 {
-        bail!("audio file is empty");
-    }
-
-    let total_frames = sample_len / channels as usize;
-    let actual_duration = total_frames as f32 / sample_rate as f32;
-    let trim_start = sound.trim_start_secs.clamp(0.0, actual_duration);
-    let trim_end = if sound.trim_end_secs >= sound.safe_duration() - 0.02 {
-        actual_duration
-    } else {
-        sound.trim_end_secs.clamp(0.0, actual_duration)
-    };
-    let start_frame = ((trim_start * sample_rate as f32).floor() as usize).min(total_frames);
-    let end_frame = if trim_end >= actual_duration - 0.02 {
-        total_frames
-    } else {
-        ((trim_end * sample_rate as f32).ceil() as usize)
-            .min(total_frames)
-            .max(start_frame + 1)
-    };
-    let start_sample = start_frame * channels as usize;
-    let end_sample = (end_frame * channels as usize).min(sample_len);
-
-    Ok((start_sample, end_sample))
 }
 
 fn decode_audio_file(asset_path: &Path) -> Result<(u16, u32, Vec<f32>)> {

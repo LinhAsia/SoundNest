@@ -3032,10 +3032,24 @@ impl SoundFxApp {
                             cut_rect,
                             12.0,
                             if dark_theme {
-                                Color32::from_rgba_premultiplied(214, 51, 132, 72)
+                                timeline_fill
                             } else {
-                                Color32::from_rgba_premultiplied(214, 51, 132, 52)
+                                timeline_fill
                             },
+                        );
+                        painter.rect_stroke(
+                            cut_rect,
+                            12.0,
+                            Stroke::new(2.0, Color32::from_rgb(214, 51, 132)),
+                            StrokeKind::Inside,
+                        );
+                        let line_y = cut_rect.center().y;
+                        painter.line_segment(
+                            [
+                                Pos2::new(cut_rect.left() + 8.0, line_y),
+                                Pos2::new(cut_rect.right() - 8.0, line_y),
+                            ],
+                            Stroke::new(2.0, Color32::from_rgb(214, 51, 132)),
                         );
                     }
 
