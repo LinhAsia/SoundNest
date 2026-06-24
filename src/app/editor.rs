@@ -2982,33 +2982,29 @@ impl SoundFxApp {
                         StrokeKind::Outside,
                     );
 
+                    let has_cutout = sound.has_cutout();
                     let start_t = sound.trim_start_secs / duration;
                     let end_t = sound.trim_end_secs / duration;
-                    let start_x = rect.left() + rect.width() * start_t.clamp(0.0, 1.0);
-                    let end_x = rect.left() + rect.width() * end_t.clamp(0.0, 1.0);
-                    let cut_rect = if let (Some(cut_start), Some(cut_end)) =
-                        (sound.cut_start_secs, sound.cut_end_secs)
-                    {
-                        let cut_start_t = cut_start / duration;
-                        let cut_end_t = cut_end / duration;
-                        Some(Rect::from_min_max(
-                            Pos2::new(
-                                rect.left() + rect.width() * cut_start_t.clamp(0.0, 1.0),
-                                rect.top() + 10.0,
-                            ),
-                            Pos2::new(
-                                rect.left() + rect.width() * cut_end_t.clamp(0.0, 1.0),
-                                rect.bottom() - 10.0,
-                            ),
-                        ))
+                    let start_x = if has_cutout {
+                        rect.left()
                     } else {
-                        None
+                        rect.left() + rect.width() * start_t.clamp(0.0, 1.0)
+                    };
+                    let end_x = if has_cutout {
+                        rect.right()
+                    } else {
+                        rect.left() + rect.width() * end_t.clamp(0.0, 1.0)
+                    };
+                    let display_waveform = if has_cutout {
+                        Self::trimmed_waveform_preview_from_samples(sound, waveform_samples)
+                    } else {
+                        waveform_samples.to_vec()
                     };
 
                     Self::paint_waveform_bars(
                         &painter,
                         rect.shrink2(vec2(12.0, 14.0)),
-                        waveform_samples,
+                        &display_waveform,
                         start_x,
                         end_x,
                         None,
@@ -3027,31 +3023,6 @@ impl SoundFxApp {
                             Color32::from_rgba_premultiplied(227, 82, 149, 24)
                         },
                     );
-                    if let Some(cut_rect) = cut_rect {
-                        painter.rect_filled(
-                            cut_rect,
-                            12.0,
-                            if dark_theme {
-                                timeline_fill
-                            } else {
-                                timeline_fill
-                            },
-                        );
-                        painter.rect_stroke(
-                            cut_rect,
-                            12.0,
-                            Stroke::new(2.0, Color32::from_rgb(214, 51, 132)),
-                            StrokeKind::Inside,
-                        );
-                        let line_y = cut_rect.center().y;
-                        painter.line_segment(
-                            [
-                                Pos2::new(cut_rect.left() + 8.0, line_y),
-                                Pos2::new(cut_rect.right() - 8.0, line_y),
-                            ],
-                            Stroke::new(2.0, Color32::from_rgb(214, 51, 132)),
-                        );
-                    }
 
                     let handle_stroke = Stroke::new(2.0, Color32::from_rgb(214, 51, 132));
                     painter.line_segment(
@@ -3384,20 +3355,26 @@ impl SoundFxApp {
                     };
                     if let Some(region) = delete_region {
                         let before = TrimSnapshot::from_sound(sound);
+                        let current_trim_start = sound.trim_start_secs;
+                        let current_trim_end = sound.trim_end_secs;
                         match region {
                             TrimDeleteRegion::Left => {
-                                sound.clear_cutout();
+                                sound.trim_start_secs = 0.0;
                                 sound.trim_end_secs = duration;
+                                sound.cut_start_secs = Some(0.0);
+                                sound.cut_end_secs = Some(current_trim_start.max(0.05));
                             }
                             TrimDeleteRegion::Middle => {
                                 sound.trim_start_secs = 0.0;
                                 sound.trim_end_secs = duration;
-                                sound.cut_start_secs = Some(start_t * duration);
-                                sound.cut_end_secs = Some(end_t * duration);
+                                sound.cut_start_secs = Some(current_trim_start);
+                                sound.cut_end_secs = Some(current_trim_end);
                             }
                             TrimDeleteRegion::Right => {
-                                sound.clear_cutout();
                                 sound.trim_start_secs = 0.0;
+                                sound.trim_end_secs = duration;
+                                sound.cut_start_secs = Some(current_trim_end.min(duration - 0.05));
+                                sound.cut_end_secs = Some(duration);
                             }
                         }
                         sound.clamp_trim();
