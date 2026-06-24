@@ -343,8 +343,8 @@ impl SoundFxApp {
                 ui.add_space(6.0);
                 ui.label(
                     RichText::new(self.t("stream.description"))
-                    .size(11.5)
-                    .color(Self::muted_text_color()),
+                        .size(11.5)
+                        .color(Self::muted_text_color()),
                 );
 
                 ui.add_space(10.0);
@@ -598,10 +598,7 @@ impl SoundFxApp {
                         }
                         ui.add_space(8.0);
                         let show_live_wave_label = self.t("stream.show_live_wave");
-                        ui.checkbox(
-                            &mut self.stream_input_show_waveform,
-                            show_live_wave_label,
-                        );
+                        ui.checkbox(&mut self.stream_input_show_waveform, show_live_wave_label);
                         if snapshot.running {
                             ui.add_space(8.0);
                             let meter_level = Self::boost_stream_meter_level(snapshot.level);
@@ -624,11 +621,9 @@ impl SoundFxApp {
                             );
                             ui.add_space(4.0);
                             ui.label(
-                                RichText::new(
-                                    "Neu ban vua cai driver ma chua restart Windows, hay restart 1 lan roi mo app lai.",
-                                )
-                                .size(10.5)
-                                .color(Self::muted_text_color()),
+                                RichText::new(self.t("stream.restart_after_driver_install"))
+                                    .size(10.5)
+                                    .color(Self::muted_text_color()),
                             );
                         }
                     });

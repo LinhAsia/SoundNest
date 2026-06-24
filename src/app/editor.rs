@@ -1248,6 +1248,17 @@ impl SoundFxApp {
         let effect_underwater_hint = self.t("editor.effect_underwater_hint");
         let effect_robot_hint = self.t("editor.effect_robot_hint");
         let effect_pitch_shift_hint = self.t("editor.effect_pitch_shift_hint");
+        let vocal_unavailable_label = self.t("editor.vocal_unavailable");
+        let first_run_slower_label = self.t("editor.first_run_slower");
+        let export_label = self.t("editor.export");
+        let animation_label = self.t("editor.animation");
+        let fps_label = self.t("editor.fps");
+        let stop_label = self.t("editor.stop");
+        let preview_label = self.t("editor.preview");
+        let export_spn_label = self.t("editor.export_spn");
+        let save_audio_label = self.t("editor.save_audio");
+        let close_label = self.t("editor.close");
+        let discard_label = self.t("editor.discard");
         let vocal_elapsed_label = self.t("editor.vocal_elapsed");
         let vocal_elapsed_text = if record_vocal_job_running {
             self.vocal_separation_elapsed_secs().map(|elapsed_secs| {
@@ -1703,14 +1714,14 @@ impl SoundFxApp {
                             if !demucs_available {
                                 ui.add_space(8.0);
                                 ui.label(
-                                    RichText::new("(vocal separation is unavailable)")
+                                    RichText::new(&vocal_unavailable_label)
                                         .size(11.5)
                                         .color(Self::muted_text_color()),
                                 );
                             } else if draft.keep_vocal || draft.keep_music {
                                 ui.add_space(8.0);
                                 ui.label(
-                                    RichText::new("(first run can be slower)")
+                                    RichText::new(&first_run_slower_label)
                                         .size(11.5)
                                         .color(Self::muted_text_color()),
                                 );
@@ -1732,7 +1743,7 @@ impl SoundFxApp {
                                     egui::Layout::left_to_right(Align::Center),
                                     |ui| {
                                         ui.label(
-                                            RichText::new("Export")
+                                            RichText::new(&export_label)
                                                 .size(12.5)
                                                 .color(Self::muted_text_color()),
                                         );
@@ -1743,7 +1754,7 @@ impl SoundFxApp {
                                 let animation = ui.add_sized(
                                     [108.0, 32.0],
                                     Self::action_button(
-                                        RichText::new("Animation").size(12.5),
+                                        RichText::new(&animation_label).size(12.5),
                                         self.record_export_video_animation,
                                         false,
                                     ),
@@ -1776,7 +1787,7 @@ impl SoundFxApp {
                                     egui::Layout::left_to_right(Align::Center),
                                     |ui| {
                                         ui.label(
-                                            RichText::new("FPS")
+                                            RichText::new(&fps_label)
                                                 .size(12.5)
                                                 .color(Self::muted_text_color()),
                                         );
@@ -1830,7 +1841,12 @@ impl SoundFxApp {
                     let preview = ui.add_sized(
                         [118.0, 38.0],
                         Self::action_button(
-                            RichText::new(if is_playing { "Stop" } else { "Preview" }).size(13.0),
+                            RichText::new(if is_playing {
+                                &stop_label
+                            } else {
+                                &preview_label
+                            })
+                            .size(13.0),
                             is_playing,
                             false,
                         ),
@@ -1846,7 +1862,7 @@ impl SoundFxApp {
                                 ui.add_sized(
                                     [132.0, 38.0],
                                     Self::action_button(
-                                        RichText::new("Export SPN").size(13.0),
+                                        RichText::new(&export_spn_label).size(13.0),
                                         false,
                                         false,
                                     ),
@@ -1861,7 +1877,7 @@ impl SoundFxApp {
                         let save = ui.add_sized(
                             [132.0, 38.0],
                             Self::action_button(
-                                RichText::new("Save audio").size(13.0),
+                                RichText::new(&save_audio_label).size(13.0),
                                 false,
                                 false,
                             ),
@@ -1878,9 +1894,9 @@ impl SoundFxApp {
                                 [118.0, 38.0],
                                 Self::action_button(
                                     RichText::new(if is_video_export_mode {
-                                        "Close"
+                                        &close_label
                                     } else {
-                                        "Discard"
+                                        &discard_label
                                     })
                                     .size(13.0),
                                     false,

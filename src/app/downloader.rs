@@ -762,7 +762,7 @@ impl SoundFxApp {
                             parts.push("YouTube".to_owned());
                         }
                         ui.label(
-                            RichText::new(parts.join("  •  "))
+                            RichText::new(parts.join("  -  "))
                                 .size(12.0)
                                 .color(Self::muted_text_color()),
                         );
@@ -1277,7 +1277,7 @@ impl SoundFxApp {
 
                     ui.horizontal(|ui| {
                         ui.label(
-                            RichText::new("Supporting web:")
+                            RichText::new(self.t("download.supporting_web"))
                                 .size(12.5)
                                 .color(Self::muted_text_color()),
                         );
@@ -1294,17 +1294,17 @@ impl SoundFxApp {
                         help.on_hover_ui_at_pointer(|ui| {
                             ui.set_max_width(300.0);
                             ui.label(
-                                RichText::new("Supported websites")
+                                RichText::new(self.t("download.supported_websites"))
                                     .size(13.0)
                                     .color(Self::strong_text_color())
                                     .strong(),
                             );
                             ui.add_space(4.0);
-                            ui.label("Works through yt-dlp, so it supports many sites.");
-                            ui.label("Common examples: YouTube, SoundCloud, Bandcamp, TikTok, Facebook, Instagram, X/Twitter, Vimeo, Dailymotion, Bilibili, Twitch, Google Drive, direct media links.");
+                            ui.label(self.t("download.supported_websites_help_1"));
+                            ui.label(self.t("download.supported_websites_help_2"));
                             ui.add_space(4.0);
-                            ui.label("Some sites can still fail because of login, region lock, cookies, or DRM.");
-                            ui.label("Spotify album / track links are usually DRM-protected and will not download.");
+                            ui.label(self.t("download.supported_websites_help_3"));
+                            ui.label(self.t("download.supported_websites_help_4"));
                         });
                     });
                     ui.add_space(8.0);

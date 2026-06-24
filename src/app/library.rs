@@ -22,7 +22,7 @@ impl SoundFxApp {
         let selected_parent_label = self
             .library_current_folder
             .map(|folder_id| self.folder_path_label(folder_id))
-            .unwrap_or_else(|| "Root".to_owned());
+            .unwrap_or_else(|| self.t("common.root"));
 
         ui.horizontal(|ui| {
             if self.library_folder_view == LibraryFolderView::Grid
@@ -58,7 +58,7 @@ impl SoundFxApp {
                 let grid_btn = ui.add_sized(
                     [58.0, 30.0],
                     Self::action_button(
-                        RichText::new("Grid").size(11.5),
+                        RichText::new(self.t("library.grid")).size(11.5),
                         self.library_folder_view == LibraryFolderView::Grid,
                         false,
                     ),
@@ -74,7 +74,7 @@ impl SoundFxApp {
                 let rows_btn = ui.add_sized(
                     [58.0, 30.0],
                     Self::action_button(
-                        RichText::new("Rows").size(11.5),
+                        RichText::new(self.t("library.rows")).size(11.5),
                         self.library_folder_view == LibraryFolderView::Rows,
                         false,
                     ),
@@ -91,9 +91,9 @@ impl SoundFxApp {
                     [160.0, 32.0],
                     Button::new(
                         RichText::new(if self.library_folder_create_open {
-                            "Hide Add Folder"
+                            self.t("library.hide_add_folder")
                         } else {
-                            "+ Add Folder"
+                            self.t("library.add_folder")
                         })
                         .size(12.5)
                         .color(Color32::WHITE),
@@ -119,7 +119,7 @@ impl SoundFxApp {
                         .find(|folder| folder.id == folder_id)
                         .map(|folder| self.folder_path_label(folder.id))
                 })
-                .unwrap_or_else(|| "Root".to_owned());
+                .unwrap_or_else(|| self.t("common.root"));
             Frame::new()
                 .fill(Color32::from_rgba_premultiplied(242, 140, 56, 20))
                 .stroke(Stroke::new(1.0, Color32::from_rgb(242, 140, 56)))
@@ -129,10 +129,13 @@ impl SoundFxApp {
                     ui.horizontal(|ui| {
                         ui.label(Self::icon(0xe2c7, 16.0, Color32::from_rgb(242, 140, 56)));
                         ui.label(
-                            RichText::new(format!("Importing into {target_label}"))
-                                .size(12.5)
-                                .color(Self::strong_text_color())
-                                .strong(),
+                            RichText::new(
+                                self.t("library.importing_into")
+                                    .replace("{target}", &target_label),
+                            )
+                            .size(12.5)
+                            .color(Self::strong_text_color())
+                            .strong(),
                         );
                         ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                             let total = import_job.total.max(import_job.completed.max(1));
@@ -161,7 +164,7 @@ impl SoundFxApp {
         if self.library_folder_create_open {
             ui.add_space(10.0);
             ui.label(
-                RichText::new("Create folder in:")
+                RichText::new(self.t("library.create_folder_in"))
                     .size(11.5)
                     .color(Self::muted_text_color()),
             );
@@ -186,7 +189,11 @@ impl SoundFxApp {
                 if self.library_current_folder.is_some() {
                     let clear_btn = ui.add_sized(
                         [92.0, 30.0],
-                        Self::action_button(RichText::new("To root").size(12.0), false, false),
+                        Self::action_button(
+                            RichText::new(self.t("library.to_root")).size(12.0),
+                            false,
+                            false,
+                        ),
                     );
                     Self::decorate_button_response(ui, &clear_btn);
                     if clear_btn.clicked() {
@@ -486,10 +493,13 @@ impl SoundFxApp {
                                         .add_enabled_ui(clipboard_paste_ready, |ui| {
                                             ui.add_sized(
                                                 [58.0, 30.0],
-                                                Button::new(RichText::new("Paste").size(11.5))
-                                                    .fill(folder_accent)
-                                                    .stroke(Stroke::new(1.0, folder_accent_soft))
-                                                    .corner_radius(10.0),
+                                                Button::new(
+                                                    RichText::new(self.t("common.paste"))
+                                                        .size(11.5),
+                                                )
+                                                .fill(folder_accent)
+                                                .stroke(Stroke::new(1.0, folder_accent_soft))
+                                                .corner_radius(10.0),
                                             )
                                         })
                                         .inner;
@@ -499,9 +509,12 @@ impl SoundFxApp {
                                             .paste_clipboard_sounds_to_folder(folder.id, ui.ctx())
                                         {
                                             Ok(imported) => {
-                                                self.status = Some(format!(
-                                                    "Pasted {imported} sound(s) into folder"
-                                                ));
+                                                self.status = Some(
+                                                    self.t("library.pasted_into_folder").replace(
+                                                        "{imported}",
+                                                        &imported.to_string(),
+                                                    ),
+                                                );
                                             }
                                             Err(error) => self.set_error_status(error),
                                         }
@@ -865,9 +878,12 @@ impl SoundFxApp {
                                         .add_enabled_ui(clipboard_paste_ready, |ui| {
                                             ui.add_sized(
                                                 [58.0, 28.0],
-                                                Button::new(RichText::new("Paste").size(10.8))
-                                                    .fill(folder_accent)
-                                                    .corner_radius(9.0),
+                                                Button::new(
+                                                    RichText::new(self.t("common.paste"))
+                                                        .size(10.8),
+                                                )
+                                                .fill(folder_accent)
+                                                .corner_radius(9.0),
                                             )
                                         })
                                         .inner;
@@ -877,9 +893,12 @@ impl SoundFxApp {
                                             .paste_clipboard_sounds_to_folder(folder.id, ui.ctx())
                                         {
                                             Ok(imported) => {
-                                                self.status = Some(format!(
-                                                    "Pasted {imported} sound(s) into folder"
-                                                ));
+                                                self.status = Some(
+                                                    self.t("library.pasted_into_folder").replace(
+                                                        "{imported}",
+                                                        &imported.to_string(),
+                                                    ),
+                                                );
                                             }
                                             Err(error) => self.set_error_status(error),
                                         }
@@ -1304,7 +1323,7 @@ impl SoundFxApp {
                     self.set_error_status(error);
                 } else {
                     self.mark_sound_copied(ui.ctx(), sound_id);
-                    self.status = Some("Copied to clipboard".to_owned());
+                    self.status = Some(self.t("library.copied_to_clipboard"));
                 }
             }
         }
@@ -1373,7 +1392,7 @@ impl SoundFxApp {
                 let sounds_tab = ui.add_sized(
                     [92.0, 30.0],
                     Self::action_button(
-                        RichText::new("Library").size(12.5),
+                        RichText::new(self.t("library.library")).size(12.5),
                         self.library_tab == LibraryTab::Sounds,
                         false,
                     ),
@@ -1477,7 +1496,7 @@ impl SoundFxApp {
                         let grid_btn = ui.add_sized(
                             [58.0, 30.0],
                             Self::action_button(
-                                RichText::new("Grid").size(11.5),
+                                RichText::new(self.t("library.grid")).size(11.5),
                                 self.library_sound_view == LibrarySoundView::Grid,
                                 false,
                             ),
@@ -1493,7 +1512,7 @@ impl SoundFxApp {
                         let rows_btn = ui.add_sized(
                             [58.0, 30.0],
                             Self::action_button(
-                                RichText::new("Rows").size(11.5),
+                                RichText::new(self.t("library.rows")).size(11.5),
                                 self.library_sound_view == LibrarySoundView::Rows,
                                 false,
                             ),
@@ -1583,9 +1602,14 @@ impl SoundFxApp {
                             }
                             ui.add_space(8.0);
                             ui.label(
-                                RichText::new(format!("Row {}", self.library_row_thickness))
-                                    .size(11.5)
-                                    .color(Self::muted_text_color()),
+                                RichText::new(
+                                    self.t("library.row_label").replace(
+                                        "{value}",
+                                        &self.library_row_thickness.to_string(),
+                                    ),
+                                )
+                                .size(11.5)
+                                .color(Self::muted_text_color()),
                             );
                         });
                         if library_slider_active {
@@ -1977,7 +2001,9 @@ impl SoundFxApp {
                                     if self.sound_copy_feedback_active(ui.ctx(), sound.id) {
                                         ui.add_space(6.0);
                                         ui.label(
-                                            RichText::new("Copied").size(11.0).color(meta_color),
+                                            RichText::new(self.t("common.copied"))
+                                                .size(11.0)
+                                                .color(meta_color),
                                         );
                                     }
                                 }
@@ -2059,7 +2085,7 @@ impl SoundFxApp {
                     self.set_error_status(error);
                 } else {
                     self.mark_sound_copied(ui.ctx(), sound_id);
-                    self.status = Some("Copied to clipboard".to_owned());
+                    self.status = Some(self.t("library.copied_to_clipboard"));
                 }
             }
         }
@@ -2311,7 +2337,9 @@ impl SoundFxApp {
                                     if self.video_copy_feedback_active(ui.ctx(), video.id) {
                                         ui.add_space(6.0);
                                         ui.label(
-                                            RichText::new("Copied").size(11.0).color(meta_color),
+                                            RichText::new(self.t("common.copied"))
+                                                .size(11.0)
+                                                .color(meta_color),
                                         );
                                     }
                                 }
@@ -2337,7 +2365,7 @@ impl SoundFxApp {
                 self.set_error_status(error);
             } else {
                 self.mark_video_copied(ui.ctx(), video.id);
-                self.status = Some("Copied to clipboard".to_owned());
+                self.status = Some(self.t("library.copied_to_clipboard"));
             }
         }
         if let Some(video_id) = favorite_video {
