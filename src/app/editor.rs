@@ -240,6 +240,22 @@ impl SoundFxApp {
             .max(0.25)
     }
 
+    fn trim_timeline_track_waveform(&self, sound: &SoundEffect, max_bars: usize) -> Vec<f32> {
+        let waveform = self.sound_waveform_samples(sound);
+        let preview = Self::trimmed_waveform_preview_from_samples(sound, &waveform);
+        if preview.len() <= max_bars {
+            return preview;
+        }
+
+        let mut reduced = Vec::with_capacity(max_bars);
+        let chunk = (preview.len() as f32 / max_bars as f32).ceil() as usize;
+        for slice in preview.chunks(chunk.max(1)) {
+            let level = slice.iter().copied().fold(0.0f32, f32::max);
+            reduced.push(level);
+        }
+        reduced
+    }
+
     fn collect_trim_timeline_render_clips(&self, sound_id: Uuid) -> Option<Vec<(SoundEffect, f32)>> {
         let state = self.trim_timeline_state.as_ref()?;
         if !state.enabled || state.sound_id != sound_id {
@@ -3934,8 +3950,46 @@ impl SoundFxApp {
             ui.add_space(6.0);
         }
 
+        if let Some(drag_sound) = pending_drag_sound
+            && let Some(pointer) = ctx.input(|input| input.pointer.hover_pos())
+        {
+            let overlay_painter = ctx.layer_painter(egui::LayerId::new(
+                egui::Order::Foreground,
+                egui::Id::new(("trim-timeline-drag-ghost", sound_id)),
+            ));
+            let ghost_rect = Rect::from_min_size(
+                pointer + vec2(18.0, 18.0),
+                vec2(220.0, 54.0),
+            );
+            overlay_painter.rect_filled(
+                ghost_rect,
+                16.0,
+                Color32::from_rgba_premultiplied(29, 24, 34, 232),
+            );
+            overlay_painter.rect_stroke(
+                ghost_rect,
+                16.0,
+                Stroke::new(1.0, Color32::from_rgba_premultiplied(108, 231, 255, 210)),
+                StrokeKind::Outside,
+            );
+            overlay_painter.text(
+                ghost_rect.left_top() + vec2(12.0, 9.0),
+                Align2::LEFT_TOP,
+                &drag_sound.name,
+                FontId::proportional(12.0),
+                Self::strong_text_color(),
+            );
+            overlay_painter.text(
+                ghost_rect.left_bottom() + vec2(12.0, -9.0),
+                Align2::LEFT_BOTTOM,
+                format_time(drag_sound.trimmed_length()),
+                FontId::proportional(10.5),
+                Self::muted_text_color(),
+            );
+        }
+
         for (row_index, row) in state_snapshot.rows.iter().enumerate() {
-            let row_height = 72.0;
+            let row_height = 96.0;
             let (row_rect, _row_response) = ui.allocate_exact_size(
                 vec2(ui.available_width(), row_height),
                 Sense::hover(),
@@ -3997,11 +4051,22 @@ impl SoundFxApp {
                 Pos2::new(label_rect.right() + 8.0, row_rect.top() + 12.0),
                 Pos2::new(remove_row_rect.left() - 10.0, row_rect.bottom() - 12.0),
             );
-            painter.rect_filled(timeline_rect, 14.0, Self::input_fill());
+            let row_hovered = ctx
+                .input(|input| input.pointer.hover_pos())
+                .is_some_and(|pointer| timeline_rect.contains(pointer));
+            painter.rect_filled(
+                timeline_rect,
+                14.0,
+                if row_hovered && pending_drag_sound.is_some() {
+                    Color32::from_rgba_premultiplied(108, 231, 255, 18)
+                } else {
+                    Self::input_fill()
+                },
+            );
             painter.line_segment(
                 [
-                    Pos2::new(timeline_rect.left() + 10.0, timeline_rect.center().y),
-                    Pos2::new(timeline_rect.right() - 10.0, timeline_rect.center().y),
+                    Pos2::new(timeline_rect.left() + 10.0, timeline_rect.bottom() - 14.0),
+                    Pos2::new(timeline_rect.right() - 10.0, timeline_rect.bottom() - 14.0),
                 ],
                 Stroke::new(1.0, Self::subtle_border_color()),
             );
@@ -4020,10 +4085,10 @@ impl SoundFxApp {
                 let clip_width =
                     ((clip_duration / total_duration) * timeline_rect.width()).max(44.0);
                 let clip_rect = Rect::from_min_max(
-                    Pos2::new(clip_left, timeline_rect.top() + 6.0),
+                    Pos2::new(clip_left, timeline_rect.top() + 8.0),
                     Pos2::new(
                         (clip_left + clip_width).min(timeline_rect.right()),
-                        timeline_rect.bottom() - 6.0,
+                        timeline_rect.bottom() - 8.0,
                     ),
                 );
                 let removable = !(row_index == 0 && clip_index == 0);
@@ -4056,18 +4121,25 @@ impl SoundFxApp {
                     ),
                     StrokeKind::Outside,
                 );
-                let waveform = self.sound_waveform_samples(sound);
-                let preview = Self::trimmed_waveform_preview_from_samples(sound, &waveform);
+                let preview = self.trim_timeline_track_waveform(sound, 72);
+                let title_rect = Rect::from_min_max(
+                    clip_rect.left_top() + vec2(10.0, 6.0),
+                    Pos2::new(clip_rect.right() - 10.0, clip_rect.top() + 24.0),
+                );
+                let waveform_rect = Rect::from_min_max(
+                    Pos2::new(clip_rect.left() + 10.0, clip_rect.top() + 30.0),
+                    Pos2::new(clip_rect.right() - 10.0, clip_rect.bottom() - 10.0),
+                );
                 Self::paint_waveform_bars(
                     &painter,
-                    clip_rect.shrink2(vec2(8.0, 10.0)),
+                    waveform_rect,
                     &preview,
-                    clip_rect.left() + 8.0,
-                    clip_rect.right() - 8.0,
+                    waveform_rect.left(),
+                    waveform_rect.right(),
                     None,
                 );
                 painter.text(
-                    Pos2::new(clip_rect.left() + 8.0, clip_rect.top() + 5.0),
+                    title_rect.left_top(),
                     Align2::LEFT_TOP,
                     &sound.name,
                     FontId::proportional(11.0),
@@ -4096,8 +4168,8 @@ impl SoundFxApp {
                 let marker_x = timeline_rect.left() + ratio * timeline_rect.width();
                 painter.line_segment(
                     [
-                        Pos2::new(marker_x, timeline_rect.top() + 4.0),
-                        Pos2::new(marker_x, timeline_rect.bottom() - 4.0),
+                        Pos2::new(marker_x, timeline_rect.top() + 6.0),
+                        Pos2::new(marker_x, timeline_rect.bottom() - 6.0),
                     ],
                     Stroke::new(2.0, Color32::from_rgb(108, 231, 255)),
                 );
@@ -4112,11 +4184,47 @@ impl SoundFxApp {
                             timeline_rect.bottom() - 8.0,
                         ),
                     );
+                    painter.rect_filled(
+                        ghost_rect,
+                        12.0,
+                        Color32::from_rgba_premultiplied(108, 231, 255, 22),
+                    );
                     painter.rect_stroke(
                         ghost_rect,
                         10.0,
                         Stroke::new(1.25, Color32::from_rgba_premultiplied(108, 231, 255, 192)),
                         StrokeKind::Outside,
+                    );
+                    let ghost_waveform = self.trim_timeline_track_waveform(drag_sound, 64);
+                    let ghost_title_rect = Rect::from_min_max(
+                        ghost_rect.left_top() + vec2(10.0, 6.0),
+                        Pos2::new(ghost_rect.right() - 10.0, ghost_rect.top() + 24.0),
+                    );
+                    let ghost_waveform_rect = Rect::from_min_max(
+                        Pos2::new(ghost_rect.left() + 10.0, ghost_rect.top() + 30.0),
+                        Pos2::new(ghost_rect.right() - 10.0, ghost_rect.bottom() - 10.0),
+                    );
+                    Self::paint_waveform_bars(
+                        &painter,
+                        ghost_waveform_rect,
+                        &ghost_waveform,
+                        ghost_waveform_rect.left(),
+                        ghost_waveform_rect.right(),
+                        None,
+                    );
+                    painter.text(
+                        ghost_title_rect.left_top(),
+                        Align2::LEFT_TOP,
+                        &drag_sound.name,
+                        FontId::proportional(11.0),
+                        Color32::from_rgb(208, 244, 255),
+                    );
+                    painter.text(
+                        Pos2::new(marker_x + 6.0, timeline_rect.top() - 8.0),
+                        Align2::LEFT_BOTTOM,
+                        format!("Drop at {}", format_time(start_secs)),
+                        FontId::proportional(10.5),
+                        Color32::from_rgb(208, 244, 255),
                     );
                 }
                 ctx.set_cursor_icon(egui::CursorIcon::Copy);

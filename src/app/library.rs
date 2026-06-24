@@ -1282,7 +1282,9 @@ impl SoundFxApp {
         } else if response.drag_started() {
             self.pending_sound_drag = Some(sound.id);
         } else if response.drag_stopped() {
-            self.pending_sound_drag = None;
+            if !self.trim_timeline_drag_capture_active() {
+                self.pending_sound_drag = None;
+            }
         } else if response.dragged()
             && self.pending_sound_drag == Some(sound.id)
             && Self::pointer_primary_drag_ready(ui.ctx())
@@ -1291,8 +1293,8 @@ impl SoundFxApp {
                 if let Err(error) = self.drag_sound_file_out(ui.ctx(), sound) {
                     self.set_error_status(error);
                 }
+                self.pending_sound_drag = None;
             }
-            self.pending_sound_drag = None;
         }
         let over_action = favorite_response
             .as_ref()
@@ -1781,8 +1783,8 @@ impl SoundFxApp {
                 {
                     if !self.trim_timeline_drag_capture_active() {
                         drag_sound = Some(sound.id);
+                        self.pending_sound_drag = None;
                     }
-                    self.pending_sound_drag = None;
                 }
                 let mut body_clicked = false;
                 if !modal_open && body_response.clicked() {
@@ -2625,8 +2627,8 @@ impl SoundFxApp {
                             {
                                 if !self.trim_timeline_drag_capture_active() {
                                     drag_request = Some(sound.id);
+                                    self.pending_sound_drag = None;
                                 }
-                                self.pending_sound_drag = None;
                             }
                             if !modal_open && response.clicked() {
                                 self.selected = Some(sound.id);
