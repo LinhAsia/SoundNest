@@ -304,6 +304,37 @@ impl SoundFxApp {
         next_start.max(0.0)
     }
 
+    fn trim_timeline_preview_drop_start(
+        row: &TrimTimelineRow,
+        desired_start_secs: f32,
+        clip_duration_secs: f32,
+        snap_enabled: bool,
+    ) -> f32 {
+        let mut next_start = desired_start_secs.max(0.0);
+        let clip_duration = clip_duration_secs.max(0.05);
+
+        if snap_enabled {
+            let mut snap_points = vec![0.0];
+            for existing in &row.clips {
+                snap_points.push(existing.start_secs.max(0.0));
+                snap_points.push(
+                    existing.start_secs.max(0.0)
+                        + (existing.clip_end_secs - existing.clip_start_secs).max(0.05),
+                );
+            }
+            if let Some(snap) = snap_points.into_iter().min_by(|left, right| {
+                (left - next_start)
+                    .abs()
+                    .total_cmp(&(right - next_start).abs())
+            }) && (snap - next_start).abs() <= 0.18
+            {
+                next_start = snap;
+            }
+        }
+
+        Self::trim_timeline_resolve_row_start(row, None, next_start, clip_duration)
+    }
+
     fn collect_trim_timeline_render_clips(
         &self,
         sound_id: Uuid,
@@ -4801,12 +4832,26 @@ impl SoundFxApp {
                 && pending_drag_sound.is_some()
             {
                 let ratio = ((pointer.x - timeline_rect.left()) / timeline_rect.width()).clamp(0.0, 1.0);
-                let start_secs = ((view_start_secs + ratio * visible_duration) * 20.0).round() / 20.0;
+                let desired_start_secs =
+                    ((view_start_secs + ratio * visible_duration) * 20.0).round() / 20.0;
+                let start_secs = pending_drag_sound
+                    .as_ref()
+                    .map(|drag_sound| {
+                        Self::trim_timeline_preview_drop_start(
+                            row,
+                            desired_start_secs,
+                            drag_sound.trimmed_length(),
+                            state_snapshot.snap_enabled,
+                        )
+                    })
+                    .unwrap_or(desired_start_secs);
                 next_drop_target = Some(TrimTimelineDropTarget {
                     row_index,
                     start_secs,
                 });
-                    let marker_x = timeline_rect.left() + ratio * timeline_rect.width();
+                let marker_ratio =
+                    ((start_secs - view_start_secs) / visible_duration).clamp(0.0, 1.0);
+                let marker_x = timeline_rect.left() + marker_ratio * timeline_rect.width();
                 painter.line_segment(
                     [
                         Pos2::new(marker_x, timeline_rect.top() + 6.0),
