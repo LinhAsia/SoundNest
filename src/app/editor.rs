@@ -720,6 +720,9 @@ impl SoundFxApp {
 
         let sound = self.sounds[index].clone();
         let timeline_clips = self.collect_trim_timeline_render_clips(sound_id);
+        if timeline_clips.is_some() {
+            self.stop_preview();
+        }
         let root_dir = self.storage.root_dir().to_path_buf();
         let tx = self.trim_commit_tx.clone();
         self.trim_commit_inflight.insert(sound_id);
@@ -3724,17 +3727,17 @@ impl SoundFxApp {
                     let left_region_response = ui.interact(
                         left_region_rect,
                         ui.make_persistent_id((sound.id, "trim-delete-left")),
-                        Sense::click(),
+                        Sense::hover(),
                     );
                     let middle_region_response = ui.interact(
                         middle_region_rect,
                         ui.make_persistent_id((sound.id, "trim-delete-middle")),
-                        Sense::click(),
+                        Sense::hover(),
                     );
                     let right_region_response = ui.interact(
                         right_region_rect,
                         ui.make_persistent_id((sound.id, "trim-delete-right")),
-                        Sense::click(),
+                        Sense::hover(),
                     );
                     let pointer_time = pointer_pos.map(|pointer| {
                         let ratio = ((pointer.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
@@ -3981,17 +3984,9 @@ impl SoundFxApp {
                     }
 
                     let delete_region = if interactive
-                        && left_region_enabled
-                        && left_region_response.secondary_clicked()
+                        && ui.input(|input| input.pointer.secondary_clicked())
                     {
-                        Some(TrimDeleteRegion::Left)
-                    } else if interactive && middle_region_response.secondary_clicked() {
-                        Some(TrimDeleteRegion::Middle)
-                    } else if interactive
-                        && right_region_enabled
-                        && right_region_response.secondary_clicked()
-                    {
-                        Some(TrimDeleteRegion::Right)
+                        hovered_delete_region
                     } else {
                         None
                     };

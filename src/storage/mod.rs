@@ -607,27 +607,45 @@ impl Storage {
         Self::finalize_rendered_sound_replacement(root_dir, sound, target_file, &temp_path)
     }
 
+    fn build_timeline_mixed_clips_at(
+        root_dir: &Path,
+        clips: &[(SoundEffect, f32, f32, f32)],
+        trim_outer_silence: bool,
+    ) -> Result<Vec<MixedAudioClip>> {
+        if clips.is_empty() {
+            bail!("timeline mix is empty");
+        }
+
+        let start_offset = if trim_outer_silence {
+            clips
+                .iter()
+                .map(|(_, start_secs, _, _)| *start_secs)
+                .fold(f32::INFINITY, f32::min)
+                .max(0.0)
+        } else {
+            0.0
+        };
+
+        clips
+            .iter()
+            .map(|(sound, start_secs, clip_start_secs, clip_end_secs)| {
+                Self::export_processed_sound_at(root_dir, sound).map(|path| MixedAudioClip {
+                    path,
+                    start_secs: (*start_secs - start_offset).max(0.0),
+                    clip_start_secs: *clip_start_secs,
+                    clip_end_secs: *clip_end_secs,
+                })
+            })
+            .collect()
+    }
+
     pub fn commit_timeline_mix_at(
         root_dir: &Path,
         base_sound: &SoundEffect,
         clips: &[(SoundEffect, f32, f32, f32)],
         keep_old: bool,
     ) -> Result<SoundEffect> {
-        if clips.is_empty() {
-            bail!("timeline mix is empty");
-        }
-
-        let mixed_clips = clips
-            .iter()
-            .map(|(sound, start_secs, clip_start_secs, clip_end_secs)| {
-                Self::export_processed_sound_at(root_dir, sound).map(|path| MixedAudioClip {
-                    path,
-                    start_secs: *start_secs,
-                    clip_start_secs: *clip_start_secs,
-                    clip_end_secs: *clip_end_secs,
-                })
-            })
-            .collect::<Result<Vec<_>>>()?;
+        let mixed_clips = Self::build_timeline_mixed_clips_at(root_dir, clips, true)?;
         let staging_path = root_dir
             .join("exports")
             .join(format!("timeline-{}.tmp.wav", base_sound.id));
@@ -665,21 +683,7 @@ impl Storage {
         base_sound: &SoundEffect,
         clips: &[(SoundEffect, f32, f32, f32)],
     ) -> Result<PathBuf> {
-        if clips.is_empty() {
-            bail!("timeline mix is empty");
-        }
-
-        let mixed_clips = clips
-            .iter()
-            .map(|(sound, start_secs, clip_start_secs, clip_end_secs)| {
-                Self::export_processed_sound_at(root_dir, sound).map(|path| MixedAudioClip {
-                    path,
-                    start_secs: *start_secs,
-                    clip_start_secs: *clip_start_secs,
-                    clip_end_secs: *clip_end_secs,
-                })
-            })
-            .collect::<Result<Vec<_>>>()?;
+        let mixed_clips = Self::build_timeline_mixed_clips_at(root_dir, clips, false)?;
         let preview_path = root_dir
             .join("exports")
             .join(format!("timeline-preview-{}.wav", base_sound.id));
