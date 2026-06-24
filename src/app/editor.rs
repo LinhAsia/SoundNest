@@ -4245,12 +4245,20 @@ impl SoundFxApp {
             ui.add_space(6.0);
         }
 
+        let row_height = 96.0;
+        let row_spacing = 8.0;
+        let row_count = state_snapshot.rows.len().max(1);
         let viewport_width = ui.available_width().max(320.0);
+        let viewport_height =
+            row_count as f32 * row_height + row_count.saturating_sub(1) as f32 * row_spacing;
         let trim_timeline_scroll_offset_id = egui::Id::new((sound_id, "trim-timeline-mix-scroll"));
         let stored_scroll_offset = ui
             .ctx()
             .data(|data| data.get_temp::<f32>(trim_timeline_scroll_offset_id));
         let mut requested_scroll_offset: Option<f32> = None;
+        let (viewport_rect, _) =
+            ui.allocate_exact_size(vec2(viewport_width, viewport_height.max(row_height)), Sense::hover());
+        let viewport_painter = ui.painter().with_clip_rect(viewport_rect);
 
         if let Some(drag_sound) = pending_drag_sound.as_ref()
             && let Some(pointer) = ctx.input(|input| input.pointer.hover_pos())
@@ -4291,7 +4299,8 @@ impl SoundFxApp {
         }
 
         let pointer_pos = ctx.input(|input| input.pointer.hover_pos());
-        let pointer_over_timeline = pointer_pos.is_some_and(|pointer| ui.max_rect().contains(pointer));
+        let pointer_over_timeline =
+            pointer_pos.is_some_and(|pointer| viewport_rect.contains(pointer));
         let ctrl_scroll_y = if pointer_over_timeline {
             ctx.input(|input| {
                 if input.modifiers.ctrl || input.modifiers.command || input.modifiers.mac_cmd {
@@ -4308,7 +4317,7 @@ impl SoundFxApp {
             let current_content_width =
                 (total_duration * timeline_pixels_per_sec * previous_zoom).max(viewport_width) + 120.0;
             let visible_x = pointer_pos
-                .map(|pointer| (pointer.x - ui.clip_rect().left()).clamp(0.0, viewport_width))
+                .map(|pointer| (pointer.x - viewport_rect.left()).clamp(0.0, viewport_width))
                 .unwrap_or(viewport_width * 0.5);
             let anchor_content_x = current_offset + visible_x;
             let zoom_factor = if ctrl_scroll_y > 0.0 { 1.12 } else { 1.0 / 1.12 };
@@ -4329,22 +4338,20 @@ impl SoundFxApp {
 
         let timeline_world_width = (total_duration * timeline_pixels_per_sec * zoom)
             .max(viewport_width);
+        let max_scroll_offset = (timeline_world_width + 120.0 - viewport_width).max(0.0);
+        let scroll_offset = requested_scroll_offset
+            .unwrap_or_else(|| stored_scroll_offset.unwrap_or(0.0))
+            .clamp(0.0, max_scroll_offset);
+        let content_left = viewport_rect.left() - scroll_offset;
+        let content_width = timeline_world_width + 120.0;
 
-        let scroll_output = ScrollArea::horizontal()
-            .id_salt((sound_id, "trim-timeline-mix-scroll-area"))
-            .drag_to_scroll(false)
-            .auto_shrink([false, false])
-            .horizontal_scroll_offset(
-                requested_scroll_offset.unwrap_or_else(|| stored_scroll_offset.unwrap_or(0.0)),
-            )
-            .show(ui, |ui| {
         for (row_index, row) in state_snapshot.rows.iter().enumerate() {
-            let row_height = 96.0;
-            let (row_rect, _row_response) = ui.allocate_exact_size(
-                vec2(timeline_world_width + 120.0, row_height),
-                Sense::hover(),
+            let row_top = viewport_rect.top() + row_index as f32 * (row_height + row_spacing);
+            let row_rect = Rect::from_min_size(
+                Pos2::new(content_left, row_top),
+                vec2(content_width, row_height),
             );
-            let painter = ui.painter_at(row_rect);
+            let painter = viewport_painter.clone();
             painter.rect_filled(row_rect, 18.0, Self::surface_fill());
             painter.rect_stroke(
                 row_rect,
@@ -4598,7 +4605,8 @@ impl SoundFxApp {
                         .iter()
                         .enumerate()
                         .find_map(|(candidate_row, _)| {
-                            let top = row_rect.top() + (candidate_row as f32 - row_index as f32) * row_height;
+                            let top = viewport_rect.top()
+                                + candidate_row as f32 * (row_height + row_spacing);
                             let rect = Rect::from_min_max(
                                 Pos2::new(timeline_rect.left(), top + 12.0),
                                 Pos2::new(timeline_rect.right(), top + row_height - 12.0),
@@ -4744,10 +4752,7 @@ impl SoundFxApp {
                 }
                 ctx.set_cursor_icon(egui::CursorIcon::Copy);
             }
-
-            ui.add_space(8.0);
         }
-            });
 
         if let Some(state) = self.trim_timeline_state.as_mut() {
             state.enabled = next_enabled;
@@ -4792,8 +4797,6 @@ impl SoundFxApp {
             self.refresh_trim_timeline_preview_after_edit(sound_id);
         }
         self.trim_timeline_zoom = zoom;
-        let scroll_offset = requested_scroll_offset
-            .unwrap_or_else(|| scroll_output.state.offset.x.max(0.0));
         ui.ctx().data_mut(|data| {
             data.insert_temp(trim_timeline_scroll_offset_id, scroll_offset);
         });
