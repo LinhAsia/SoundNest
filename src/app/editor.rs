@@ -530,6 +530,7 @@ impl SoundFxApp {
             return;
         }
         self.trim_timeline_preview_path = Some(preview_path);
+        self.trim_timeline_preview_dirty = false;
         if let Some(state) = self.trim_timeline_state.as_mut()
             && state.sound_id == sound_id
         {
@@ -555,6 +556,14 @@ impl SoundFxApp {
         }
 
         let was_paused = self.audio.as_ref().is_some_and(|audio| audio.is_paused());
+        if self.trim_timeline_preview_dirty {
+            self.stop_preview();
+            self.preview_timeline_mix_from_position(sound_id, secs);
+            if was_paused && let Some(audio) = self.audio.as_mut() {
+                audio.pause();
+            }
+            return;
+        }
         if let Some(path) = preview_path
             && let Some(audio) = self.audio.as_mut()
             && let Err(error) = audio.play_file_from(&path, secs)
@@ -609,6 +618,10 @@ impl SoundFxApp {
             .as_ref()
             .is_some_and(|audio| self.trim_timeline_preview_path.as_ref().is_some_and(|path| audio.is_playing_file(path)));
         let was_paused = self.audio.as_ref().is_some_and(|audio| audio.is_paused());
+        self.trim_timeline_preview_dirty = true;
+        if was_active && !was_paused {
+            return;
+        }
         if was_active {
             self.stop_preview();
             self.preview_timeline_mix_from_position(sound_id, playhead_secs);
@@ -679,7 +692,16 @@ impl SoundFxApp {
                     audio.pause();
                 }
             } else if is_playing && is_paused {
-                if let Some(audio) = self.audio.as_mut() {
+                if self.trim_timeline_preview_dirty {
+                    let resume_secs = self
+                        .trim_timeline_state
+                        .as_ref()
+                        .filter(|state| state.sound_id == sound_id)
+                        .map(|state| state.playhead_secs)
+                        .unwrap_or(0.0);
+                    self.stop_preview();
+                    self.preview_timeline_mix_from_position(sound_id, resume_secs);
+                } else if let Some(audio) = self.audio.as_mut() {
                     audio.resume();
                 }
             } else if let Some(state) = self.trim_timeline_state.as_ref() {
@@ -4374,10 +4396,10 @@ impl SoundFxApp {
                 Sense::hover(),
             );
         let viewport_painter = ui.painter().with_clip_rect(viewport_rect);
-        viewport_painter.rect_filled(viewport_rect, 18.0, Self::surface_fill());
+        viewport_painter.rect_filled(viewport_rect, 0.0, Self::surface_fill());
         viewport_painter.rect_stroke(
             viewport_rect,
-            18.0,
+            0.0,
             Stroke::new(1.0, Self::subtle_border_color()),
             StrokeKind::Outside,
         );
@@ -4487,7 +4509,7 @@ impl SoundFxApp {
             Pos2::new(shared_timeline_left, viewport_rect.top() + 4.0),
             Pos2::new(shared_timeline_right, viewport_rect.top() + ruler_height),
         );
-        viewport_painter.rect_filled(ruler_rect, 12.0, Self::input_fill());
+        viewport_painter.rect_filled(ruler_rect, 0.0, Self::input_fill());
         viewport_painter.line_segment(
             [
                 Pos2::new(ruler_rect.left(), ruler_rect.bottom() - 8.0),
@@ -4626,25 +4648,7 @@ impl SoundFxApp {
                 }
             }
 
-            let timeline_radius = if row_count <= 1 {
-                CornerRadius::same(14)
-            } else if row_index == 0 {
-                CornerRadius {
-                    nw: 14,
-                    ne: 14,
-                    sw: 0,
-                    se: 0,
-                }
-            } else if row_index + 1 == row_count {
-                CornerRadius {
-                    nw: 0,
-                    ne: 0,
-                    sw: 14,
-                    se: 14,
-                }
-            } else {
-                CornerRadius::ZERO
-            };
+            let timeline_radius = CornerRadius::ZERO;
             let timeline_rect = Rect::from_min_max(
                 Pos2::new(shared_timeline_left, row_rect.top()),
                 Pos2::new(shared_timeline_right, row_rect.bottom()),
@@ -4732,7 +4736,7 @@ impl SoundFxApp {
 
                 painter.rect_filled(
                     clip_rect,
-                    12.0,
+                    0.0,
                     if selected_clip {
                         Color32::from_rgba_premultiplied(92, 38, 71, 228)
                     } else {
@@ -4741,7 +4745,7 @@ impl SoundFxApp {
                 );
                 painter.rect_stroke(
                     clip_rect,
-                    12.0,
+                    0.0,
                     Stroke::new(
                         1.0,
                         if selected_clip {
@@ -5030,12 +5034,12 @@ impl SoundFxApp {
                     );
                     painter.rect_filled(
                         ghost_rect,
-                        12.0,
+                        0.0,
                         Color32::from_rgba_premultiplied(56, 34, 49, 170),
                     );
                     painter.rect_stroke(
                         ghost_rect,
-                        10.0,
+                        0.0,
                         Stroke::new(1.25, Color32::from_rgba_premultiplied(255, 112, 181, 196)),
                         StrokeKind::Outside,
                     );
