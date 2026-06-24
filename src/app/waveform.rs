@@ -192,33 +192,41 @@ impl SoundFxApp {
         let clip_duration = sound.trimmed_length().max(0.05);
         let start_ratio = (clip_start_secs / clip_duration).clamp(0.0, 1.0);
         let end_ratio = (clip_end_secs / clip_duration).clamp(start_ratio, 1.0);
-        let start_index = ((preview.len() as f32) * start_ratio).floor() as usize;
-        let mut end_index = ((preview.len() as f32) * end_ratio).ceil() as usize;
-        let start_index = start_index.min(preview.len().saturating_sub(1));
-        end_index = end_index.clamp(start_index + 1, preview.len());
-        Self::compact_timeline_waveform(&preview[start_index..end_index], buckets)
+        Self::resample_timeline_waveform(&preview, start_ratio, end_ratio, buckets)
     }
 
-    fn compact_timeline_waveform(samples: &[f32], buckets: usize) -> Vec<f32> {
+    pub(super) fn compact_timeline_waveform(samples: &[f32], buckets: usize) -> Vec<f32> {
+        Self::resample_timeline_waveform(samples, 0.0, 1.0, buckets)
+    }
+
+    fn resample_timeline_waveform(
+        samples: &[f32],
+        start_ratio: f32,
+        end_ratio: f32,
+        buckets: usize,
+    ) -> Vec<f32> {
         if samples.is_empty() {
             return Vec::new();
         }
 
-        let bucket_count = buckets.clamp(18, 160).min(samples.len().max(1));
+        let bucket_count = buckets.clamp(18, 160).max(1);
         let mut preview = Vec::with_capacity(bucket_count);
+        let range_start = start_ratio.clamp(0.0, 1.0);
+        let range_end = end_ratio.clamp(range_start, 1.0);
+        let range_span = (range_end - range_start).max(f32::EPSILON);
 
         for bucket_index in 0..bucket_count {
-            let start = ((bucket_index as f32 / bucket_count as f32) * samples.len() as f32).floor()
-                as usize;
-            let mut end = ((((bucket_index + 1) as f32) / bucket_count as f32)
-                * samples.len() as f32)
-                .ceil() as usize;
-            let start = start.min(samples.len().saturating_sub(1));
-            end = end.clamp(start + 1, samples.len());
-
-            let slice = &samples[start..end];
-            let peak = slice.iter().copied().fold(0.0_f32, f32::max);
-            preview.push(peak.powf(0.82));
+            let left_progress =
+                range_start + range_span * ((bucket_index as f32 + 0.22) / bucket_count as f32);
+            let center_progress =
+                range_start + range_span * ((bucket_index as f32 + 0.50) / bucket_count as f32);
+            let right_progress =
+                range_start + range_span * ((bucket_index as f32 + 0.78) / bucket_count as f32);
+            let left = Self::sample_waveform_level(samples, left_progress);
+            let center = Self::sample_waveform_level(samples, center_progress);
+            let right = Self::sample_waveform_level(samples, right_progress);
+            let level = (left * 0.24 + center * 0.52 + right * 0.24).clamp(0.0, 1.0);
+            preview.push(level);
         }
 
         for value in &mut preview {

@@ -358,17 +358,7 @@ impl SoundFxApp {
     fn trim_timeline_track_waveform(&self, sound: &SoundEffect, max_bars: usize) -> Vec<f32> {
         let waveform = self.sound_waveform_samples(sound);
         let preview = Self::trimmed_waveform_preview_from_samples(sound, &waveform);
-        if preview.len() <= max_bars {
-            return preview;
-        }
-
-        let mut reduced = Vec::with_capacity(max_bars);
-        let chunk = (preview.len() as f32 / max_bars as f32).ceil() as usize;
-        for slice in preview.chunks(chunk.max(1)) {
-            let level = slice.iter().copied().fold(0.0f32, f32::max);
-            reduced.push(level);
-        }
-        reduced
+        Self::compact_timeline_waveform(&preview, max_bars)
     }
 
     fn trim_timeline_waveform_bars(width: f32) -> usize {
