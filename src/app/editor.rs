@@ -1033,6 +1033,13 @@ impl SoundFxApp {
         if !timeline_playhead_drag_active {
             self.sync_trim_timeline_playhead_from_audio(sound_id);
         }
+        let selected_clip_active = self
+            .trim_timeline_state
+            .as_ref()
+            .is_some_and(|state| state.sound_id == sound_id && state.selected_clip_id.is_some());
+        if selected_clip_active {
+            ctx.memory_mut(|memory| memory.stop_text_input());
+        }
 
         let command_z = ctx.input(|input| {
             input.key_pressed(egui::Key::Z)
@@ -1047,14 +1054,31 @@ impl SoundFxApp {
                 && !input.modifiers.alt
         });
         let command_c = ctx.input(|input| {
-            input.key_pressed(egui::Key::C)
-                && (input.modifiers.ctrl || input.modifiers.command || input.modifiers.mac_cmd)
-                && !input.modifiers.shift
-                && !input.modifiers.alt
+            input.events.iter().any(|event| matches!(event, egui::Event::Copy))
+                || (input.key_pressed(egui::Key::C)
+                    && (input.modifiers.ctrl
+                        || input.modifiers.command
+                        || input.modifiers.mac_cmd)
+                    && !input.modifiers.shift
+                    && !input.modifiers.alt)
         });
         let command_v = ctx.input(|input| {
-            input.key_pressed(egui::Key::V)
-                && (input.modifiers.ctrl || input.modifiers.command || input.modifiers.mac_cmd)
+            input
+                .events
+                .iter()
+                .any(|event| matches!(event, egui::Event::Paste(_)))
+                || (input.key_pressed(egui::Key::V)
+                    && (input.modifiers.ctrl
+                        || input.modifiers.command
+                        || input.modifiers.mac_cmd)
+                    && !input.modifiers.shift
+                    && !input.modifiers.alt)
+        });
+        let split_shortcut = ctx.input(|input| {
+            input.key_pressed(egui::Key::B)
+                && !input.modifiers.ctrl
+                && !input.modifiers.command
+                && !input.modifiers.mac_cmd
                 && !input.modifiers.shift
                 && !input.modifiers.alt
         });
@@ -1098,6 +1122,11 @@ impl SoundFxApp {
 
         if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Delete)) {
             self.trim_timeline_delete_selected_clip(ctx, sound_id);
+            return;
+        }
+
+        if split_shortcut {
+            self.trim_timeline_split_selected_clip_at_playhead(ctx, sound_id);
             return;
         }
 
