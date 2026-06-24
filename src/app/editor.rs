@@ -3239,7 +3239,9 @@ impl SoundFxApp {
 
         let sound_id = self.sounds[index].id;
         let sound_duration = self.sounds[index].safe_duration();
-        self.trim_timeline_zoom = trim_timeline_zoom;
+        if !timeline_mix_enabled {
+            self.trim_timeline_zoom = trim_timeline_zoom;
+        }
         if let Some(snapshot) = trim_history_commit {
             let current = TrimSnapshot::from_sound(&self.sounds[index]);
             self.push_trim_undo_snapshot(snapshot, current);
@@ -4230,7 +4232,6 @@ impl SoundFxApp {
                     .unwrap_or(0.25),
             );
         let mut next_drop_target = None;
-        let previous_zoom = zoom;
         let base_visible_secs = 12.0f32;
 
         if pending_drag_sound.is_some() {
@@ -4295,7 +4296,6 @@ impl SoundFxApp {
         let pointer_pos = ctx.input(|input| input.pointer.hover_pos());
         let pointer_over_timeline =
             pointer_pos.is_some_and(|pointer| viewport_rect.contains(pointer));
-        let visible_duration_before_zoom = (base_visible_secs / previous_zoom.max(0.1)).max(0.25);
         let ctrl_scroll_y = if pointer_over_timeline {
             ctx.input(|input| {
                 if input.modifiers.ctrl || input.modifiers.command || input.modifiers.mac_cmd {
@@ -4308,16 +4308,9 @@ impl SoundFxApp {
             0.0
         };
         if ctrl_scroll_y.abs() > f32::EPSILON {
-            let visible_ratio = pointer_pos
-                .map(|pointer| ((pointer.x - viewport_rect.left()) / viewport_rect.width()).clamp(0.0, 1.0))
-                .unwrap_or(0.5);
-            let anchor_time = view_start_secs + visible_ratio * visible_duration_before_zoom;
             let zoom_factor = if ctrl_scroll_y > 0.0 { 1.12 } else { 1.0 / 1.12 };
             zoom = (zoom * zoom_factor).clamp(0.1, 8.0);
-            let next_visible_duration = (base_visible_secs / zoom.max(0.1)).max(0.25);
-            requested_view_start_secs = Some(
-                (anchor_time - visible_ratio * next_visible_duration).max(0.0),
-            );
+            requested_view_start_secs = Some(view_start_secs);
             ctx.input_mut(|input| {
                 input.smooth_scroll_delta = Vec2::ZERO;
                 input.raw_scroll_delta = Vec2::ZERO;
