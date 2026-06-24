@@ -367,6 +367,56 @@ impl SoundFxApp {
         (next_start, None)
     }
 
+    fn trim_timeline_row_has_clip_at_time(
+        row: &TrimTimelineRow,
+        time_secs: f32,
+        ignored_clip_id: Option<Uuid>,
+    ) -> bool {
+        row.clips.iter().any(|clip| {
+            if Some(clip.id) == ignored_clip_id {
+                return false;
+            }
+            let start = clip.start_secs.max(0.0);
+            let end = start + (clip.clip_end_secs - clip.clip_start_secs).max(0.05);
+            time_secs >= start && time_secs < end
+        })
+    }
+
+    fn trim_timeline_pick_paste_row(
+        state: &mut TrimTimelineState,
+        preferred_row_index: usize,
+        playhead_secs: f32,
+    ) -> usize {
+        let clamped_preferred = preferred_row_index.min(state.rows.len().saturating_sub(1));
+        if !Self::trim_timeline_row_has_clip_at_time(
+            &state.rows[clamped_preferred],
+            playhead_secs,
+            None,
+        ) {
+            return clamped_preferred;
+        }
+
+        let mut best_row = None;
+        let mut best_distance = usize::MAX;
+        for (row_index, row) in state.rows.iter().enumerate() {
+            if Self::trim_timeline_row_has_clip_at_time(row, playhead_secs, None) {
+                continue;
+            }
+            let distance = row_index.abs_diff(clamped_preferred);
+            if distance < best_distance {
+                best_distance = distance;
+                best_row = Some(row_index);
+            }
+        }
+
+        if let Some(row_index) = best_row {
+            return row_index;
+        }
+
+        state.rows.push(TrimTimelineRow::default());
+        state.rows.len().saturating_sub(1)
+    }
+
     fn trim_timeline_preview_drop_start(
         rows: &[TrimTimelineRow],
         row: &TrimTimelineRow,
@@ -598,7 +648,8 @@ impl SoundFxApp {
             if !state.enabled || state.sound_id != sound_id {
                 return false;
             }
-            let row_index = selected_row_index.min(state.rows.len().saturating_sub(1));
+            let row_index =
+                Self::trim_timeline_pick_paste_row(state, selected_row_index, playhead_secs);
             let resolved_start = Self::trim_timeline_resolve_row_start(
                 &state.rows[row_index],
                 None,
@@ -1769,6 +1820,13 @@ impl SoundFxApp {
 
     pub(super) fn trim_timeline_playhead_drag_id(sound_id: Uuid) -> egui::Id {
         egui::Id::new((sound_id, "trim-timeline-playhead-drag"))
+    }
+
+    pub(super) fn trim_timeline_clip_drag_snapshot_id(
+        sound_id: Uuid,
+        clip_id: Uuid,
+    ) -> egui::Id {
+        egui::Id::new((sound_id, clip_id, "trim-timeline-clip-drag-snapshot"))
     }
 
     pub(super) fn poll_vocal_separation_jobs(&mut self, ctx: &Context) {
@@ -5037,6 +5095,7 @@ impl SoundFxApp {
             ctx.set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
         }
         if ruler_response.drag_started() {
+            ui.ctx().memory_mut(|memory| memory.stop_text_input());
             let preview_path = self.trim_timeline_preview_path.clone();
             let preview_is_playing = self.audio.as_ref().is_some_and(|audio| {
                 preview_path
@@ -5068,6 +5127,7 @@ impl SoundFxApp {
                 ctx.data_mut(|data| data.insert_temp(timeline_playhead_drag_id, true));
             }
             if ruler_response.clicked() {
+                ui.ctx().memory_mut(|memory| memory.stop_text_input());
                 self.set_trim_timeline_playhead(sound_id, secs);
                 ctx.data_mut(|data| data.remove::<bool>(timeline_playhead_drag_id));
             }
@@ -5178,6 +5238,7 @@ impl SoundFxApp {
             if timeline_click_response.clicked()
                 && let Some(pointer) = timeline_click_response.interact_pointer_pos()
             {
+                ui.ctx().memory_mut(|memory| memory.stop_text_input());
                 let secs = (view_start_secs
                     + ((pointer.x - timeline_rect.left()) / timeline_rect.width()).clamp(0.0, 1.0)
                         * visible_duration)
@@ -5246,6 +5307,8 @@ impl SoundFxApp {
                     },
                 );
                 let drag_anchor_id = ui.id().with(("trim-mix-drag-anchor", sound_id, clip.id));
+                let drag_snapshot_id =
+                    Self::trim_timeline_clip_drag_snapshot_id(sound_id, clip.id);
                 let selected_clip = state_snapshot.selected_clip_id == Some(clip.id);
                 let rendered_clip_rect = if let Some(progress) = delete_progress {
                     let shrink_x = ((clip_rect.width() - 8.0).max(0.0) * 0.12).min(14.0) * progress;
@@ -5344,6 +5407,7 @@ impl SoundFxApp {
                 if !clip_is_deleting
                     && clip_response.clicked()
                 {
+                    ui.ctx().memory_mut(|memory| memory.stop_text_input());
                     let pointer_time = clip_response
                         .interact_pointer_pos()
                         .map(|pointer| {
@@ -5363,11 +5427,19 @@ impl SoundFxApp {
                     && clip_response.drag_started()
                     && let Some(pointer) = clip_response.interact_pointer_pos()
                 {
+                    ui.ctx().memory_mut(|memory| memory.stop_text_input());
                     let pointer_time = view_start_secs
                         + ((pointer.x - timeline_rect.left()) / timeline_rect.width()).clamp(0.0, 1.0)
                             * visible_duration;
                     let grab_offset_secs = (pointer_time - clip.start_secs).clamp(0.0, clip_duration);
-                    ui.ctx().data_mut(|data| data.insert_temp(drag_anchor_id, grab_offset_secs));
+                    if let Some(before) = self.trim_timeline_state.clone() {
+                        ui.ctx().data_mut(|data| {
+                            data.insert_temp(drag_anchor_id, grab_offset_secs);
+                            data.insert_temp(drag_snapshot_id, before);
+                        });
+                    } else {
+                        ui.ctx().data_mut(|data| data.insert_temp(drag_anchor_id, grab_offset_secs));
+                    }
                 }
                 if !clip_is_deleting
                     && selected_clip
@@ -5421,7 +5493,6 @@ impl SoundFxApp {
                     && removable
                     && clip_response.dragged()
                     && let Some(pointer) = clip_response.interact_pointer_pos()
-                    && let Some(before) = self.trim_timeline_state.clone()
                     && let Some(state) = self.trim_timeline_state.as_mut()
                 {
                     let target_row = state
@@ -5492,14 +5563,18 @@ impl SoundFxApp {
                         .clips
                         .sort_by(|left, right| left.start_secs.total_cmp(&right.start_secs));
                     state.selected_clip_id = Some(clip.id);
-                    if before != *state {
-                        self.push_trim_timeline_undo_snapshot(before);
-                    }
                 }
                 if !clip_is_deleting && clip_response.drag_stopped() {
+                    let before = ui
+                        .ctx()
+                        .data(|data| data.get_temp::<TrimTimelineState>(drag_snapshot_id));
                     ui.ctx().data_mut(|data| {
                         data.remove::<f32>(drag_anchor_id);
+                        data.remove::<TrimTimelineState>(drag_snapshot_id);
                     });
+                    if let Some(before) = before {
+                        self.push_trim_timeline_undo_snapshot(before);
+                    }
                     timeline_state_changed = true;
                 }
 
