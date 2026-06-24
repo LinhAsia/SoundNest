@@ -41,7 +41,12 @@ impl SoundFxApp {
             .corner_radius(9.0)
     }
 
-    pub(super) fn action_button(label: RichText, active: bool, accent: bool) -> Button<'static> {
+    pub(super) fn action_button_with_radius(
+        label: RichText,
+        active: bool,
+        accent: bool,
+        radius: u8,
+    ) -> Button<'static> {
         let (fill, stroke, text) = if accent {
             (
                 Color32::from_rgb(214, 51, 132),
@@ -85,7 +90,37 @@ impl SoundFxApp {
         Button::new(label.color(text))
             .fill(fill)
             .stroke(Stroke::new(1.0, stroke))
-            .corner_radius(18.0)
+            .corner_radius(radius)
+    }
+
+    pub(super) fn action_button(label: RichText, active: bool, accent: bool) -> Button<'static> {
+        Self::action_button_with_radius(label, active, accent, 18)
+    }
+
+    pub(super) fn icon_action_with_radius(
+        ui: &mut Ui,
+        size: [f32; 2],
+        codepoint: u32,
+        active: bool,
+        accent: bool,
+        radius: u8,
+    ) -> egui::Response {
+        let icon_color = if accent || active {
+            Color32::WHITE
+        } else {
+            Self::strong_text_color()
+        };
+        let response = ui.add_sized(
+            size,
+            Self::action_button_with_radius(
+                Self::icon(codepoint, 18.0, icon_color),
+                active,
+                accent,
+                radius,
+            ),
+        );
+        Self::decorate_button_response(ui, &response);
+        response
     }
 
     pub(super) fn icon_action(
@@ -95,17 +130,7 @@ impl SoundFxApp {
         active: bool,
         accent: bool,
     ) -> egui::Response {
-        let icon_color = if accent || active {
-            Color32::WHITE
-        } else {
-            Self::strong_text_color()
-        };
-        let response = ui.add_sized(
-            size,
-            Self::action_button(Self::icon(codepoint, 18.0, icon_color), active, accent),
-        );
-        Self::decorate_button_response(ui, &response);
-        response
+        Self::icon_action_with_radius(ui, size, codepoint, active, accent, 18)
     }
 
     pub(super) fn icon_titlebar(

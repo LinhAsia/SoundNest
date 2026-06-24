@@ -209,6 +209,9 @@ impl SoundFxApp {
         {
             self.trim_timeline_state = Some(Self::default_trim_timeline_state(sound_id));
             self.trim_timeline_view_start_secs = 0.0;
+            self.trim_timeline_clip_delete_animating.clear();
+            self.trim_timeline_segment_delete_animations.clear();
+            self.trim_timeline_scrub_resume_pending = false;
             created_new = true;
         }
 
@@ -499,6 +502,344 @@ impl SoundFxApp {
         self.trim_timeline_redo_stack.clear();
     }
 
+    fn trim_timeline_selected_clip_from_state(
+        state: &TrimTimelineState,
+    ) -> Option<(usize, usize, TrimTimelineClip)> {
+        let selected_clip_id = state.selected_clip_id?;
+        state.rows.iter().enumerate().find_map(|(row_index, row)| {
+            row.clips
+                .iter()
+                .enumerate()
+                .find(|(_, clip)| clip.id == selected_clip_id)
+                .map(|(clip_index, clip)| (row_index, clip_index, clip.clone()))
+        })
+    }
+
+    fn trim_timeline_selected_clip_snapshot(
+        &self,
+        sound_id: Uuid,
+    ) -> Option<(usize, usize, TrimTimelineClip)> {
+        let state = self
+            .trim_timeline_state
+            .as_ref()
+            .filter(|state| state.sound_id == sound_id && state.enabled)?;
+        Self::trim_timeline_selected_clip_from_state(state)
+    }
+
+    fn trim_timeline_cut_local_time_from_playhead(
+        state: &TrimTimelineState,
+        clip: &TrimTimelineClip,
+    ) -> Option<f32> {
+        let clip_start = clip.clip_start_secs;
+        let clip_end = clip.clip_end_secs.max(clip_start + 0.05);
+        let timeline_local =
+            clip_start + (state.playhead_secs.max(0.0) - clip.start_secs.max(0.0));
+        let cut_local_time = timeline_local.clamp(clip_start, clip_end);
+        (cut_local_time > clip_start + 0.05 && cut_local_time < clip_end - 0.05)
+            .then_some(cut_local_time)
+    }
+
+    fn trim_timeline_begin_clip_delete_animation(
+        &mut self,
+        ctx: &Context,
+        clip_id: Uuid,
+    ) -> bool {
+        if self.trim_timeline_clip_delete_animating.contains_key(&clip_id) {
+            return false;
+        }
+        self.trim_timeline_clip_delete_animating
+            .insert(clip_id, Instant::now());
+        ctx.request_repaint();
+        true
+    }
+
+    fn trim_timeline_delete_selected_clip(&mut self, ctx: &Context, sound_id: Uuid) -> bool {
+        let Some((_, _, clip)) = self.trim_timeline_selected_clip_snapshot(sound_id) else {
+            return false;
+        };
+        self.trim_timeline_begin_clip_delete_animation(ctx, clip.id)
+    }
+
+    fn trim_timeline_copy_selected_clip(&mut self, sound_id: Uuid) -> bool {
+        let Some((_, _, clip)) = self.trim_timeline_selected_clip_snapshot(sound_id) else {
+            return false;
+        };
+        self.trim_timeline_copied_clip = Some(TrimTimelineClipboardClip {
+            source_sound_id: clip.source_sound_id,
+            clip_start_secs: clip.clip_start_secs.max(0.0),
+            clip_end_secs: clip.clip_end_secs.max(clip.clip_start_secs + 0.05),
+        });
+        true
+    }
+
+    fn trim_timeline_paste_copied_clip(&mut self, ctx: &Context, sound_id: Uuid) -> bool {
+        let Some(copied_clip) = self.trim_timeline_copied_clip.clone() else {
+            return false;
+        };
+
+        self.sync_trim_timeline_state_for(sound_id);
+        let Some(before) = self.trim_timeline_state.clone() else {
+            return false;
+        };
+        let Some((playhead_secs, selected_row_index)) = self.trim_timeline_state.as_ref().map(|state| {
+            let row_index = Self::trim_timeline_selected_clip_from_state(state)
+                .map(|(row_index, _, _)| row_index)
+                .unwrap_or(0);
+            (state.playhead_secs.max(0.0), row_index)
+        }) else {
+            return false;
+        };
+
+        let clip_duration =
+            (copied_clip.clip_end_secs - copied_clip.clip_start_secs).max(0.05);
+        let inserted_clip_id = Uuid::new_v4();
+        let mut did_change = false;
+        if let Some(state) = self.trim_timeline_state.as_mut() {
+            if !state.enabled || state.sound_id != sound_id {
+                return false;
+            }
+            let row_index = selected_row_index.min(state.rows.len().saturating_sub(1));
+            let resolved_start = Self::trim_timeline_resolve_row_start(
+                &state.rows[row_index],
+                None,
+                playhead_secs,
+                clip_duration,
+            );
+            state.rows[row_index].clips.push(TrimTimelineClip {
+                id: inserted_clip_id,
+                source_sound_id: copied_clip.source_sound_id,
+                start_secs: resolved_start,
+                clip_start_secs: copied_clip.clip_start_secs,
+                clip_end_secs: copied_clip.clip_end_secs,
+            });
+            state.rows[row_index]
+                .clips
+                .sort_by(|left, right| left.start_secs.total_cmp(&right.start_secs));
+            state.selected_clip_id = Some(inserted_clip_id);
+            did_change = before != *state;
+        }
+
+        if !did_change {
+            return false;
+        }
+
+        self.push_trim_timeline_undo_snapshot(before);
+        self.refresh_trim_timeline_preview_after_edit(sound_id);
+        self.mark_dirty(ctx);
+        ctx.request_repaint();
+        true
+    }
+
+    fn trim_timeline_push_segment_delete_animation(
+        &mut self,
+        sound_id: Uuid,
+        row_index: usize,
+        clip: &TrimTimelineClip,
+        removed_clip_start_secs: f32,
+        removed_clip_end_secs: f32,
+    ) {
+        if removed_clip_end_secs <= removed_clip_start_secs + 0.01 {
+            return;
+        }
+        let segment_timeline_start =
+            clip.start_secs + (removed_clip_start_secs - clip.clip_start_secs).max(0.0);
+        self.trim_timeline_segment_delete_animations.push(TrimTimelineSegmentDeleteAnimation {
+            owner_sound_id: sound_id,
+            row_index,
+            source_sound_id: clip.source_sound_id,
+            start_secs: segment_timeline_start.max(0.0),
+            clip_start_secs: removed_clip_start_secs.max(0.0),
+            clip_end_secs: removed_clip_end_secs.max(removed_clip_start_secs + 0.05),
+            started_at: Instant::now(),
+        });
+    }
+
+    fn trim_timeline_trim_clip_edge_at_local_time(
+        &mut self,
+        ctx: &Context,
+        sound_id: Uuid,
+        row_index: usize,
+        clip_index: usize,
+        cut_local_time: f32,
+        trim_left: bool,
+    ) -> bool {
+        let Some(before) = self.trim_timeline_state.clone() else {
+            return false;
+        };
+
+        let mut animation = None;
+        let mut did_change = false;
+        if let Some(state) = self.trim_timeline_state.as_mut() {
+            if !state.enabled || state.sound_id != sound_id {
+                return false;
+            }
+            let Some(target_clip) = state
+                .rows
+                .get_mut(row_index)
+                .and_then(|row| row.clips.get_mut(clip_index))
+            else {
+                return false;
+            };
+            let original_clip = target_clip.clone();
+            let clip_start = original_clip.clip_start_secs;
+            let clip_end = original_clip.clip_end_secs.max(clip_start + 0.05);
+            let next_cut = cut_local_time.clamp(clip_start, clip_end);
+            if next_cut <= clip_start + 0.05 || next_cut >= clip_end - 0.05 {
+                return false;
+            }
+
+            if trim_left {
+                animation = Some((clip_start, next_cut, original_clip.clone()));
+                let removed_duration = next_cut - clip_start;
+                target_clip.start_secs = original_clip.start_secs + removed_duration;
+                target_clip.clip_start_secs = next_cut;
+            } else {
+                animation = Some((next_cut, clip_end, original_clip.clone()));
+                target_clip.clip_end_secs = next_cut;
+            }
+            state.selected_clip_id = Some(original_clip.id);
+            did_change = before != *state;
+        }
+
+        if !did_change {
+            return false;
+        }
+
+        if let Some((removed_start, removed_end, original_clip)) = animation {
+            self.trim_timeline_push_segment_delete_animation(
+                sound_id,
+                row_index,
+                &original_clip,
+                removed_start,
+                removed_end,
+            );
+        }
+        self.push_trim_timeline_undo_snapshot(before);
+        self.refresh_trim_timeline_preview_after_edit(sound_id);
+        self.mark_dirty(ctx);
+        ctx.request_repaint();
+        true
+    }
+
+    fn trim_timeline_trim_selected_clip_at_playhead(
+        &mut self,
+        ctx: &Context,
+        sound_id: Uuid,
+        trim_left: bool,
+    ) -> bool {
+        let Some(state) = self
+            .trim_timeline_state
+            .as_ref()
+            .filter(|state| state.enabled && state.sound_id == sound_id)
+        else {
+            return false;
+        };
+        let Some((row_index, clip_index, clip)) = Self::trim_timeline_selected_clip_from_state(state) else {
+            return false;
+        };
+        let Some(cut_local_time) = Self::trim_timeline_cut_local_time_from_playhead(state, &clip) else {
+            return false;
+        };
+        self.trim_timeline_trim_clip_edge_at_local_time(
+            ctx,
+            sound_id,
+            row_index,
+            clip_index,
+            cut_local_time,
+            trim_left,
+        )
+    }
+
+    fn trim_timeline_split_selected_clip_at_playhead(
+        &mut self,
+        ctx: &Context,
+        sound_id: Uuid,
+    ) -> bool {
+        self.sync_trim_timeline_state_for(sound_id);
+        let Some(before) = self.trim_timeline_state.clone() else {
+            return false;
+        };
+        let Some((row_index, clip_index, clip, cut_local_time)) = self
+            .trim_timeline_state
+            .as_ref()
+            .and_then(|state| {
+                let (row_index, clip_index, clip) = Self::trim_timeline_selected_clip_from_state(state)?;
+                let cut_local_time = Self::trim_timeline_cut_local_time_from_playhead(state, &clip)?;
+                Some((row_index, clip_index, clip, cut_local_time))
+            })
+        else {
+            return false;
+        };
+
+        let timeline_split_secs =
+            clip.start_secs + (cut_local_time - clip.clip_start_secs).max(0.0);
+        let new_clip_id = Uuid::new_v4();
+        let mut did_change = false;
+        if let Some(state) = self.trim_timeline_state.as_mut() {
+            let Some(row) = state.rows.get_mut(row_index) else {
+                return false;
+            };
+            let Some(target_clip) = row.clips.get_mut(clip_index) else {
+                return false;
+            };
+            target_clip.clip_end_secs = cut_local_time;
+            row.clips.push(TrimTimelineClip {
+                id: new_clip_id,
+                source_sound_id: clip.source_sound_id,
+                start_secs: timeline_split_secs,
+                clip_start_secs: cut_local_time,
+                clip_end_secs: clip.clip_end_secs,
+            });
+            row.clips
+                .sort_by(|left, right| left.start_secs.total_cmp(&right.start_secs));
+            state.selected_clip_id = Some(new_clip_id);
+            did_change = before != *state;
+        }
+
+        if !did_change {
+            return false;
+        }
+
+        self.push_trim_timeline_undo_snapshot(before);
+        self.refresh_trim_timeline_preview_after_edit(sound_id);
+        self.mark_dirty(ctx);
+        ctx.request_repaint();
+        true
+    }
+
+    fn commit_trim_timeline_playhead_after_scrub(&mut self, sound_id: Uuid, playhead_secs: f32) {
+        let secs = playhead_secs.max(0.0);
+        let should_resume = std::mem::take(&mut self.trim_timeline_scrub_resume_pending);
+        if !should_resume {
+            self.set_trim_timeline_playhead(sound_id, secs);
+            return;
+        }
+
+        if let Some(state) = self.trim_timeline_state.as_mut()
+            && state.sound_id == sound_id
+        {
+            state.playhead_secs = secs;
+        }
+
+        if self.trim_timeline_preview_dirty {
+            self.stop_preview();
+            self.preview_timeline_mix_from_position(sound_id, secs);
+            return;
+        }
+
+        let Some(path) = self.trim_timeline_preview_path.clone() else {
+            self.preview_timeline_mix_from_position(sound_id, secs);
+            return;
+        };
+        let Some(audio) = self.audio.as_mut() else {
+            self.preview_timeline_mix_from_position(sound_id, secs);
+            return;
+        };
+        if let Err(error) = audio.play_file_from(&path, secs) {
+            self.set_error_status(error);
+        }
+    }
+
     fn preview_timeline_mix_from_position(&mut self, sound_id: Uuid, start_secs: f32) {
         let Some(index) = self.sounds.iter().position(|sound| sound.id == sound_id) else {
             return;
@@ -669,6 +1010,23 @@ impl SoundFxApp {
             }
             self.trim_timeline_state = Some(snapshot);
             ctx.request_repaint();
+            return;
+        }
+
+        if ctx.input_mut(|input| input.consume_key(undo_modifiers, egui::Key::C)) {
+            if self.trim_timeline_copy_selected_clip(sound_id) {
+                ctx.request_repaint();
+            }
+            return;
+        }
+
+        if ctx.input_mut(|input| input.consume_key(undo_modifiers, egui::Key::V)) {
+            self.trim_timeline_paste_copied_clip(ctx, sound_id);
+            return;
+        }
+
+        if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Delete)) {
+            self.trim_timeline_delete_selected_clip(ctx, sound_id);
             return;
         }
 
@@ -1640,6 +1998,7 @@ impl SoundFxApp {
         }
         self.myinstants_preview_audio_url = None;
         self.pending_preview_after_preload = None;
+        self.trim_timeline_scrub_resume_pending = false;
     }
 
     pub(super) fn maybe_start_pending_processed_export(&mut self) {
@@ -4295,6 +4654,21 @@ impl SoundFxApp {
         let mut timeline_state_changed = false;
         let mut zoom = self.trim_timeline_zoom;
         let delete_anim_now = Instant::now();
+        let selected_clip_snapshot = Self::trim_timeline_selected_clip_from_state(&state_snapshot);
+        let clip_selected = selected_clip_snapshot.is_some();
+        let can_edit_selected_clip = selected_clip_snapshot
+            .as_ref()
+            .and_then(|(_, _, clip)| {
+                Self::trim_timeline_cut_local_time_from_playhead(&state_snapshot, clip)
+            })
+            .is_some();
+        let can_paste_clip = self.trim_timeline_copied_clip.is_some();
+        let mut toolbar_trim_left = false;
+        let mut toolbar_trim_right = false;
+        let mut toolbar_copy_clip = false;
+        let mut toolbar_paste_clip = false;
+        let mut toolbar_split_clip = false;
+        let mut toolbar_delete_clip = false;
 
         if !next_enabled {
             self.trim_timeline_drop_target = None;
@@ -4311,6 +4685,122 @@ impl SoundFxApp {
                     .color(Self::strong_text_color())
                     .strong(),
             );
+            ui.add_space(10.0);
+
+            let trim_left_button = ui
+                .add_enabled_ui(can_edit_selected_clip, |ui| {
+                    ui.add_sized(
+                        [32.0, 32.0],
+                        Self::action_button_with_radius(
+                            RichText::new("<|").size(11.5),
+                            false,
+                            false,
+                            8,
+                        ),
+                    )
+                })
+                .inner
+                .on_hover_text("Trim left at playhead");
+            Self::decorate_button_response(ui, &trim_left_button);
+            if trim_left_button.clicked() {
+                toolbar_trim_left = true;
+            }
+
+            let trim_right_button = ui
+                .add_enabled_ui(can_edit_selected_clip, |ui| {
+                    ui.add_sized(
+                        [32.0, 32.0],
+                        Self::action_button_with_radius(
+                            RichText::new("|>").size(11.5),
+                            false,
+                            false,
+                            8,
+                        ),
+                    )
+                })
+                .inner
+                .on_hover_text("Trim right at playhead");
+            Self::decorate_button_response(ui, &trim_right_button);
+            if trim_right_button.clicked() {
+                toolbar_trim_right = true;
+            }
+
+            let copy_clip_button = ui
+                .add_enabled_ui(clip_selected, |ui| {
+                    ui.add_sized(
+                        [32.0, 32.0],
+                        Self::action_button_with_radius(
+                            Self::icon(0xe14d, 16.0, Self::strong_text_color()),
+                            false,
+                            false,
+                            8,
+                        ),
+                    )
+                })
+                .inner
+                .on_hover_text("Copy selected clip");
+            Self::decorate_button_response(ui, &copy_clip_button);
+            if copy_clip_button.clicked() {
+                toolbar_copy_clip = true;
+            }
+
+            let paste_clip_button = ui
+                .add_enabled_ui(can_paste_clip, |ui| {
+                    ui.add_sized(
+                        [32.0, 32.0],
+                        Self::action_button_with_radius(
+                            Self::icon(0xe14f, 16.0, Self::strong_text_color()),
+                            false,
+                            false,
+                            8,
+                        ),
+                    )
+                })
+                .inner
+                .on_hover_text("Paste copied clip at playhead");
+            Self::decorate_button_response(ui, &paste_clip_button);
+            if paste_clip_button.clicked() {
+                toolbar_paste_clip = true;
+            }
+
+            let split_clip_button = ui
+                .add_enabled_ui(can_edit_selected_clip, |ui| {
+                    ui.add_sized(
+                        [32.0, 32.0],
+                        Self::action_button_with_radius(
+                            RichText::new("||").size(11.5),
+                            false,
+                            false,
+                            8,
+                        ),
+                    )
+                })
+                .inner
+                .on_hover_text("Split selected clip at playhead");
+            Self::decorate_button_response(ui, &split_clip_button);
+            if split_clip_button.clicked() {
+                toolbar_split_clip = true;
+            }
+
+            let delete_clip_button = ui
+                .add_enabled_ui(clip_selected, |ui| {
+                    ui.add_sized(
+                        [32.0, 32.0],
+                        Self::action_button_with_radius(
+                            Self::icon(0xe872, 16.0, Self::strong_text_color()),
+                            false,
+                            false,
+                            8,
+                        ),
+                    )
+                })
+                .inner
+                .on_hover_text("Delete selected clip");
+            Self::decorate_button_response(ui, &delete_clip_button);
+            if delete_clip_button.clicked() {
+                toolbar_delete_clip = true;
+            }
+
             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                 let snap_enabled = state_snapshot.snap_enabled;
                 let snap_button = ui.add_sized(
@@ -4546,6 +5036,20 @@ impl SoundFxApp {
         if ruler_response.hovered() || ruler_response.dragged() {
             ctx.set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
         }
+        if ruler_response.drag_started() {
+            let preview_path = self.trim_timeline_preview_path.clone();
+            let preview_is_playing = self.audio.as_ref().is_some_and(|audio| {
+                preview_path
+                    .as_ref()
+                    .is_some_and(|path| audio.is_playing_file(path) && !audio.is_paused())
+            });
+            self.trim_timeline_scrub_resume_pending = preview_is_playing;
+            if preview_is_playing
+                && let Some(audio) = self.audio.as_mut()
+            {
+                audio.pause();
+            }
+        }
         if let Some(pointer) = ruler_response.interact_pointer_pos()
             && (ruler_response.clicked()
                 || ruler_response.dragged()
@@ -4573,7 +5077,7 @@ impl SoundFxApp {
                 .data(|data| data.get_temp::<bool>(timeline_playhead_drag_id))
                 .unwrap_or(false)
         {
-            self.set_trim_timeline_playhead(sound_id, timeline_playhead_secs);
+            self.commit_trim_timeline_playhead_after_scrub(sound_id, timeline_playhead_secs);
             ctx.data_mut(|data| data.remove::<bool>(timeline_playhead_drag_id));
         }
         if !ctx.input(|input| input.pointer.primary_down()) {
@@ -4587,7 +5091,7 @@ impl SoundFxApp {
                     .filter(|state| state.sound_id == sound_id)
                     .map(|state| state.playhead_secs)
                     .unwrap_or(timeline_playhead_secs);
-                self.set_trim_timeline_playhead(sound_id, committed_secs);
+                self.commit_trim_timeline_playhead_after_scrub(sound_id, committed_secs);
             }
             ctx.data_mut(|data| data.remove::<bool>(timeline_playhead_drag_id));
         }
@@ -4870,7 +5374,6 @@ impl SoundFxApp {
                     && clip_rect.contains(ctx.input(|input| input.pointer.hover_pos()).unwrap_or(clip_rect.center()))
                     && let Some(pointer) = ctx.input(|input| input.pointer.hover_pos())
                 {
-                    let clip_before = self.trim_timeline_state.clone();
                     let pointer_time = view_start_secs
                         + ((pointer.x - timeline_rect.left()) / timeline_rect.width()).clamp(0.0, 1.0)
                             * visible_duration;
@@ -4888,38 +5391,31 @@ impl SoundFxApp {
                         2.4,
                         Color32::from_rgba_premultiplied(108, 231, 255, 180),
                     );
-                    let mut q_changed = false;
-                    let mut w_changed = false;
                     if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Q))
-                        && let Some(state) = self.trim_timeline_state.as_mut()
-                        && let Some(target_clip) = state.rows[row_index].clips.get_mut(clip_index)
                     {
-                        target_clip.clip_start_secs =
-                            local_time.clamp(0.0, target_clip.clip_end_secs - 0.05);
-                        q_changed = true;
+                        self.trim_timeline_trim_clip_edge_at_local_time(
+                            ctx,
+                            sound_id,
+                            row_index,
+                            clip_index,
+                            local_time,
+                            true,
+                        );
                     }
                     if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::W))
-                        && let Some(state) = self.trim_timeline_state.as_mut()
-                        && let Some(target_clip) = state.rows[row_index].clips.get_mut(clip_index)
                     {
-                        target_clip.clip_end_secs =
-                            local_time.clamp(target_clip.clip_start_secs + 0.05, clip.clip_end_secs.max(local_time));
-                        w_changed = true;
-                    }
-                    if (q_changed || w_changed)
-                        && let Some(before) = clip_before
-                    {
-                        self.push_trim_timeline_undo_snapshot(before);
-                        timeline_state_changed = true;
-                        self.mark_dirty(ctx);
-                        ctx.request_repaint();
+                        self.trim_timeline_trim_clip_edge_at_local_time(
+                            ctx,
+                            sound_id,
+                            row_index,
+                            clip_index,
+                            local_time,
+                            false,
+                        );
                     }
                 }
                 if !clip_is_deleting && removable && clip_response.secondary_clicked() {
-                    self.trim_timeline_clip_delete_animating
-                        .entry(clip.id)
-                        .or_insert(delete_anim_now);
-                    ctx.request_repaint();
+                    self.trim_timeline_begin_clip_delete_animation(ctx, clip.id);
                 }
                 if !clip_is_deleting
                     && removable
@@ -5020,6 +5516,94 @@ impl SoundFxApp {
                         hint_color,
                     );
                 }
+            }
+
+            for animation in self.trim_timeline_segment_delete_animations.iter().filter(|animation| {
+                animation.owner_sound_id == sound_id && animation.row_index == row_index
+            }) {
+                let progress = (delete_anim_now
+                    .saturating_duration_since(animation.started_at)
+                    .as_secs_f32()
+                    / TRIM_TIMELINE_DELETE_ANIM_SECS)
+                    .clamp(0.0, 1.0);
+                let Some(sound) = self
+                    .sounds
+                    .iter()
+                    .find(|candidate| candidate.id == animation.source_sound_id)
+                else {
+                    continue;
+                };
+                let clip_duration =
+                    (animation.clip_end_secs - animation.clip_start_secs).max(0.05);
+                let clip_time_start = animation.start_secs.max(0.0);
+                let clip_time_end = clip_time_start + clip_duration;
+                if clip_time_end <= view_start_secs || clip_time_start >= view_end_secs {
+                    continue;
+                }
+                let visible_clip_start = clip_time_start.max(view_start_secs);
+                let visible_clip_end = clip_time_end.min(view_end_secs);
+                let clip_left = timeline_rect.left()
+                    + ((visible_clip_start - view_start_secs) / visible_duration)
+                        * timeline_rect.width();
+                let clip_right = timeline_rect.left()
+                    + ((visible_clip_end - view_start_secs) / visible_duration)
+                        * timeline_rect.width();
+                let animation_rect = Rect::from_min_max(
+                    Pos2::new(clip_left, timeline_rect.top() + 1.0),
+                    Pos2::new(
+                        clip_right.max(clip_left + 1.5).min(timeline_rect.right()),
+                        timeline_rect.bottom() - 1.0,
+                    ),
+                );
+                let rendered_animation_rect = animation_rect.shrink2(vec2(
+                    ((animation_rect.width() - 8.0).max(0.0) * 0.12).min(14.0) * progress,
+                    ((animation_rect.height() - 8.0).max(0.0) * 0.28).min(16.0) * progress,
+                ));
+                let waveform_bars =
+                    ((rendered_animation_rect.width() / 7.0).round() as usize).clamp(16, 96);
+                let preview = Self::timeline_clip_waveform_preview_from_samples(
+                    sound,
+                    &self.sound_waveform_samples(sound),
+                    animation.clip_start_secs,
+                    animation.clip_end_secs,
+                    waveform_bars,
+                );
+                painter.rect_filled(
+                    rendered_animation_rect,
+                    0.0,
+                    Color32::from_rgba_premultiplied(92, 38, 71, 220)
+                        .linear_multiply(1.0 - progress * 0.45),
+                );
+                painter.rect_stroke(
+                    rendered_animation_rect,
+                    0.0,
+                    Stroke::new(
+                        1.0,
+                        Color32::from_rgb(255, 112, 181).linear_multiply(1.0 - progress * 0.3),
+                    ),
+                    StrokeKind::Outside,
+                );
+                if rendered_animation_rect.width() >= 18.0 {
+                    let waveform_rect = Rect::from_min_max(
+                        Pos2::new(
+                            rendered_animation_rect.left() + 8.0,
+                            rendered_animation_rect.top() + 15.0,
+                        ),
+                        Pos2::new(
+                            (rendered_animation_rect.right() - 8.0)
+                                .max(rendered_animation_rect.left() + 8.0),
+                            rendered_animation_rect.bottom() - 4.0,
+                        ),
+                    );
+                    Self::paint_timeline_waveform_columns(
+                        &painter,
+                        waveform_rect,
+                        &preview,
+                        Color32::from_rgb(241, 78, 162).linear_multiply(1.0 - progress * 0.2),
+                        false,
+                    );
+                }
+                ctx.request_repaint();
             }
 
             if let Some(pointer) = ctx.input(|input| input.pointer.hover_pos())
@@ -5151,6 +5735,7 @@ impl SoundFxApp {
             Color32::from_rgb(108, 231, 255),
         );
 
+        let mut removal_before_snapshot = None;
         if let Some(state) = self.trim_timeline_state.as_mut() {
             state.enabled = next_enabled;
             state.playhead_secs = timeline_playhead_secs.max(0.0);
@@ -5193,6 +5778,9 @@ impl SoundFxApp {
             }
             let mut removed_any_clip = false;
             for removed_clip_id in finalized_removed_clip_ids {
+                if removal_before_snapshot.is_none() {
+                    removal_before_snapshot = Some(state.clone());
+                }
                 let mut removed = false;
                 for row in &mut state.rows {
                     if let Some(clip_index) = row.clips.iter().position(|clip| clip.id == removed_clip_id) {
@@ -5211,6 +5799,37 @@ impl SoundFxApp {
             if removed_any_clip {
                 timeline_state_changed = true;
             }
+        }
+        if let Some(before) = removal_before_snapshot {
+            self.push_trim_timeline_undo_snapshot(before);
+        }
+        self.trim_timeline_segment_delete_animations
+            .retain(|animation| {
+                delete_anim_now
+                    .saturating_duration_since(animation.started_at)
+                    .as_secs_f32()
+                    < TRIM_TIMELINE_DELETE_ANIM_SECS
+            });
+        if !self.trim_timeline_segment_delete_animations.is_empty() {
+            ctx.request_repaint();
+        }
+        if toolbar_trim_left {
+            self.trim_timeline_trim_selected_clip_at_playhead(ctx, sound_id, true);
+        }
+        if toolbar_trim_right {
+            self.trim_timeline_trim_selected_clip_at_playhead(ctx, sound_id, false);
+        }
+        if toolbar_copy_clip {
+            self.trim_timeline_copy_selected_clip(sound_id);
+        }
+        if toolbar_paste_clip {
+            self.trim_timeline_paste_copied_clip(ctx, sound_id);
+        }
+        if toolbar_split_clip {
+            self.trim_timeline_split_selected_clip_at_playhead(ctx, sound_id);
+        }
+        if toolbar_delete_clip {
+            self.trim_timeline_delete_selected_clip(ctx, sound_id);
         }
         if timeline_state_changed {
             self.refresh_trim_timeline_preview_after_edit(sound_id);

@@ -164,6 +164,24 @@ pub(crate) struct TrimTimelineDropTarget {
     pub(crate) start_secs: f32,
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct TrimTimelineClipboardClip {
+    pub(crate) source_sound_id: Uuid,
+    pub(crate) clip_start_secs: f32,
+    pub(crate) clip_end_secs: f32,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct TrimTimelineSegmentDeleteAnimation {
+    pub(crate) owner_sound_id: Uuid,
+    pub(crate) row_index: usize,
+    pub(crate) source_sound_id: Uuid,
+    pub(crate) start_secs: f32,
+    pub(crate) clip_start_secs: f32,
+    pub(crate) clip_end_secs: f32,
+    pub(crate) started_at: Instant,
+}
+
 impl TrimSnapshot {
     pub(crate) fn from_sound(sound: &SoundEffect) -> Self {
         Self {
@@ -257,6 +275,9 @@ pub struct SoundFxApp {
     pub(super) trim_timeline_preview_path: Option<PathBuf>,
     pub(super) trim_timeline_preview_dirty: bool,
     pub(super) trim_timeline_clip_delete_animating: HashMap<Uuid, Instant>,
+    pub(super) trim_timeline_segment_delete_animations: Vec<TrimTimelineSegmentDeleteAnimation>,
+    pub(super) trim_timeline_copied_clip: Option<TrimTimelineClipboardClip>,
+    pub(super) trim_timeline_scrub_resume_pending: bool,
     pub(super) import_dir: PathBuf,
     pub(super) import_audio_entries: Vec<PathBuf>,
     pub(super) app_view: AppView,
@@ -581,6 +602,9 @@ impl SoundFxApp {
             trim_timeline_preview_path: None,
             trim_timeline_preview_dirty: false,
             trim_timeline_clip_delete_animating: HashMap::new(),
+            trim_timeline_segment_delete_animations: Vec::new(),
+            trim_timeline_copied_clip: None,
+            trim_timeline_scrub_resume_pending: false,
             import_dir,
             import_audio_entries: Vec::new(),
             app_view: AppView::Editor,
