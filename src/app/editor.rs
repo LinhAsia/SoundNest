@@ -304,35 +304,76 @@ impl SoundFxApp {
         next_start.max(0.0)
     }
 
+    fn trim_timeline_collect_snap_points(
+        rows: &[TrimTimelineRow],
+        ignored_clip_id: Option<Uuid>,
+    ) -> Vec<f32> {
+        let mut snap_points = vec![0.0];
+        for row in rows {
+            for existing in &row.clips {
+                if Some(existing.id) == ignored_clip_id {
+                    continue;
+                }
+                let start = existing.start_secs.max(0.0);
+                let end =
+                    start + (existing.clip_end_secs - existing.clip_start_secs).max(0.05);
+                snap_points.push(start);
+                snap_points.push(end);
+            }
+        }
+        snap_points
+    }
+
+    fn trim_timeline_snap_start(
+        desired_start_secs: f32,
+        clip_duration_secs: f32,
+        snap_points: &[f32],
+        snap_enabled: bool,
+    ) -> (f32, Option<f32>) {
+        let next_start = desired_start_secs.max(0.0);
+        if !snap_enabled {
+            return (next_start, None);
+        }
+
+        let clip_duration = clip_duration_secs.max(0.05);
+        let mut best: Option<(f32, f32, f32)> = None;
+        for snap_point in snap_points.iter().copied() {
+            for candidate_start in [snap_point, (snap_point - clip_duration).max(0.0)] {
+                let distance = (candidate_start - next_start).abs();
+                if best.is_none_or(|(best_distance, _, _)| distance < best_distance) {
+                    best = Some((distance, candidate_start, snap_point));
+                }
+            }
+        }
+
+        if let Some((distance, snapped_start, snapped_point)) = best
+            && distance <= 0.18
+        {
+            return (snapped_start.max(0.0), Some(snapped_point));
+        }
+
+        (next_start, None)
+    }
+
     fn trim_timeline_preview_drop_start(
+        rows: &[TrimTimelineRow],
         row: &TrimTimelineRow,
         desired_start_secs: f32,
         clip_duration_secs: f32,
         snap_enabled: bool,
-    ) -> f32 {
-        let mut next_start = desired_start_secs.max(0.0);
+    ) -> (f32, Option<f32>) {
         let clip_duration = clip_duration_secs.max(0.05);
-
-        if snap_enabled {
-            let mut snap_points = vec![0.0];
-            for existing in &row.clips {
-                snap_points.push(existing.start_secs.max(0.0));
-                snap_points.push(
-                    existing.start_secs.max(0.0)
-                        + (existing.clip_end_secs - existing.clip_start_secs).max(0.05),
-                );
-            }
-            if let Some(snap) = snap_points.into_iter().min_by(|left, right| {
-                (left - next_start)
-                    .abs()
-                    .total_cmp(&(right - next_start).abs())
-            }) && (snap - next_start).abs() <= 0.18
-            {
-                next_start = snap;
-            }
-        }
-
-        Self::trim_timeline_resolve_row_start(row, None, next_start, clip_duration)
+        let snap_points = Self::trim_timeline_collect_snap_points(rows, None);
+        let (snapped_start, snapped_point) = Self::trim_timeline_snap_start(
+            desired_start_secs,
+            clip_duration,
+            &snap_points,
+            snap_enabled,
+        );
+        (
+            Self::trim_timeline_resolve_row_start(row, None, snapped_start, clip_duration),
+            snapped_point,
+        )
     }
 
     fn collect_trim_timeline_render_clips(
@@ -4575,8 +4616,7 @@ impl SoundFxApp {
                 let removable = true;
                 let clip_response = ui.interact(
                     clip_hit_rect,
-                    ui.id()
-                        .with(("trim-mix-clip", sound_id, row_index, clip_index, sound.id)),
+                    ui.id().with(("trim-mix-clip", sound_id, clip.id)),
                     Sense::click_and_drag(),
                 );
                 let drag_anchor_id = ui.id().with(("trim-mix-drag-anchor", sound_id, clip.id));
@@ -4745,44 +4785,36 @@ impl SoundFxApp {
                             let top = viewport_rect.top()
                                 + candidate_row as f32 * (row_height + row_spacing);
                             let rect = Rect::from_min_max(
-                                Pos2::new(timeline_rect.left(), top + 12.0),
-                                Pos2::new(timeline_rect.right(), top + row_height - 12.0),
+                                Pos2::new(timeline_rect.left(), top),
+                                Pos2::new(timeline_rect.right(), top + row_height),
                             );
                             rect.contains(pointer).then_some(candidate_row)
                         })
                         .unwrap_or(row_index);
+                    let target_row_top =
+                        viewport_rect.top() + target_row as f32 * (row_height + row_spacing);
+                    let target_timeline_rect = Rect::from_min_max(
+                        Pos2::new(timeline_rect.left(), target_row_top),
+                        Pos2::new(timeline_rect.right(), target_row_top + row_height),
+                    );
                     let pointer_time = (view_start_secs
-                        + ((pointer.x - timeline_rect.left()) / timeline_rect.width()).clamp(0.0, 1.0)
+                        + ((pointer.x - target_timeline_rect.left()) / target_timeline_rect.width())
+                            .clamp(0.0, 1.0)
                             * visible_duration)
                         .max(0.0);
                     let grab_offset_secs = ui
                         .ctx()
                         .data(|data| data.get_temp::<f32>(drag_anchor_id))
                         .unwrap_or(0.0);
-                    let mut next_start = (pointer_time - grab_offset_secs).max(0.0);
-                    if state.snap_enabled {
-                        let mut snap_points = vec![0.0];
-                        for existing_row in &state.rows {
-                            for existing in &existing_row.clips {
-                                if existing.id != clip.id {
-                                    snap_points.push(existing.start_secs);
-                                    snap_points.push(
-                                        existing.start_secs
-                                            + (existing.clip_end_secs - existing.clip_start_secs)
-                                                .max(0.05),
-                                    );
-                                }
-                            }
-                        }
-                        if let Some(snap) = snap_points.into_iter().min_by(|left, right| {
-                            (left - next_start)
-                                .abs()
-                                .total_cmp(&(right - next_start).abs())
-                        }) && (snap - next_start).abs() <= 0.18
-                        {
-                            next_start = snap;
-                        }
-                    }
+                    let desired_start = (pointer_time - grab_offset_secs).max(0.0);
+                    let snap_points =
+                        Self::trim_timeline_collect_snap_points(&state.rows, Some(clip.id));
+                    let (next_start, _) = Self::trim_timeline_snap_start(
+                        desired_start,
+                        (clip.clip_end_secs - clip.clip_start_secs).max(0.05),
+                        &snap_points,
+                        state.snap_enabled,
+                    );
                     let moving_clip = state.rows[row_index].clips.remove(clip_index);
                     let insert_row = target_row.min(state.rows.len().saturating_sub(1));
                     let resolved_start = Self::trim_timeline_resolve_row_start(
@@ -4830,17 +4862,18 @@ impl SoundFxApp {
                 let ratio = ((pointer.x - timeline_rect.left()) / timeline_rect.width()).clamp(0.0, 1.0);
                 let desired_start_secs =
                     ((view_start_secs + ratio * visible_duration) * 20.0).round() / 20.0;
-                let start_secs = pending_drag_sound
+                let (start_secs, snapped_point) = pending_drag_sound
                     .as_ref()
                     .map(|drag_sound| {
                         Self::trim_timeline_preview_drop_start(
+                            &state_snapshot.rows,
                             row,
                             desired_start_secs,
                             drag_sound.trimmed_length(),
                             state_snapshot.snap_enabled,
                         )
                     })
-                    .unwrap_or(desired_start_secs);
+                    .unwrap_or((desired_start_secs, None));
                 next_drop_target = Some(TrimTimelineDropTarget {
                     row_index,
                     start_secs,
@@ -4855,6 +4888,18 @@ impl SoundFxApp {
                     ],
                     Stroke::new(2.0, Color32::from_rgb(108, 231, 255)),
                 );
+                if let Some(snap_point) = snapped_point {
+                    let snap_ratio =
+                        ((snap_point - view_start_secs) / visible_duration).clamp(0.0, 1.0);
+                    let snap_x = timeline_rect.left() + snap_ratio * timeline_rect.width();
+                    painter.line_segment(
+                        [
+                            Pos2::new(snap_x, timeline_rect.top() + 3.0),
+                            Pos2::new(snap_x, timeline_rect.bottom() - 3.0),
+                        ],
+                        Stroke::new(1.0, Color32::from_rgba_premultiplied(255, 112, 181, 190)),
+                    );
+                }
                 if let Some(drag_sound) = pending_drag_sound.as_ref() {
                     let clip_width =
                         ((drag_sound.trimmed_length() / visible_duration) * timeline_rect.width()).max(1.5);
