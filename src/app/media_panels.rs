@@ -53,8 +53,9 @@ impl SoundFxApp {
 
                 ui.add_space(12.0);
                 Self::with_input_widget_visuals(ui, |ui| {
+                    ui.spacing_mut().interact_size.y = 32.0;
                     ui.add_sized(
-                        [ui.available_width(), 40.0],
+                        [ui.available_width(), 32.0],
                         TextEdit::singleline(&mut self.record_name)
                             .desired_width(f32::INFINITY)
                             .hint_text("recording"),
@@ -183,6 +184,7 @@ impl SoundFxApp {
                     ui.set_width(ui.available_width());
                     if self.record_input_source == PitchInputSource::Microphone {
                         Self::with_dark_combo_visuals(ui, |ui| {
+                            ui.spacing_mut().interact_size.y = 32.0;
                             ComboBox::from_id_salt("record-input-device")
                                 .width(ui.available_width())
                                 .selected_text(
@@ -206,8 +208,9 @@ impl SoundFxApp {
                         });
                     } else {
                         Self::with_input_widget_visuals(ui, |ui| {
+                            ui.spacing_mut().interact_size.y = 32.0;
                             ui.add_sized(
-                                [ui.available_width(), 36.0],
+                                [ui.available_width(), 32.0],
                                 egui::Label::new(
                                     RichText::new("System output")
                                         .size(13.0)

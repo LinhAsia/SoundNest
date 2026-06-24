@@ -3094,44 +3094,70 @@ impl SoundFxApp {
                         Middle,
                         Right,
                     }
+                    let left_region_rect = Rect::from_min_max(
+                        Pos2::new(rect.left(), rect.top() + 10.0),
+                        Pos2::new(start_x.max(rect.left() + 2.0), rect.bottom() - 10.0),
+                    );
+                    let middle_region_rect = selection;
+                    let right_region_rect = Rect::from_min_max(
+                        Pos2::new(end_x.min(rect.right() - 2.0), rect.top() + 10.0),
+                        Pos2::new(rect.right(), rect.bottom() - 10.0),
+                    );
+                    let left_region_enabled = sound.trim_start_secs > 0.001;
+                    let right_region_enabled = sound.trim_end_secs < duration - 0.001;
+                    let left_region_response = ui.interact(
+                        left_region_rect,
+                        ui.make_persistent_id((sound.id, "trim-delete-left")),
+                        Sense::click(),
+                    );
+                    let middle_region_response = ui.interact(
+                        middle_region_rect,
+                        ui.make_persistent_id((sound.id, "trim-delete-middle")),
+                        Sense::click(),
+                    );
+                    let right_region_response = ui.interact(
+                        right_region_rect,
+                        ui.make_persistent_id((sound.id, "trim-delete-right")),
+                        Sense::click(),
+                    );
                     let pointer_time = pointer_pos.map(|pointer| {
                         let ratio = ((pointer.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
                         ratio * duration
                     });
-                    let hovered_delete_region = pointer_pos.and_then(|pointer| {
-                        if pointer.x < start_x && sound.trim_start_secs > 0.001 {
+                    let hovered_delete_region =
+                        if left_region_enabled && left_region_response.hovered() {
                             Some(TrimDeleteRegion::Left)
-                        } else if pointer.x > end_x && sound.trim_end_secs < duration - 0.001 {
+                        } else if right_region_enabled && right_region_response.hovered() {
                             Some(TrimDeleteRegion::Right)
-                        } else if pointer.x >= start_x && pointer.x <= end_x {
+                        } else if middle_region_response.hovered() {
                             Some(TrimDeleteRegion::Middle)
                         } else {
                             None
-                        }
-                    });
+                        };
                     if let Some(region) = hovered_delete_region {
                         let region_rect = match region {
-                            TrimDeleteRegion::Left => Some(Rect::from_min_max(
-                                Pos2::new(rect.left(), rect.top() + 10.0),
-                                Pos2::new(start_x.max(rect.left() + 2.0), rect.bottom() - 10.0),
-                            )),
-                            TrimDeleteRegion::Middle => Some(selection),
-                            TrimDeleteRegion::Right => Some(Rect::from_min_max(
-                                Pos2::new(end_x.min(rect.right() - 2.0), rect.top() + 10.0),
-                                Pos2::new(rect.right(), rect.bottom() - 10.0),
-                            )),
+                            TrimDeleteRegion::Left => Some(left_region_rect),
+                            TrimDeleteRegion::Middle => Some(middle_region_rect),
+                            TrimDeleteRegion::Right => Some(right_region_rect),
                         };
                         if let Some(region_rect) = region_rect {
                             painter.rect_filled(
                                 region_rect,
                                 14.0,
                                 if dark_theme {
-                                    Color32::from_rgba_premultiplied(255, 120, 170, 24)
+                                    Color32::from_rgba_premultiplied(255, 120, 170, 52)
                                 } else {
-                                    Color32::from_rgba_premultiplied(214, 51, 132, 20)
+                                    Color32::from_rgba_premultiplied(214, 51, 132, 42)
                                 },
                             );
+                            painter.rect_stroke(
+                                region_rect,
+                                14.0,
+                                Stroke::new(1.5, Color32::from_rgb(255, 120, 170)),
+                                StrokeKind::Inside,
+                            );
                         }
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::ContextMenu);
                     }
                     let playhead_outline = if dark_theme {
                         Color32::from_rgba_premultiplied(8, 13, 19, 224)
@@ -3327,10 +3353,22 @@ impl SoundFxApp {
                         }
                     }
 
-                    if interactive
-                        && response.secondary_clicked()
-                        && let Some(region) = hovered_delete_region
+                    let delete_region = if interactive
+                        && left_region_enabled
+                        && left_region_response.secondary_clicked()
                     {
+                        Some(TrimDeleteRegion::Left)
+                    } else if interactive && middle_region_response.secondary_clicked() {
+                        Some(TrimDeleteRegion::Middle)
+                    } else if interactive
+                        && right_region_enabled
+                        && right_region_response.secondary_clicked()
+                    {
+                        Some(TrimDeleteRegion::Right)
+                    } else {
+                        None
+                    };
+                    if let Some(region) = delete_region {
                         let before = TrimSnapshot::from_sound(sound);
                         match region {
                             TrimDeleteRegion::Left => {
@@ -3352,6 +3390,7 @@ impl SoundFxApp {
                         changed = true;
                         preview_commit_requested = true;
                         trim_history_commit = Some(before);
+                        *preview_cursor_secs = sound.trim_start_secs;
                         ui.ctx().data_mut(|data| {
                             data.remove::<TrimSnapshot>(trim_history_snapshot_id);
                             data.remove::<bool>(trim_adjusting_id);
