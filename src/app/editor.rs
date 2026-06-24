@@ -1023,7 +1023,7 @@ impl SoundFxApp {
         let Some(sound_id) = self.timeline_mode_active_for_selected() else {
             return;
         };
-        if self.has_modal_panel() || self.show_record_review_panel || ctx.wants_keyboard_input() {
+        if self.has_modal_panel() || self.show_record_review_panel {
             return;
         }
 
@@ -1034,16 +1034,32 @@ impl SoundFxApp {
             self.sync_trim_timeline_playhead_from_audio(sound_id);
         }
 
-        let undo_modifiers = egui::Modifiers {
-            ctrl: true,
-            ..Default::default()
-        };
-        let redo_modifiers = egui::Modifiers {
-            ctrl: true,
-            shift: true,
-            ..Default::default()
-        };
-        if ctx.input_mut(|input| input.consume_key(redo_modifiers, egui::Key::Z))
+        let command_z = ctx.input(|input| {
+            input.key_pressed(egui::Key::Z)
+                && (input.modifiers.ctrl || input.modifiers.command || input.modifiers.mac_cmd)
+                && !input.modifiers.shift
+                && !input.modifiers.alt
+        });
+        let command_shift_z = ctx.input(|input| {
+            input.key_pressed(egui::Key::Z)
+                && (input.modifiers.ctrl || input.modifiers.command || input.modifiers.mac_cmd)
+                && input.modifiers.shift
+                && !input.modifiers.alt
+        });
+        let command_c = ctx.input(|input| {
+            input.key_pressed(egui::Key::C)
+                && (input.modifiers.ctrl || input.modifiers.command || input.modifiers.mac_cmd)
+                && !input.modifiers.shift
+                && !input.modifiers.alt
+        });
+        let command_v = ctx.input(|input| {
+            input.key_pressed(egui::Key::V)
+                && (input.modifiers.ctrl || input.modifiers.command || input.modifiers.mac_cmd)
+                && !input.modifiers.shift
+                && !input.modifiers.alt
+        });
+
+        if command_shift_z
             && let Some(snapshot) = self.trim_timeline_redo_stack.pop()
         {
             if let Some(current) = self.trim_timeline_state.clone() {
@@ -1053,7 +1069,7 @@ impl SoundFxApp {
             ctx.request_repaint();
             return;
         }
-        if ctx.input_mut(|input| input.consume_key(undo_modifiers, egui::Key::Z))
+        if command_z
             && let Some(snapshot) = self.trim_timeline_undo_stack.pop()
         {
             if let Some(current) = self.trim_timeline_state.clone() {
@@ -1064,15 +1080,19 @@ impl SoundFxApp {
             return;
         }
 
-        if ctx.input_mut(|input| input.consume_key(undo_modifiers, egui::Key::C)) {
+        if command_c {
             if self.trim_timeline_copy_selected_clip(sound_id) {
                 ctx.request_repaint();
             }
             return;
         }
 
-        if ctx.input_mut(|input| input.consume_key(undo_modifiers, egui::Key::V)) {
+        if command_v {
             self.trim_timeline_paste_copied_clip(ctx, sound_id);
+            return;
+        }
+
+        if ctx.wants_keyboard_input() {
             return;
         }
 
