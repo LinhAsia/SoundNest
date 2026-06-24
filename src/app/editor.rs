@@ -204,6 +204,9 @@ impl SoundFxApp {
             created_new = true;
         }
 
+        let timeline_zoom = self.trim_timeline_zoom;
+        let timeline_view_start_secs = self.trim_timeline_view_start_secs.max(0.0);
+
         let Some(state) = self.trim_timeline_state.as_mut() else {
             return;
         };
@@ -226,7 +229,11 @@ impl SoundFxApp {
             .map(|clip| clip.start_secs.max(0.0) + (clip.clip_end_secs - clip.clip_start_secs).max(0.05))
             .fold(0.0f32, f32::max)
             .max(0.25);
-        state.playhead_secs = state.playhead_secs.clamp(0.0, total_duration.max(0.05));
+        let visible_duration = (12.0 / timeline_zoom.max(0.1)).max(0.25);
+        let workspace_padding_secs = visible_duration.max(24.0);
+        let workspace_duration =
+            total_duration.max(timeline_view_start_secs + visible_duration) + workspace_padding_secs;
+        state.playhead_secs = state.playhead_secs.clamp(0.0, workspace_duration.max(0.05));
     }
 
     pub(super) fn trim_timeline_drag_capture_active(&self) -> bool {
@@ -4251,7 +4258,7 @@ impl SoundFxApp {
             .as_ref()
             .map(SoundEffect::trimmed_length)
             .unwrap_or(0.0);
-        let total_duration = (self.trim_timeline_total_duration(&state_snapshot)
+        let timeline_content_duration = (self.trim_timeline_total_duration(&state_snapshot)
             + pending_drag_duration)
             .max(
                 self.sounds
@@ -4347,9 +4354,15 @@ impl SoundFxApp {
             });
             ctx.request_repaint();
         }
-        view_start_secs = requested_view_start_secs.unwrap_or(view_start_secs).max(0.0);
+        let requested_or_current_view_start = requested_view_start_secs.unwrap_or(view_start_secs).max(0.0);
+        view_start_secs = requested_or_current_view_start;
         let visible_duration = (base_visible_secs / zoom.max(0.1)).max(0.25);
-        let max_view_start_secs = (total_duration - visible_duration).max(0.0);
+        let workspace_padding_secs = visible_duration.max(24.0);
+        let workspace_duration = timeline_content_duration
+            .max(requested_or_current_view_start + visible_duration)
+            .max(self.trim_timeline_view_start_secs.max(0.0) + visible_duration)
+            + workspace_padding_secs;
+        let max_view_start_secs = (workspace_duration - visible_duration).max(0.0);
         view_start_secs = view_start_secs.clamp(0.0, max_view_start_secs);
         let view_end_secs = view_start_secs + visible_duration;
 
