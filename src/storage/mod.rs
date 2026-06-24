@@ -610,7 +610,7 @@ impl Storage {
     pub fn commit_timeline_mix_at(
         root_dir: &Path,
         base_sound: &SoundEffect,
-        clips: &[(SoundEffect, f32)],
+        clips: &[(SoundEffect, f32, f32, f32)],
         keep_old: bool,
     ) -> Result<SoundEffect> {
         if clips.is_empty() {
@@ -619,10 +619,12 @@ impl Storage {
 
         let mixed_clips = clips
             .iter()
-            .map(|(sound, start_secs)| {
+            .map(|(sound, start_secs, clip_start_secs, clip_end_secs)| {
                 Self::export_processed_sound_at(root_dir, sound).map(|path| MixedAudioClip {
                     path,
                     start_secs: *start_secs,
+                    clip_start_secs: *clip_start_secs,
+                    clip_end_secs: *clip_end_secs,
                 })
             })
             .collect::<Result<Vec<_>>>()?;
@@ -656,6 +658,33 @@ impl Storage {
         fs::rename(&staging_path, &temp_path)
             .with_context(|| format!("unable to stage {}", temp_path.display()))?;
         Self::finalize_rendered_sound_replacement(root_dir, base_sound, target_file, &temp_path)
+    }
+
+    pub fn export_timeline_mix_preview_at(
+        root_dir: &Path,
+        base_sound: &SoundEffect,
+        clips: &[(SoundEffect, f32, f32, f32)],
+    ) -> Result<PathBuf> {
+        if clips.is_empty() {
+            bail!("timeline mix is empty");
+        }
+
+        let mixed_clips = clips
+            .iter()
+            .map(|(sound, start_secs, clip_start_secs, clip_end_secs)| {
+                Self::export_processed_sound_at(root_dir, sound).map(|path| MixedAudioClip {
+                    path,
+                    start_secs: *start_secs,
+                    clip_start_secs: *clip_start_secs,
+                    clip_end_secs: *clip_end_secs,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let preview_path = root_dir
+            .join("exports")
+            .join(format!("timeline-preview-{}.wav", base_sound.id));
+        write_mixed_wav(&mixed_clips, &preview_path)?;
+        Ok(preview_path)
     }
 
     fn finalize_rendered_sound_replacement(

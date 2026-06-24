@@ -50,6 +50,7 @@ impl eframe::App for SoundFxApp {
 
         self.enforce_square_window_if_needed(ctx);
         self.preload_selected_sound_audio();
+        self.handle_trim_timeline_hotkeys(ctx);
         self.handle_space_preview(ctx);
         self.handle_trim_start_preview(ctx);
         self.handle_record_hotkey(ctx);

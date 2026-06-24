@@ -104,6 +104,9 @@ impl SoundFxApp {
         if ctx.wants_keyboard_input() {
             return;
         }
+        if self.timeline_mode_active_for_selected().is_some() {
+            return;
+        }
 
         if !ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Space)) {
             return;

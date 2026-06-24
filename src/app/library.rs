@@ -1310,7 +1310,11 @@ impl SoundFxApp {
                 .is_some_and(|value| Self::response_pointer_within(ui.ctx(), value));
         let action_clicked = preview_clicked || copy_clicked || favorite_clicked || remove_clicked;
         if response.clicked() && !over_action && !action_clicked {
-            open_sound = true;
+            if self.timeline_mode_active_for_selected().is_some() {
+                preview_sound = Some(sound.id);
+            } else {
+                open_sound = true;
+            }
         }
 
         if let Some(sound_id) = preview_sound {
@@ -2631,11 +2635,15 @@ impl SoundFxApp {
                                 }
                             }
                             if !modal_open && response.clicked() {
-                                self.selected = Some(sound.id);
-                                if is_loading || playing {
-                                    self.stop_preview();
-                                } else {
+                                if self.timeline_mode_active_for_selected().is_some() {
                                     preview_request = Some(sound.id);
+                                } else {
+                                    self.selected = Some(sound.id);
+                                    if is_loading || playing {
+                                        self.stop_preview();
+                                    } else {
+                                        preview_request = Some(sound.id);
+                                    }
                                 }
                             }
                         }

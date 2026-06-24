@@ -134,21 +134,27 @@ pub(crate) struct TrimSnapshot {
     pub(crate) display_trim_end_secs: Option<f32>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct TrimTimelineClip {
+    pub(crate) id: Uuid,
     pub(crate) source_sound_id: Uuid,
     pub(crate) start_secs: f32,
+    pub(crate) clip_start_secs: f32,
+    pub(crate) clip_end_secs: f32,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct TrimTimelineRow {
     pub(crate) clips: Vec<TrimTimelineClip>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct TrimTimelineState {
     pub(crate) sound_id: Uuid,
     pub(crate) enabled: bool,
+    pub(crate) playhead_secs: f32,
+    pub(crate) snap_enabled: bool,
+    pub(crate) selected_clip_id: Option<Uuid>,
     pub(crate) rows: Vec<TrimTimelineRow>,
 }
 
@@ -248,6 +254,7 @@ pub struct SoundFxApp {
     pub(super) show_delete_folder_confirm: Option<Uuid>,
     pub(super) trim_timeline_state: Option<TrimTimelineState>,
     pub(super) trim_timeline_drop_target: Option<TrimTimelineDropTarget>,
+    pub(super) trim_timeline_preview_path: Option<PathBuf>,
     pub(super) import_dir: PathBuf,
     pub(super) import_audio_entries: Vec<PathBuf>,
     pub(super) app_view: AppView,
@@ -371,6 +378,8 @@ pub struct SoundFxApp {
     pub(super) trim_commit_inflight: HashSet<Uuid>,
     pub(super) trim_undo_stack: Vec<TrimSnapshot>,
     pub(super) trim_redo_stack: Vec<TrimSnapshot>,
+    pub(super) trim_timeline_undo_stack: Vec<TrimTimelineState>,
+    pub(super) trim_timeline_redo_stack: Vec<TrimTimelineState>,
     pub(super) processed_export_inflight: HashSet<PathBuf>,
     pub(super) processed_export_tx: Sender<ProcessedExportMessage>,
     pub(super) processed_export_rx: Receiver<ProcessedExportMessage>,
@@ -566,6 +575,7 @@ impl SoundFxApp {
             show_delete_folder_confirm: None,
             trim_timeline_state: None,
             trim_timeline_drop_target: None,
+            trim_timeline_preview_path: None,
             import_dir,
             import_audio_entries: Vec::new(),
             app_view: AppView::Editor,
@@ -712,6 +722,8 @@ impl SoundFxApp {
             trim_commit_inflight: HashSet::new(),
             trim_undo_stack: Vec::new(),
             trim_redo_stack: Vec::new(),
+            trim_timeline_undo_stack: Vec::new(),
+            trim_timeline_redo_stack: Vec::new(),
             processed_export_inflight: HashSet::new(),
             processed_export_tx,
             processed_export_rx,
