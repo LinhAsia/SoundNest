@@ -4415,6 +4415,40 @@ impl SoundFxApp {
                 ],
                 Stroke::new(1.0, Self::subtle_border_color()),
             );
+            let tick_step = if visible_duration > 90.0 {
+                15.0
+            } else if visible_duration > 45.0 {
+                10.0
+            } else if visible_duration > 18.0 {
+                5.0
+            } else if visible_duration > 8.0 {
+                2.0
+            } else {
+                1.0
+            };
+            let first_tick = (view_start_secs / tick_step).floor() * tick_step;
+            let mut tick_time = first_tick;
+            while tick_time <= view_end_secs + tick_step {
+                if tick_time >= view_start_secs {
+                    let tick_ratio = ((tick_time - view_start_secs) / visible_duration).clamp(0.0, 1.0);
+                    let tick_x = timeline_rect.left() + tick_ratio * timeline_rect.width();
+                    painter.line_segment(
+                        [
+                            Pos2::new(tick_x, timeline_rect.top() + 6.0),
+                            Pos2::new(tick_x, timeline_rect.top() + 14.0),
+                        ],
+                        Stroke::new(1.0, Self::subtle_border_color()),
+                    );
+                    painter.text(
+                        Pos2::new(tick_x + 4.0, timeline_rect.top() + 4.0),
+                        Align2::LEFT_TOP,
+                        format_time(tick_time.max(0.0)),
+                        FontId::proportional(9.5),
+                        Self::muted_text_color(),
+                    );
+                }
+                tick_time += tick_step;
+            }
             let playhead_x = timeline_rect.left()
                 + ((state_snapshot.playhead_secs.max(0.0) - view_start_secs) / visible_duration)
                     * timeline_rect.width();
@@ -4504,7 +4538,18 @@ impl SoundFxApp {
                     ),
                     StrokeKind::Outside,
                 );
-                let preview = self.trim_timeline_track_waveform(sound, 72);
+                let visible_local_start =
+                    clip.clip_start_secs + (visible_clip_start - clip_time_start).max(0.0);
+                let visible_local_end =
+                    clip.clip_end_secs - (clip_time_end - visible_clip_end).max(0.0);
+                let waveform_bars = ((clip_rect.width() / 7.0).round() as usize).clamp(16, 96);
+                let preview = Self::timeline_clip_waveform_preview_from_samples(
+                    sound,
+                    &self.sound_waveform_samples(sound),
+                    visible_local_start,
+                    visible_local_end,
+                    waveform_bars,
+                );
                 let title_rect = Rect::from_min_max(
                     clip_rect.left_top() + vec2(10.0, 6.0),
                     Pos2::new(clip_rect.right() - 10.0, clip_rect.top() + 24.0),
