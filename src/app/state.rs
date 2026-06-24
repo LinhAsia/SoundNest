@@ -70,35 +70,35 @@ pub(super) struct GeminiVoiceOption {
 pub(super) const GEMINI_VOICE_OPTIONS: &[GeminiVoiceOption] = &[
     GeminiVoiceOption {
         name: "Kore",
-        label: "Kore Â· Female",
+        label: "Kore - Female",
     },
     GeminiVoiceOption {
         name: "Puck",
-        label: "Puck Â· Male",
+        label: "Puck - Male",
     },
     GeminiVoiceOption {
         name: "Charon",
-        label: "Charon Â· Male",
+        label: "Charon - Male",
     },
     GeminiVoiceOption {
         name: "Aoede",
-        label: "Aoede Â· Female",
+        label: "Aoede - Female",
     },
     GeminiVoiceOption {
         name: "Fenrir",
-        label: "Fenrir Â· Male",
+        label: "Fenrir - Male",
     },
     GeminiVoiceOption {
         name: "Leda",
-        label: "Leda Â· Female",
+        label: "Leda - Female",
     },
     GeminiVoiceOption {
         name: "Orus",
-        label: "Orus Â· Male",
+        label: "Orus - Male",
     },
     GeminiVoiceOption {
         name: "Zephyr",
-        label: "Zephyr Â· Female",
+        label: "Zephyr - Female",
     },
 ];
 
