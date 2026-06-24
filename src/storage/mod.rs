@@ -17,7 +17,7 @@ use self::paths::{
     sanitize_stem, sound_asset_file_name, unique_directory_path, unique_file_path,
 };
 use anyhow::{Context, Result, bail};
-use cache::{analyze_audio_file, write_processed_wav};
+use cache::{MixedAudioClip, analyze_audio_file, write_mixed_wav, write_processed_wav};
 use std::collections::HashMap;
 use std::fs;
 #[cfg(windows)]
@@ -593,12 +593,10 @@ impl Storage {
             bail!("sound source file is missing");
         }
 
-        let mut updated = sound.clone();
-        let target_file = sound_asset_file_name(&updated.name, updated.id, "wav");
-        let target_path = root_dir.join("sounds").join(&target_file);
+        let target_file = sound_asset_file_name(&sound.name, sound.id, "wav");
         let temp_path = root_dir
             .join("sounds")
-            .join(format!("{}.trimmed.tmp.wav", updated.id));
+            .join(format!("{}.trimmed.tmp.wav", sound.id));
 
         if temp_path.exists() {
             let _ = fs::remove_file(&temp_path);
@@ -606,11 +604,75 @@ impl Storage {
 
         write_processed_wav(&source_path, &temp_path, sound)?;
 
+        Self::finalize_rendered_sound_replacement(root_dir, sound, target_file, &temp_path)
+    }
+
+    pub fn commit_timeline_mix_at(
+        root_dir: &Path,
+        base_sound: &SoundEffect,
+        clips: &[(SoundEffect, f32)],
+        keep_old: bool,
+    ) -> Result<SoundEffect> {
+        if clips.is_empty() {
+            bail!("timeline mix is empty");
+        }
+
+        let mixed_clips = clips
+            .iter()
+            .map(|(sound, start_secs)| {
+                Self::export_processed_sound_at(root_dir, sound).map(|path| MixedAudioClip {
+                    path,
+                    start_secs: *start_secs,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let staging_path = root_dir
+            .join("exports")
+            .join(format!("timeline-{}.tmp.wav", base_sound.id));
+
+        if staging_path.exists() {
+            let _ = fs::remove_file(&staging_path);
+        }
+        write_mixed_wav(&mixed_clips, &staging_path)?;
+
+        if keep_old {
+            let import_result =
+                Self::import_sound_at(root_dir, &staging_path).map(|mut imported_sound| {
+                    imported_sound.name = committed_trimmed_sound_name(base_sound);
+                    imported_sound.folder_id = base_sound.folder_id;
+                    imported_sound
+                });
+            let _ = fs::remove_file(&staging_path);
+            return import_result;
+        }
+
+        let target_file = sound_asset_file_name(&base_sound.name, base_sound.id, "wav");
+        let temp_path = root_dir
+            .join("sounds")
+            .join(format!("{}.timeline.tmp.wav", base_sound.id));
+        if temp_path.exists() {
+            let _ = fs::remove_file(&temp_path);
+        }
+        fs::rename(&staging_path, &temp_path)
+            .with_context(|| format!("unable to stage {}", temp_path.display()))?;
+        Self::finalize_rendered_sound_replacement(root_dir, base_sound, target_file, &temp_path)
+    }
+
+    fn finalize_rendered_sound_replacement(
+        root_dir: &Path,
+        sound: &SoundEffect,
+        target_file: String,
+        temp_path: &Path,
+    ) -> Result<SoundEffect> {
+        let source_path = sound.playback_asset_path(root_dir);
+        let mut updated = sound.clone();
+        let target_path = root_dir.join("sounds").join(&target_file);
+
         if target_path.exists() {
             fs::remove_file(&target_path).context("unable to replace existing trimmed sound")?;
         }
 
-        fs::rename(&temp_path, &target_path).context("unable to finalize trimmed sound")?;
+        fs::rename(temp_path, &target_path).context("unable to finalize trimmed sound")?;
 
         let preserve_source = updated
             .vocal_asset_path(root_dir)

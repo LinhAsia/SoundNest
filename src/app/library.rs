@@ -1287,8 +1287,10 @@ impl SoundFxApp {
             && self.pending_sound_drag == Some(sound.id)
             && Self::pointer_primary_drag_ready(ui.ctx())
         {
-            if let Err(error) = self.drag_sound_file_out(ui.ctx(), sound) {
-                self.set_error_status(error);
+            if !self.trim_timeline_drag_capture_active() {
+                if let Err(error) = self.drag_sound_file_out(ui.ctx(), sound) {
+                    self.set_error_status(error);
+                }
             }
             self.pending_sound_drag = None;
         }
@@ -1777,7 +1779,9 @@ impl SoundFxApp {
                     && self.pending_sound_drag == Some(sound.id)
                     && Self::pointer_primary_drag_ready(ui.ctx())
                 {
-                    drag_sound = Some(sound.id);
+                    if !self.trim_timeline_drag_capture_active() {
+                        drag_sound = Some(sound.id);
+                    }
                     self.pending_sound_drag = None;
                 }
                 let mut body_clicked = false;
@@ -2619,7 +2623,9 @@ impl SoundFxApp {
                                 && self.pending_sound_drag == Some(sound.id)
                                 && Self::pointer_primary_drag_ready(ui.ctx())
                             {
-                                drag_request = Some(sound.id);
+                                if !self.trim_timeline_drag_capture_active() {
+                                    drag_request = Some(sound.id);
+                                }
                                 self.pending_sound_drag = None;
                             }
                             if !modal_open && response.clicked() {

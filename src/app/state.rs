@@ -134,6 +134,30 @@ pub(crate) struct TrimSnapshot {
     pub(crate) display_trim_end_secs: Option<f32>,
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct TrimTimelineClip {
+    pub(crate) source_sound_id: Uuid,
+    pub(crate) start_secs: f32,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct TrimTimelineRow {
+    pub(crate) clips: Vec<TrimTimelineClip>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct TrimTimelineState {
+    pub(crate) sound_id: Uuid,
+    pub(crate) enabled: bool,
+    pub(crate) rows: Vec<TrimTimelineRow>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct TrimTimelineDropTarget {
+    pub(crate) row_index: usize,
+    pub(crate) start_secs: f32,
+}
+
 impl TrimSnapshot {
     pub(crate) fn from_sound(sound: &SoundEffect) -> Self {
         Self {
@@ -222,6 +246,8 @@ pub struct SoundFxApp {
     pub(super) show_settings_panel: bool,
     pub(super) show_trim_commit_panel: bool,
     pub(super) show_delete_folder_confirm: Option<Uuid>,
+    pub(super) trim_timeline_state: Option<TrimTimelineState>,
+    pub(super) trim_timeline_drop_target: Option<TrimTimelineDropTarget>,
     pub(super) import_dir: PathBuf,
     pub(super) import_audio_entries: Vec<PathBuf>,
     pub(super) app_view: AppView,
@@ -538,6 +564,8 @@ impl SoundFxApp {
             show_settings_panel: false,
             show_trim_commit_panel: false,
             show_delete_folder_confirm: None,
+            trim_timeline_state: None,
+            trim_timeline_drop_target: None,
             import_dir,
             import_audio_entries: Vec::new(),
             app_view: AppView::Editor,

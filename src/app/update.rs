@@ -26,7 +26,10 @@ impl eframe::App for SoundFxApp {
         self.poll_tts_jobs(ctx);
         self.prune_copy_feedback(ctx);
         if !ctx.input(|input| input.pointer.primary_down()) {
-            self.pending_sound_drag = None;
+            let accepted_trim_drop = self.finalize_pending_trim_timeline_drop();
+            if !accepted_trim_drop {
+                self.pending_sound_drag = None;
+            }
             self.pending_folder_drag = None;
         }
 

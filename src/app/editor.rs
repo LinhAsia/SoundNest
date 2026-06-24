@@ -173,6 +173,136 @@ impl SoundFxApp {
         }
     }
 
+    fn default_trim_timeline_state(sound_id: Uuid) -> TrimTimelineState {
+        TrimTimelineState {
+            sound_id,
+            enabled: false,
+            rows: vec![TrimTimelineRow {
+                clips: vec![TrimTimelineClip {
+                    source_sound_id: sound_id,
+                    start_secs: 0.0,
+                }],
+            }],
+        }
+    }
+
+    fn sync_trim_timeline_state_for(&mut self, sound_id: Uuid) {
+        if self
+            .trim_timeline_state
+            .as_ref()
+            .is_none_or(|state| state.sound_id != sound_id)
+        {
+            self.trim_timeline_state = Some(Self::default_trim_timeline_state(sound_id));
+        }
+
+        let Some(state) = self.trim_timeline_state.as_mut() else {
+            return;
+        };
+        if state.rows.is_empty() {
+            state.rows.push(TrimTimelineRow::default());
+        }
+        let base_row = &mut state.rows[0];
+        if base_row.clips.is_empty() {
+            base_row.clips.push(TrimTimelineClip {
+                source_sound_id: sound_id,
+                start_secs: 0.0,
+            });
+        } else {
+            let base_clip = &mut base_row.clips[0];
+            base_clip.source_sound_id = sound_id;
+            base_clip.start_secs = 0.0;
+        }
+    }
+
+    pub(super) fn trim_timeline_drag_capture_active(&self) -> bool {
+        self.pending_sound_drag.is_some()
+            && self
+                .trim_timeline_state
+                .as_ref()
+                .is_some_and(|state| state.enabled)
+    }
+
+    fn trim_timeline_clip_duration(&self, clip: &TrimTimelineClip) -> f32 {
+        self.sounds
+            .iter()
+            .find(|sound| sound.id == clip.source_sound_id)
+            .map(SoundEffect::trimmed_length)
+            .unwrap_or(0.25)
+    }
+
+    fn trim_timeline_total_duration(&self, state: &TrimTimelineState) -> f32 {
+        state
+            .rows
+            .iter()
+            .flat_map(|row| row.clips.iter())
+            .map(|clip| clip.start_secs.max(0.0) + self.trim_timeline_clip_duration(clip))
+            .fold(0.0f32, f32::max)
+            .max(0.25)
+    }
+
+    fn collect_trim_timeline_render_clips(&self, sound_id: Uuid) -> Option<Vec<(SoundEffect, f32)>> {
+        let state = self.trim_timeline_state.as_ref()?;
+        if !state.enabled || state.sound_id != sound_id {
+            return None;
+        }
+
+        let clips = state
+            .rows
+            .iter()
+            .flat_map(|row| row.clips.iter())
+            .filter_map(|clip| {
+                self.sounds
+                    .iter()
+                    .find(|sound| sound.id == clip.source_sound_id)
+                    .cloned()
+                    .map(|sound| (sound, clip.start_secs.max(0.0)))
+            })
+            .collect::<Vec<_>>();
+        let has_extra_mix = clips.len() > 1
+            || clips
+                .first()
+                .is_some_and(|(_, start_secs)| start_secs.abs() > 0.001);
+        has_extra_mix.then_some(clips)
+    }
+
+    pub(super) fn finalize_pending_trim_timeline_drop(&mut self) -> bool {
+        let Some(drag_sound_id) = self.pending_sound_drag else {
+            self.trim_timeline_drop_target = None;
+            return false;
+        };
+        let Some(target) = self.trim_timeline_drop_target.take() else {
+            return false;
+        };
+        let Some(selected_sound_id) = self.selected else {
+            return false;
+        };
+        if self
+            .sounds
+            .iter()
+            .all(|sound| sound.id != drag_sound_id)
+        {
+            return false;
+        }
+
+        self.sync_trim_timeline_state_for(selected_sound_id);
+        let Some(state) = self.trim_timeline_state.as_mut() else {
+            return false;
+        };
+        if !state.enabled || state.sound_id != selected_sound_id || target.row_index >= state.rows.len() {
+            return false;
+        }
+
+        state.rows[target.row_index].clips.push(TrimTimelineClip {
+            source_sound_id: drag_sound_id,
+            start_secs: target.start_secs.max(0.0),
+        });
+        state.rows[target.row_index]
+            .clips
+            .sort_by(|left, right| left.start_secs.total_cmp(&right.start_secs));
+        self.pending_sound_drag = None;
+        true
+    }
+
     pub(super) fn start_trim_commit_job(&mut self, ctx: &Context, keep_old: bool) {
         let Some(index) = self.selected_sound_index() else {
             return;
@@ -189,11 +319,14 @@ impl SoundFxApp {
         }
 
         let sound = self.sounds[index].clone();
+        let timeline_clips = self.collect_trim_timeline_render_clips(sound_id);
         let root_dir = self.storage.root_dir().to_path_buf();
         let tx = self.trim_commit_tx.clone();
         self.trim_commit_inflight.insert(sound_id);
         thread::spawn(move || {
-            let result = if keep_old {
+            let result = if let Some(timeline_clips) = timeline_clips {
+                Storage::commit_timeline_mix_at(&root_dir, &sound, &timeline_clips, keep_old)
+            } else if keep_old {
                 Storage::duplicate_trimmed_sound_at(&root_dir, &sound)
             } else {
                 Storage::replace_sound_with_processed_at(&root_dir, &sound)
@@ -1131,6 +1264,8 @@ impl SoundFxApp {
                             if self.save_now() {
                                 self.clear_status();
                             }
+                            self.trim_timeline_state = None;
+                            self.trim_timeline_drop_target = None;
                             changed = true;
                         }
                         Err(error) => self.set_error_status(error),
@@ -2047,6 +2182,8 @@ impl SoundFxApp {
         let mut start_music_job = false;
         let mut stop_vocal_job = false;
         let mut stop_music_job = false;
+        let mut save_mix_replace_request = false;
+        let mut save_mix_copy_request = false;
         let mut changed = false;
         let mut processed_export_dirty = false;
         let mut trim_history_commit: Option<TrimSnapshot> = None;
@@ -2767,6 +2904,18 @@ impl SoundFxApp {
                 }
             });
 
+        ui.add_space(14.0);
+        Frame::new()
+            .fill(Self::panel_fill())
+            .stroke(Stroke::new(1.0, Self::subtle_border_color()))
+            .corner_radius(26.0)
+            .inner_margin(Margin::same(18))
+            .show(ui, |ui| {
+                let (save_replace, save_copy) = self.render_trim_composer(ui, ctx, sound_id);
+                save_mix_replace_request |= save_replace;
+                save_mix_copy_request |= save_copy;
+            });
+
         let sound_id = self.sounds[index].id;
         let sound_duration = self.sounds[index].safe_duration();
         self.trim_timeline_zoom = trim_timeline_zoom;
@@ -2817,6 +2966,13 @@ impl SoundFxApp {
 
         if normalize_request {
             self.start_normalize_job(sound_id);
+        }
+
+        if save_mix_replace_request {
+            self.start_trim_commit_job(ctx, false);
+        }
+        if save_mix_copy_request {
+            self.start_trim_commit_job(ctx, true);
         }
 
         if processed_export_dirty {
@@ -3646,6 +3802,348 @@ impl SoundFxApp {
             preview_commit_requested,
             trim_history_commit,
         )
+    }
+
+    fn render_trim_composer(
+        &mut self,
+        ui: &mut Ui,
+        ctx: &Context,
+        sound_id: Uuid,
+    ) -> (bool, bool) {
+        self.sync_trim_timeline_state_for(sound_id);
+        let Some(state_snapshot) = self.trim_timeline_state.as_ref().cloned() else {
+            return (false, false);
+        };
+
+        let mut next_enabled = state_snapshot.enabled;
+        let mut add_row = false;
+        let mut reset_rows = false;
+        let mut remove_row = None;
+        let mut remove_clip = None;
+        let mut save_replace = false;
+        let mut save_copy = false;
+
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new("Timeline mix")
+                    .size(13.0)
+                    .color(Self::strong_text_color())
+                    .strong(),
+            );
+            ui.add_space(8.0);
+            let toggle = ui.add_sized(
+                [108.0, 30.0],
+                Self::action_button(RichText::new("Enable").size(11.5), next_enabled, false),
+            );
+            Self::decorate_button_response(ui, &toggle);
+            if toggle.clicked() {
+                next_enabled = !next_enabled;
+            }
+
+            ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                if next_enabled {
+                    let save_copy_button = ui.add_sized(
+                        [92.0, 30.0],
+                        Self::action_button(RichText::new("Save copy").size(11.5), false, false),
+                    );
+                    Self::decorate_button_response(ui, &save_copy_button);
+                    if save_copy_button.clicked() {
+                        save_copy = true;
+                    }
+
+                    let save_replace_button = ui.add_sized(
+                        [96.0, 30.0],
+                        Self::action_button(
+                            RichText::new("Save mix").size(11.5),
+                            false,
+                            false,
+                        ),
+                    );
+                    Self::decorate_button_response(ui, &save_replace_button);
+                    if save_replace_button.clicked() {
+                        save_replace = true;
+                    }
+
+                    let reset_button = ui.add_sized(
+                        [74.0, 30.0],
+                        Self::action_button(RichText::new("Reset").size(11.5), false, false),
+                    );
+                    Self::decorate_button_response(ui, &reset_button);
+                    if reset_button.clicked() {
+                        reset_rows = true;
+                    }
+
+                    let add_row_button = ui.add_sized(
+                        [76.0, 30.0],
+                        Self::action_button(RichText::new("+ Row").size(11.5), false, false),
+                    );
+                    Self::decorate_button_response(ui, &add_row_button);
+                    if add_row_button.clicked() {
+                        add_row = true;
+                    }
+                }
+            });
+        });
+        ui.add_space(8.0);
+
+        if !next_enabled {
+            self.trim_timeline_drop_target = None;
+            if let Some(state) = self.trim_timeline_state.as_mut() {
+                state.enabled = false;
+            }
+            ui.label(
+                RichText::new("Turn this on to stack extra sounds and save them as one sound.")
+                    .size(11.5)
+                    .color(Self::muted_text_color()),
+            );
+            return (false, false);
+        }
+
+        let pending_drag_sound = self
+            .pending_sound_drag
+            .and_then(|drag_sound_id| self.sounds.iter().find(|sound| sound.id == drag_sound_id));
+        let pending_drag_duration = pending_drag_sound
+            .map(SoundEffect::trimmed_length)
+            .unwrap_or(0.0);
+        let total_duration = (self.trim_timeline_total_duration(&state_snapshot)
+            + pending_drag_duration)
+            .max(
+                self.sounds
+                    .iter()
+                    .find(|sound| sound.id == sound_id)
+                    .map(SoundEffect::trimmed_length)
+                    .unwrap_or(0.25),
+            );
+        let mut next_drop_target = None;
+
+        if pending_drag_sound.is_some() {
+            ui.label(
+                RichText::new("Drag a sound from the left list and drop it on a row below.")
+                    .size(11.0)
+                    .color(Self::muted_text_color()),
+            );
+            ui.add_space(6.0);
+        }
+
+        for (row_index, row) in state_snapshot.rows.iter().enumerate() {
+            let row_height = 72.0;
+            let (row_rect, _row_response) = ui.allocate_exact_size(
+                vec2(ui.available_width(), row_height),
+                Sense::hover(),
+            );
+            let painter = ui.painter_at(row_rect);
+            painter.rect_filled(row_rect, 18.0, Self::surface_fill());
+            painter.rect_stroke(
+                row_rect,
+                18.0,
+                Stroke::new(1.0, Self::subtle_border_color()),
+                StrokeKind::Outside,
+            );
+
+            let label_rect = Rect::from_min_max(
+                Pos2::new(row_rect.left() + 12.0, row_rect.top() + 12.0),
+                Pos2::new(row_rect.left() + 84.0, row_rect.bottom() - 12.0),
+            );
+            painter.text(
+                label_rect.left_top(),
+                Align2::LEFT_TOP,
+                format!("Row {}", row_index + 1),
+                FontId::proportional(11.5),
+                Self::muted_text_color(),
+            );
+
+            let remove_row_rect = Rect::from_min_size(
+                Pos2::new(row_rect.right() - 36.0, row_rect.center().y - 14.0),
+                vec2(28.0, 28.0),
+            );
+            if row_index > 0 {
+                painter.rect_filled(remove_row_rect, 10.0, Self::panel_fill());
+                painter.rect_stroke(
+                    remove_row_rect,
+                    10.0,
+                    Stroke::new(1.0, Self::border_color()),
+                    StrokeKind::Outside,
+                );
+                painter.text(
+                    remove_row_rect.center(),
+                    Align2::CENTER_CENTER,
+                    "-",
+                    FontId::proportional(20.0),
+                    Self::strong_text_color(),
+                );
+                let response = ui.interact(
+                    remove_row_rect,
+                    ui.id().with(("trim-mix-remove-row", sound_id, row_index)),
+                    Sense::click(),
+                );
+                if response.hovered() {
+                    ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+                }
+                if response.clicked() {
+                    remove_row = Some(row_index);
+                }
+            }
+
+            let timeline_rect = Rect::from_min_max(
+                Pos2::new(label_rect.right() + 8.0, row_rect.top() + 12.0),
+                Pos2::new(remove_row_rect.left() - 10.0, row_rect.bottom() - 12.0),
+            );
+            painter.rect_filled(timeline_rect, 14.0, Self::input_fill());
+            painter.line_segment(
+                [
+                    Pos2::new(timeline_rect.left() + 10.0, timeline_rect.center().y),
+                    Pos2::new(timeline_rect.right() - 10.0, timeline_rect.center().y),
+                ],
+                Stroke::new(1.0, Self::subtle_border_color()),
+            );
+
+            for (clip_index, clip) in row.clips.iter().enumerate() {
+                let Some(sound) = self
+                    .sounds
+                    .iter()
+                    .find(|candidate| candidate.id == clip.source_sound_id)
+                else {
+                    continue;
+                };
+                let clip_duration = sound.trimmed_length().max(0.05);
+                let clip_left = timeline_rect.left()
+                    + (clip.start_secs.max(0.0) / total_duration) * timeline_rect.width();
+                let clip_width =
+                    ((clip_duration / total_duration) * timeline_rect.width()).max(44.0);
+                let clip_rect = Rect::from_min_max(
+                    Pos2::new(clip_left, timeline_rect.top() + 6.0),
+                    Pos2::new(
+                        (clip_left + clip_width).min(timeline_rect.right()),
+                        timeline_rect.bottom() - 6.0,
+                    ),
+                );
+                let removable = !(row_index == 0 && clip_index == 0);
+                let clip_response = ui.interact(
+                    clip_rect,
+                    ui.id()
+                        .with(("trim-mix-clip", sound_id, row_index, clip_index, sound.id)),
+                    Sense::click(),
+                );
+
+                painter.rect_filled(
+                    clip_rect,
+                    12.0,
+                    if row_index == 0 && clip_index == 0 {
+                        Color32::from_rgba_premultiplied(227, 82, 149, 40)
+                    } else {
+                        Color32::from_rgba_premultiplied(214, 51, 132, 68)
+                    },
+                );
+                painter.rect_stroke(
+                    clip_rect,
+                    12.0,
+                    Stroke::new(
+                        1.0,
+                        if clip_response.hovered() && removable {
+                            Color32::from_rgb(255, 182, 214)
+                        } else {
+                            Self::border_color()
+                        },
+                    ),
+                    StrokeKind::Outside,
+                );
+                let waveform = self.sound_waveform_samples(sound);
+                let preview = Self::trimmed_waveform_preview_from_samples(sound, &waveform);
+                Self::paint_waveform_bars(
+                    &painter,
+                    clip_rect.shrink2(vec2(8.0, 10.0)),
+                    &preview,
+                    clip_rect.left() + 8.0,
+                    clip_rect.right() - 8.0,
+                    None,
+                );
+                painter.text(
+                    Pos2::new(clip_rect.left() + 8.0, clip_rect.top() + 5.0),
+                    Align2::LEFT_TOP,
+                    &sound.name,
+                    FontId::proportional(11.0),
+                    Self::strong_text_color(),
+                );
+
+                if removable && clip_response.hovered() {
+                    ctx.set_cursor_icon(egui::CursorIcon::ContextMenu);
+                }
+                if removable && clip_response.secondary_clicked() {
+                    remove_clip = Some((row_index, clip_index));
+                }
+            }
+
+            if let Some(pointer) = ctx.input(|input| input.pointer.hover_pos())
+                && timeline_rect.contains(pointer)
+                && pending_drag_sound.is_some()
+            {
+                let ratio = ((pointer.x - timeline_rect.left()) / timeline_rect.width())
+                    .clamp(0.0, 1.0);
+                let start_secs = (ratio * total_duration * 20.0).round() / 20.0;
+                next_drop_target = Some(TrimTimelineDropTarget {
+                    row_index,
+                    start_secs,
+                });
+                let marker_x = timeline_rect.left() + ratio * timeline_rect.width();
+                painter.line_segment(
+                    [
+                        Pos2::new(marker_x, timeline_rect.top() + 4.0),
+                        Pos2::new(marker_x, timeline_rect.bottom() - 4.0),
+                    ],
+                    Stroke::new(2.0, Color32::from_rgb(108, 231, 255)),
+                );
+                if let Some(drag_sound) = pending_drag_sound {
+                    let clip_width = ((drag_sound.trimmed_length() / total_duration)
+                        * timeline_rect.width())
+                    .max(44.0);
+                    let ghost_rect = Rect::from_min_max(
+                        Pos2::new(marker_x, timeline_rect.top() + 8.0),
+                        Pos2::new(
+                            (marker_x + clip_width).min(timeline_rect.right()),
+                            timeline_rect.bottom() - 8.0,
+                        ),
+                    );
+                    painter.rect_stroke(
+                        ghost_rect,
+                        10.0,
+                        Stroke::new(1.25, Color32::from_rgba_premultiplied(108, 231, 255, 192)),
+                        StrokeKind::Outside,
+                    );
+                }
+                ctx.set_cursor_icon(egui::CursorIcon::Copy);
+            }
+
+            ui.add_space(8.0);
+        }
+
+        if let Some(state) = self.trim_timeline_state.as_mut() {
+            state.enabled = next_enabled;
+            if add_row {
+                state.rows.push(TrimTimelineRow::default());
+            }
+            if reset_rows {
+                state.rows.truncate(1);
+                if let Some(base_row) = state.rows.first_mut() {
+                    base_row.clips.truncate(1);
+                }
+            }
+            if let Some(row_index) = remove_row
+                && row_index < state.rows.len()
+                && row_index > 0
+            {
+                state.rows.remove(row_index);
+            }
+            if let Some((row_index, clip_index)) = remove_clip
+                && let Some(row) = state.rows.get_mut(row_index)
+                && clip_index < row.clips.len()
+                && !(row_index == 0 && clip_index == 0)
+            {
+                row.clips.remove(clip_index);
+            }
+        }
+        self.trim_timeline_drop_target = next_drop_target;
+
+        (save_replace, save_copy)
     }
 
     pub(super) fn render_trim_commit_panel(&mut self, ctx: &Context) {

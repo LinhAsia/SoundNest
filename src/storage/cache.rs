@@ -4,7 +4,7 @@ use rodio::{Decoder, Source};
 use std::fs::File;
 use std::io::BufReader;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::SoundEffect;
 
@@ -19,6 +19,11 @@ struct DecodedAudio {
     channels: u16,
     sample_rate: u32,
     samples: Vec<f32>,
+}
+
+pub(crate) struct MixedAudioClip {
+    pub(crate) path: PathBuf,
+    pub(crate) start_secs: f32,
 }
 
 pub(super) fn analyze_audio_file(path: &Path, buckets: usize) -> Result<AudioAnalysis> {
@@ -147,6 +152,130 @@ pub(super) fn write_processed_wav(
         .finalize()
         .context("unable to finalize exported wav file")?;
     Ok(())
+}
+
+pub(crate) fn write_mixed_wav(clips: &[MixedAudioClip], target_path: &Path) -> Result<()> {
+    const TARGET_SAMPLE_RATE: u32 = 44_100;
+    const TARGET_CHANNELS: u16 = 2;
+
+    if clips.is_empty() {
+        bail!("no clips to mix");
+    }
+
+    let mut prepared = Vec::with_capacity(clips.len());
+    let mut total_frames = 0usize;
+    for clip in clips {
+        let decoded = decode_audio_file(&clip.path)?;
+        let mut stereo = convert_to_stereo(&decoded.samples, decoded.channels.max(1));
+        if decoded.sample_rate.max(1) != TARGET_SAMPLE_RATE {
+            stereo = resample_stereo_linear(&stereo, decoded.sample_rate.max(1), TARGET_SAMPLE_RATE);
+        }
+        soften_sample_edges(&mut stereo, TARGET_CHANNELS, TARGET_SAMPLE_RATE, EXPORT_POP_FADE_MS);
+        let frames = stereo.len() / TARGET_CHANNELS as usize;
+        let start_frame = (clip.start_secs.max(0.0) * TARGET_SAMPLE_RATE as f32).round() as usize;
+        total_frames = total_frames.max(start_frame + frames);
+        prepared.push((start_frame, stereo));
+    }
+
+    if total_frames == 0 {
+        bail!("mixed audio is empty");
+    }
+
+    let mut mixed = vec![0.0f32; total_frames * TARGET_CHANNELS as usize];
+    for (start_frame, stereo) in prepared {
+        let start_sample = start_frame * TARGET_CHANNELS as usize;
+        for (index, sample) in stereo.iter().enumerate() {
+            let target = start_sample + index;
+            if target < mixed.len() {
+                mixed[target] += *sample;
+            }
+        }
+    }
+
+    let peak = mixed.iter().copied().fold(0.0f32, |acc, sample| acc.max(sample.abs()));
+    if peak > 1.0 {
+        for sample in &mut mixed {
+            *sample /= peak;
+        }
+    }
+
+    let spec = WavSpec {
+        channels: TARGET_CHANNELS,
+        sample_rate: TARGET_SAMPLE_RATE,
+        bits_per_sample: 16,
+        sample_format: SampleFormat::Int,
+    };
+    let mut writer =
+        WavWriter::create(target_path, spec).context("unable to create mixed wav file")?;
+    for sample in &mixed {
+        let pcm = ((*sample).clamp(-1.0, 1.0) * i16::MAX as f32).round() as i16;
+        writer
+            .write_sample(pcm)
+            .context("unable to write mixed wav sample")?;
+    }
+    writer.finalize().context("unable to finalize mixed wav file")?;
+    Ok(())
+}
+
+fn convert_to_stereo(samples: &[f32], channels: u16) -> Vec<f32> {
+    let channels = channels.max(1) as usize;
+    if channels == 2 {
+        return samples.to_vec();
+    }
+
+    let frames = samples.len() / channels;
+    let mut stereo = Vec::with_capacity(frames * 2);
+    for frame_index in 0..frames {
+        let base = frame_index * channels;
+        if channels == 1 {
+            let sample = samples[base];
+            stereo.push(sample);
+            stereo.push(sample);
+            continue;
+        }
+
+        let mut mixed = 0.0f32;
+        for channel in 0..channels {
+            mixed += samples[base + channel];
+        }
+        mixed /= channels as f32;
+        stereo.push(mixed);
+        stereo.push(mixed);
+    }
+    stereo
+}
+
+fn resample_stereo_linear(samples: &[f32], source_rate: u32, target_rate: u32) -> Vec<f32> {
+    if source_rate == target_rate || samples.len() < 4 {
+        return samples.to_vec();
+    }
+
+    let source_frames = samples.len() / 2;
+    if source_frames <= 1 {
+        return samples.to_vec();
+    }
+
+    let target_frames =
+        ((source_frames as f64 * target_rate as f64) / source_rate as f64).round() as usize;
+    let target_frames = target_frames.max(1);
+    let ratio = source_rate as f64 / target_rate as f64;
+    let mut out = Vec::with_capacity(target_frames * 2);
+
+    for frame_index in 0..target_frames {
+        let source_pos = frame_index as f64 * ratio;
+        let left_index = source_pos.floor() as usize;
+        let right_index = (left_index + 1).min(source_frames - 1);
+        let frac = (source_pos - left_index as f64) as f32;
+
+        let base_a = left_index * 2;
+        let base_b = right_index * 2;
+        let left = samples[base_a] + (samples[base_b] - samples[base_a]) * frac;
+        let right = samples[base_a + 1] + (samples[base_b + 1] - samples[base_a + 1]) * frac;
+        out.push(left);
+        out.push(right);
+    }
+
+    out
 }
 
 fn soften_sample_edges(samples: &mut [f32], channels: u16, sample_rate: u32, fade_ms: f32) {
