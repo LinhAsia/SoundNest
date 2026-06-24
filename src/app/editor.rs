@@ -1385,6 +1385,10 @@ impl SoundFxApp {
         egui::Id::new((sound_id, "trim-playhead-drag"))
     }
 
+    pub(super) fn trim_timeline_playhead_drag_id(sound_id: Uuid) -> egui::Id {
+        egui::Id::new((sound_id, "trim-timeline-playhead-drag"))
+    }
+
     pub(super) fn poll_vocal_separation_jobs(&mut self, ctx: &Context) {
         while let Ok(message) = self.vocal_separation_rx.try_recv() {
             let elapsed_secs = self.vocal_separation_elapsed_secs();
@@ -4045,7 +4049,9 @@ impl SoundFxApp {
                     if interactive
                         && duration > 0.0
                         && let Some(pointer) = start_response.interact_pointer_pos()
-                        && (start_response.clicked() || start_response.dragged())
+                        && (start_response.clicked()
+                            || start_response.dragged()
+                            || start_response.is_pointer_button_down_on())
                     {
                         begin_trim_history(ui.ctx(), sound);
                         sound.clear_cutout();
@@ -4069,7 +4075,9 @@ impl SoundFxApp {
                     } else if interactive
                         && duration > 0.0
                         && let Some(pointer) = end_response.interact_pointer_pos()
-                        && (end_response.clicked() || end_response.dragged())
+                        && (end_response.clicked()
+                            || end_response.dragged()
+                            || end_response.is_pointer_button_down_on())
                     {
                         begin_trim_history(ui.ctx(), sound);
                         sound.clear_cutout();
@@ -4095,7 +4103,9 @@ impl SoundFxApp {
                         && !end_response.is_pointer_button_down_on()
                         && duration > 0.0
                         && let Some(pointer) = response.interact_pointer_pos()
-                        && (response.clicked() || response.dragged())
+                        && (response.clicked()
+                            || response.dragged()
+                            || response.is_pointer_button_down_on())
                     {
                         let ratio = ((pointer.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
                         *preview_cursor_secs = (ratio * duration)
@@ -4103,7 +4113,7 @@ impl SoundFxApp {
                         if response.clicked() {
                             seek_requested = true;
                         }
-                        if response.dragged() {
+                        if response.dragged() || response.is_pointer_button_down_on() {
                             ui.ctx()
                                 .data_mut(|data| data.insert_temp(playhead_drag_id, true));
                         }
@@ -4332,16 +4342,25 @@ impl SoundFxApp {
         let mut next_drop_target = None;
         let base_visible_secs = 12.0f32;
 
+        let ruler_height = 32.0;
+        let rows_top_padding = 40.0;
         let row_height = 92.0;
         let row_spacing = 0.0;
         let row_count = state_snapshot.rows.len().max(1);
         let viewport_width = ui.available_width().max(320.0);
-        let viewport_height =
-            row_count as f32 * row_height + row_count.saturating_sub(1) as f32 * row_spacing;
+        let viewport_height = rows_top_padding
+            + row_count as f32 * row_height
+            + row_count.saturating_sub(1) as f32 * row_spacing;
         let mut view_start_secs = self.trim_timeline_view_start_secs.max(0.0);
         let mut requested_view_start_secs: Option<f32> = None;
         let (viewport_rect, _) =
-            ui.allocate_exact_size(vec2(viewport_width, viewport_height.max(row_height)), Sense::hover());
+            ui.allocate_exact_size(
+                vec2(
+                    viewport_width,
+                    viewport_height.max(rows_top_padding + row_height),
+                ),
+                Sense::hover(),
+            );
         let viewport_painter = ui.painter().with_clip_rect(viewport_rect);
         viewport_painter.rect_filled(viewport_rect, 18.0, Self::surface_fill());
         viewport_painter.rect_stroke(
@@ -4439,13 +4458,99 @@ impl SoundFxApp {
         let shared_timeline_width = (shared_timeline_right - shared_timeline_left).max(1.0);
         let snap_threshold_secs = ((visible_duration / shared_timeline_width) * 18.0).clamp(0.08, 1.0);
         let mut global_snap_x = None;
-        let global_playhead_x = shared_timeline_left
-            + ((state_snapshot.playhead_secs.max(0.0) - view_start_secs) / visible_duration)
-                .clamp(0.0, 1.0)
-                * shared_timeline_width;
+        let mut timeline_playhead_secs = state_snapshot.playhead_secs.max(0.0);
+        let timeline_playhead_drag_id = Self::trim_timeline_playhead_drag_id(sound_id);
+        let tick_step = if visible_duration > 90.0 {
+            15.0
+        } else if visible_duration > 45.0 {
+            10.0
+        } else if visible_duration > 18.0 {
+            5.0
+        } else if visible_duration > 8.0 {
+            2.0
+        } else {
+            1.0
+        };
+        let ruler_rect = Rect::from_min_max(
+            Pos2::new(shared_timeline_left, viewport_rect.top() + 4.0),
+            Pos2::new(shared_timeline_right, viewport_rect.top() + ruler_height),
+        );
+        viewport_painter.rect_filled(ruler_rect, 12.0, Self::input_fill());
+        viewport_painter.line_segment(
+            [
+                Pos2::new(ruler_rect.left(), ruler_rect.bottom() - 8.0),
+                Pos2::new(ruler_rect.right(), ruler_rect.bottom() - 8.0),
+            ],
+            Stroke::new(1.0, Self::subtle_border_color()),
+        );
+        let first_tick = (view_start_secs / tick_step).floor() * tick_step;
+        let mut tick_time = first_tick;
+        while tick_time <= view_end_secs + tick_step {
+            if tick_time >= view_start_secs {
+                let tick_ratio =
+                    ((tick_time - view_start_secs) / visible_duration).clamp(0.0, 1.0);
+                let tick_x = ruler_rect.left() + tick_ratio * ruler_rect.width();
+                viewport_painter.line_segment(
+                    [
+                        Pos2::new(tick_x, ruler_rect.bottom() - 12.0),
+                        Pos2::new(tick_x, ruler_rect.bottom() - 4.0),
+                    ],
+                    Stroke::new(1.0, Self::subtle_border_color()),
+                );
+                viewport_painter.text(
+                    Pos2::new(tick_x + 4.0, ruler_rect.top() + 4.0),
+                    Align2::LEFT_TOP,
+                    format_time(tick_time.max(0.0)),
+                    FontId::proportional(9.5),
+                    Self::muted_text_color(),
+                );
+            }
+            tick_time += tick_step;
+        }
+        let ruler_response = ui.interact(
+            ruler_rect,
+            ui.id().with(("trim-timeline-ruler", sound_id)),
+            Sense::click_and_drag(),
+        );
+        if ruler_response.hovered() || ruler_response.dragged() {
+            ctx.set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+        }
+        if let Some(pointer) = ruler_response.interact_pointer_pos()
+            && (ruler_response.clicked()
+                || ruler_response.dragged()
+                || ruler_response.is_pointer_button_down_on())
+        {
+            let secs = (view_start_secs
+                + ((pointer.x - ruler_rect.left()) / ruler_rect.width()).clamp(0.0, 1.0)
+                    * visible_duration)
+                .clamp(0.0, workspace_duration.max(0.05));
+            timeline_playhead_secs = secs;
+            if let Some(state) = self.trim_timeline_state.as_mut() {
+                state.playhead_secs = secs;
+                state.selected_clip_id = None;
+            }
+            if ruler_response.dragged() || ruler_response.is_pointer_button_down_on() {
+                ctx.data_mut(|data| data.insert_temp(timeline_playhead_drag_id, true));
+            }
+            if ruler_response.clicked() {
+                self.set_trim_timeline_playhead(sound_id, secs);
+            }
+        }
+        if ruler_response.drag_stopped()
+            && ctx
+                .data(|data| data.get_temp::<bool>(timeline_playhead_drag_id))
+                .unwrap_or(false)
+        {
+            self.set_trim_timeline_playhead(sound_id, timeline_playhead_secs);
+            ctx.data_mut(|data| data.remove::<bool>(timeline_playhead_drag_id));
+        }
+        if !ctx.input(|input| input.pointer.primary_down()) {
+            ctx.data_mut(|data| data.remove::<bool>(timeline_playhead_drag_id));
+        }
 
         for (row_index, row) in state_snapshot.rows.iter().enumerate() {
-            let row_top = viewport_rect.top() + row_index as f32 * (row_height + row_spacing);
+            let row_top =
+                viewport_rect.top() + rows_top_padding + row_index as f32 * (row_height + row_spacing);
             let row_rect = Rect::from_min_size(
                 Pos2::new(viewport_rect.left(), row_top),
                 vec2(viewport_rect.width(), row_height),
@@ -4535,40 +4640,6 @@ impl SoundFxApp {
                     StrokeKind::Outside,
                 );
             }
-            let tick_step = if visible_duration > 90.0 {
-                15.0
-            } else if visible_duration > 45.0 {
-                10.0
-            } else if visible_duration > 18.0 {
-                5.0
-            } else if visible_duration > 8.0 {
-                2.0
-            } else {
-                1.0
-            };
-            let first_tick = (view_start_secs / tick_step).floor() * tick_step;
-            let mut tick_time = first_tick;
-            while tick_time <= view_end_secs + tick_step {
-                if tick_time >= view_start_secs {
-                    let tick_ratio = ((tick_time - view_start_secs) / visible_duration).clamp(0.0, 1.0);
-                    let tick_x = timeline_rect.left() + tick_ratio * timeline_rect.width();
-                    painter.line_segment(
-                        [
-                            Pos2::new(tick_x, timeline_rect.top() + 6.0),
-                            Pos2::new(tick_x, timeline_rect.top() + 14.0),
-                        ],
-                        Stroke::new(1.0, Self::subtle_border_color()),
-                    );
-                    painter.text(
-                        Pos2::new(tick_x + 4.0, timeline_rect.top() + 4.0),
-                        Align2::LEFT_TOP,
-                        format_time(tick_time.max(0.0)),
-                        FontId::proportional(9.5),
-                        Self::muted_text_color(),
-                    );
-                }
-                tick_time += tick_step;
-            }
             let timeline_click_response = ui.interact(
                 timeline_rect,
                 ui.id().with(("trim-timeline-track", sound_id, row_index)),
@@ -4581,6 +4652,7 @@ impl SoundFxApp {
                     + ((pointer.x - timeline_rect.left()) / timeline_rect.width()).clamp(0.0, 1.0)
                         * visible_duration)
                     .max(0.0);
+                timeline_playhead_secs = secs;
                 self.set_trim_timeline_playhead(sound_id, secs);
                 if let Some(state) = self.trim_timeline_state.as_mut() {
                     state.selected_clip_id = None;
@@ -4715,6 +4787,7 @@ impl SoundFxApp {
                                     * visible_duration
                         })
                         .unwrap_or(clip.start_secs);
+                    timeline_playhead_secs = pointer_time;
                     self.set_trim_timeline_playhead(sound_id, pointer_time);
                     if let Some(state) = self.trim_timeline_state.as_mut() {
                         state.selected_clip_id = Some(clip.id);
@@ -4993,21 +5066,26 @@ impl SoundFxApp {
                 Stroke::new(1.2, Color32::from_rgba_premultiplied(255, 112, 181, 210)),
             );
         }
+        let global_playhead_x = shared_timeline_left
+            + ((timeline_playhead_secs.max(0.0) - view_start_secs) / visible_duration)
+                .clamp(0.0, 1.0)
+                * shared_timeline_width;
         viewport_painter.line_segment(
             [
-                Pos2::new(global_playhead_x, viewport_rect.top() + 3.0),
+                Pos2::new(global_playhead_x, ruler_rect.top() + 3.0),
                 Pos2::new(global_playhead_x, viewport_rect.bottom() - 3.0),
             ],
             Stroke::new(1.75, Color32::from_rgb(108, 231, 255)),
         );
         viewport_painter.circle_filled(
-            Pos2::new(global_playhead_x, viewport_rect.top() + 9.0),
+            Pos2::new(global_playhead_x, ruler_rect.top() + 9.0),
             3.0,
             Color32::from_rgb(108, 231, 255),
         );
 
         if let Some(state) = self.trim_timeline_state.as_mut() {
             state.enabled = next_enabled;
+            state.playhead_secs = timeline_playhead_secs.max(0.0);
             if add_row {
                 state.rows.push(TrimTimelineRow::default());
                 timeline_state_changed = true;
