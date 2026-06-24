@@ -139,6 +139,8 @@ impl Storage {
             trim_end_secs: analysis.duration_secs,
             cut_start_secs: None,
             cut_end_secs: None,
+            display_trim_start_secs: None,
+            display_trim_end_secs: None,
             vocal_only: false,
             vocal_asset_file: None,
             music_only: false,
@@ -506,6 +508,8 @@ impl Storage {
             trim_end_secs: analysis.duration_secs,
             cut_start_secs: None,
             cut_end_secs: None,
+            display_trim_start_secs: None,
+            display_trim_end_secs: None,
             vocal_only: false,
             vocal_asset_file: None,
             music_only: false,
@@ -628,6 +632,8 @@ impl Storage {
         updated.trim_end_secs = updated.duration_secs;
         updated.cut_start_secs = None;
         updated.cut_end_secs = None;
+        updated.display_trim_start_secs = None;
+        updated.display_trim_end_secs = None;
         updated.vocal_only = false;
         updated.vocal_asset_file = None;
         updated.music_only = false;

@@ -134,7 +134,7 @@ impl AudioEngine {
     }
 
     pub fn play(&mut self, sound: &SoundEffect, asset_path: &Path) -> Result<()> {
-        self.play_from(sound, asset_path, sound.trim_start_secs)
+        self.play_from(sound, asset_path, sound.display_trim_start())
     }
 
     pub fn play_from(
@@ -182,9 +182,11 @@ impl AudioEngine {
         }
         let total_duration_secs =
             preview_samples.len() as f32 / channels.max(1) as f32 / sample_rate.max(1) as f32;
-        let start_offset_secs = sound
-            .timeline_secs_to_output_secs(start_position_secs)
-            .clamp(0.0, total_duration_secs.max(0.0));
+        let start_offset_secs = if sound.has_cutout() {
+            start_position_secs.clamp(0.0, total_duration_secs.max(0.0))
+        } else {
+            (start_position_secs - sound.trim_start_secs).clamp(0.0, total_duration_secs.max(0.0))
+        };
         let preview_total_frames = preview_samples.len() / channels as usize;
         let start_frame = ((start_offset_secs * sample_rate as f32).floor() as usize)
             .min(preview_total_frames.saturating_sub(1));
@@ -232,9 +234,11 @@ impl AudioEngine {
 
         let speed = sound.speed.clamp(0.25, 2.0);
         let total_duration_secs = sound.trimmed_length().max(0.05);
-        let original_offset_secs = sound
-            .timeline_secs_to_output_secs(start_position_secs)
-            .clamp(0.0, total_duration_secs);
+        let original_offset_secs = if sound.has_cutout() {
+            start_position_secs.clamp(0.0, total_duration_secs)
+        } else {
+            (start_position_secs - sound.trim_start_secs).clamp(0.0, total_duration_secs)
+        };
         let file_offset_secs = (original_offset_secs / speed).clamp(0.0, total_duration_secs);
         let total_frames = cached.samples.len() / channels as usize;
         let start_frame = ((file_offset_secs * sample_rate as f32).floor() as usize)
@@ -362,7 +366,13 @@ impl AudioEngine {
         Some(
             self.current_sound
                 .as_ref()
-                .map(|sound| sound.output_secs_to_timeline_secs(played))
+                .map(|sound| {
+                    if sound.has_cutout() {
+                        played
+                    } else {
+                        sound.trim_start_secs + played
+                    }
+                })
                 .unwrap_or(played),
         )
     }

@@ -130,6 +130,8 @@ pub(crate) struct TrimSnapshot {
     pub(crate) trim_end_secs: f32,
     pub(crate) cut_start_secs: Option<f32>,
     pub(crate) cut_end_secs: Option<f32>,
+    pub(crate) display_trim_start_secs: Option<f32>,
+    pub(crate) display_trim_end_secs: Option<f32>,
 }
 
 impl TrimSnapshot {
@@ -140,6 +142,8 @@ impl TrimSnapshot {
             trim_end_secs: sound.trim_end_secs,
             cut_start_secs: sound.cut_start_secs,
             cut_end_secs: sound.cut_end_secs,
+            display_trim_start_secs: sound.display_trim_start_secs,
+            display_trim_end_secs: sound.display_trim_end_secs,
         }
     }
 
@@ -158,6 +162,16 @@ impl TrimSnapshot {
                 (None, None) => true,
                 _ => false,
             }
+            && match (self.display_trim_start_secs, sound.display_trim_start_secs) {
+                (Some(left), Some(right)) => (left - right).abs() <= EPSILON,
+                (None, None) => true,
+                _ => false,
+            }
+            && match (self.display_trim_end_secs, sound.display_trim_end_secs) {
+                (Some(left), Some(right)) => (left - right).abs() <= EPSILON,
+                (None, None) => true,
+                _ => false,
+            }
     }
 
     pub(crate) fn apply_to(self, sound: &mut SoundEffect) {
@@ -168,6 +182,8 @@ impl TrimSnapshot {
         sound.trim_end_secs = self.trim_end_secs;
         sound.cut_start_secs = self.cut_start_secs;
         sound.cut_end_secs = self.cut_end_secs;
+        sound.display_trim_start_secs = self.display_trim_start_secs;
+        sound.display_trim_end_secs = self.display_trim_end_secs;
         sound.clamp_trim();
     }
 }

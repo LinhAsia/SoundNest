@@ -27,6 +27,10 @@ pub struct SoundEffect {
     #[serde(default)]
     pub cut_end_secs: Option<f32>,
     #[serde(default)]
+    pub display_trim_start_secs: Option<f32>,
+    #[serde(default)]
+    pub display_trim_end_secs: Option<f32>,
+    #[serde(default)]
     pub vocal_only: bool,
     #[serde(default)]
     pub vocal_asset_file: Option<String>,
@@ -127,6 +131,37 @@ impl SoundEffect {
         ranges
     }
 
+    pub fn display_duration_secs(&self) -> f32 {
+        if self.has_cutout() {
+            self.trimmed_length().max(0.05)
+        } else {
+            self.safe_duration()
+        }
+    }
+
+    pub fn display_trim_start(&self) -> f32 {
+        if self.has_cutout() {
+            self.display_trim_start_secs
+                .unwrap_or(0.0)
+                .clamp(0.0, self.display_duration_secs())
+        } else {
+            self.trim_start_secs
+        }
+    }
+
+    pub fn display_trim_end(&self) -> f32 {
+        if self.has_cutout() {
+            self.display_trim_end_secs
+                .unwrap_or(self.display_duration_secs())
+                .clamp(
+                    self.display_trim_start() + 0.001,
+                    self.display_duration_secs(),
+                )
+        } else {
+            self.trim_end_secs
+        }
+    }
+
     pub fn has_cutout(&self) -> bool {
         if let (Some(cut_start), Some(cut_end)) = (self.cut_start_secs, self.cut_end_secs) {
             return cut_end - cut_start > 0.001;
@@ -137,6 +172,8 @@ impl SoundEffect {
     pub fn clear_cutout(&mut self) {
         self.cut_start_secs = None;
         self.cut_end_secs = None;
+        self.display_trim_start_secs = None;
+        self.display_trim_end_secs = None;
     }
 
     pub fn timeline_secs_to_output_secs(&self, timeline_secs: f32) -> f32 {
@@ -234,6 +271,23 @@ impl SoundEffect {
             } else {
                 self.clear_cutout();
             }
+        }
+
+        if self.has_cutout() {
+            let display_duration = self.display_duration_secs();
+            let display_start = self
+                .display_trim_start_secs
+                .unwrap_or(0.0)
+                .clamp(0.0, display_duration);
+            let display_end = self
+                .display_trim_end_secs
+                .unwrap_or(display_duration)
+                .clamp(display_start + 0.001, display_duration);
+            self.display_trim_start_secs = Some(display_start);
+            self.display_trim_end_secs = Some(display_end);
+        } else {
+            self.display_trim_start_secs = None;
+            self.display_trim_end_secs = None;
         }
     }
 

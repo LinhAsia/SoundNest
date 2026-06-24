@@ -70,7 +70,7 @@ impl SoundFxApp {
         let playback = if sound.needs_processed_export()
             && Storage::processed_export_exists(self.storage.root_dir(), &sound)
         {
-            let start_position_secs = start_position_secs.unwrap_or(sound.trim_start_secs);
+            let start_position_secs = start_position_secs.unwrap_or(sound.display_trim_start());
             audio.play_processed_file(&sound, &asset_path, start_position_secs)
         } else {
             match start_position_secs {
@@ -90,8 +90,8 @@ impl SoundFxApp {
     pub(crate) fn preview_cursor_secs_for(&self, sound: &SoundEffect) -> f32 {
         self.preview_cursor
             .and_then(|(sound_id, secs)| (sound_id == sound.id).then_some(secs))
-            .unwrap_or(sound.trim_start_secs)
-            .clamp(sound.trim_start_secs, sound.trim_end_secs)
+            .unwrap_or(sound.display_trim_start())
+            .clamp(sound.display_trim_start(), sound.display_trim_end())
     }
 
     pub(crate) fn set_preview_cursor_secs(

@@ -98,8 +98,9 @@ impl SoundFxApp {
             let current_cursor = self
                 .preview_cursor
                 .and_then(|(preview_sound_id, secs)| (preview_sound_id == sound.id).then_some(secs))
-                .unwrap_or(sound.trim_start_secs);
-            let clamped_cursor = current_cursor.clamp(sound.trim_start_secs, sound.trim_end_secs);
+                .unwrap_or(sound.display_trim_start());
+            let clamped_cursor =
+                current_cursor.clamp(sound.display_trim_start(), sound.display_trim_end());
             (sound.id, sound.safe_duration(), clamped_cursor)
         };
 
@@ -2874,9 +2875,9 @@ impl SoundFxApp {
         show_loading_indicator: bool,
     ) -> (bool, bool, bool, Option<TrimSnapshot>) {
         sound.clamp_trim();
-        let duration = sound.safe_duration();
+        let duration = sound.display_duration_secs();
         *preview_cursor_secs = if clamp_cursor_to_trim {
-            (*preview_cursor_secs).clamp(sound.trim_start_secs, sound.trim_end_secs)
+            (*preview_cursor_secs).clamp(sound.display_trim_start(), sound.display_trim_end())
         } else {
             (*preview_cursor_secs).clamp(0.0, duration)
         };
@@ -2983,18 +2984,12 @@ impl SoundFxApp {
                     );
 
                     let has_cutout = sound.has_cutout();
-                    let start_t = sound.trim_start_secs / duration;
-                    let end_t = sound.trim_end_secs / duration;
-                    let start_x = if has_cutout {
-                        rect.left()
-                    } else {
-                        rect.left() + rect.width() * start_t.clamp(0.0, 1.0)
-                    };
-                    let end_x = if has_cutout {
-                        rect.right()
-                    } else {
-                        rect.left() + rect.width() * end_t.clamp(0.0, 1.0)
-                    };
+                    let display_trim_start = sound.display_trim_start();
+                    let display_trim_end = sound.display_trim_end();
+                    let start_t = display_trim_start / duration;
+                    let end_t = display_trim_end / duration;
+                    let start_x = rect.left() + rect.width() * start_t.clamp(0.0, 1.0);
+                    let end_x = rect.left() + rect.width() * end_t.clamp(0.0, 1.0);
                     let display_waveform = if has_cutout {
                         Self::trimmed_waveform_preview_from_samples(sound, waveform_samples)
                     } else {
@@ -3088,8 +3083,8 @@ impl SoundFxApp {
                         Pos2::new(end_x.min(rect.right() - 2.0), rect.top() + 10.0),
                         Pos2::new(rect.right(), rect.bottom() - 10.0),
                     );
-                    let left_region_enabled = sound.trim_start_secs > 0.001;
-                    let right_region_enabled = sound.trim_end_secs < duration - 0.001;
+                    let left_region_enabled = display_trim_start > 0.001;
+                    let right_region_enabled = display_trim_end < duration - 0.001;
                     let left_region_response = ui.interact(
                         left_region_rect,
                         ui.make_persistent_id((sound.id, "trim-delete-left")),
@@ -3305,6 +3300,8 @@ impl SoundFxApp {
                                 sound.clear_cutout();
                                 sound.trim_start_secs =
                                     pointer_time.min(sound.trim_end_secs - 0.05);
+                                sound.display_trim_start_secs = None;
+                                sound.display_trim_end_secs = None;
                                 sound.clamp_trim();
                                 changed = true;
                                 ui.ctx().data_mut(|data| {
@@ -3316,6 +3313,8 @@ impl SoundFxApp {
                                 sound.clear_cutout();
                                 sound.trim_end_secs =
                                     pointer_time.max(sound.trim_start_secs + 0.05);
+                                sound.display_trim_start_secs = None;
+                                sound.display_trim_end_secs = None;
                                 sound.clamp_trim();
                                 changed = true;
                                 ui.ctx().data_mut(|data| {
@@ -3357,31 +3356,47 @@ impl SoundFxApp {
                         let before = TrimSnapshot::from_sound(sound);
                         let current_trim_start = sound.trim_start_secs;
                         let current_trim_end = sound.trim_end_secs;
+                        let current_display_start = sound.display_trim_start();
+                        let current_display_end = sound.display_trim_end();
+                        let source_duration = sound.safe_duration();
                         match region {
                             TrimDeleteRegion::Left => {
                                 sound.trim_start_secs = 0.0;
-                                sound.trim_end_secs = duration;
+                                sound.trim_end_secs = source_duration;
                                 sound.cut_start_secs = Some(0.0);
                                 sound.cut_end_secs = Some(current_trim_start.max(0.05));
+                                sound.display_trim_start_secs = Some(0.0);
+                                sound.display_trim_end_secs =
+                                    Some((current_display_end - current_display_start).max(0.05));
                             }
                             TrimDeleteRegion::Middle => {
                                 sound.trim_start_secs = 0.0;
-                                sound.trim_end_secs = duration;
+                                sound.trim_end_secs = source_duration;
                                 sound.cut_start_secs = Some(current_trim_start);
                                 sound.cut_end_secs = Some(current_trim_end);
+                                let remaining_duration =
+                                    current_trim_start + (source_duration - current_trim_end);
+                                let join =
+                                    current_trim_start.min((remaining_duration - 0.05).max(0.0));
+                                sound.display_trim_start_secs = Some(join);
+                                sound.display_trim_end_secs =
+                                    Some((join + 0.05).min(remaining_duration.max(0.05)));
                             }
                             TrimDeleteRegion::Right => {
                                 sound.trim_start_secs = 0.0;
-                                sound.trim_end_secs = duration;
-                                sound.cut_start_secs = Some(current_trim_end.min(duration - 0.05));
-                                sound.cut_end_secs = Some(duration);
+                                sound.trim_end_secs = source_duration;
+                                sound.cut_start_secs =
+                                    Some(current_trim_end.min(source_duration - 0.05));
+                                sound.cut_end_secs = Some(source_duration);
+                                sound.display_trim_start_secs = Some(current_display_start);
+                                sound.display_trim_end_secs = Some(current_display_end);
                             }
                         }
                         sound.clamp_trim();
                         changed = true;
                         preview_commit_requested = true;
                         trim_history_commit = Some(before);
-                        *preview_cursor_secs = sound.trim_start_secs;
+                        *preview_cursor_secs = sound.display_trim_start();
                         ui.ctx().data_mut(|data| {
                             data.remove::<TrimSnapshot>(trim_history_snapshot_id);
                             data.remove::<bool>(trim_adjusting_id);
@@ -3399,6 +3414,8 @@ impl SoundFxApp {
                         let ratio = ((pointer.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
                         let next = ratio * duration;
                         sound.trim_start_secs = next.min(sound.trim_end_secs - 0.05);
+                        sound.display_trim_start_secs = None;
+                        sound.display_trim_end_secs = None;
                         sound.clamp_trim();
                         changed = true;
                         ui.ctx()
@@ -3421,6 +3438,8 @@ impl SoundFxApp {
                         let ratio = ((pointer.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
                         let next = ratio * duration;
                         sound.trim_end_secs = next.max(sound.trim_start_secs + 0.05);
+                        sound.display_trim_start_secs = None;
+                        sound.display_trim_end_secs = None;
                         sound.clamp_trim();
                         changed = true;
                         ui.ctx()
@@ -3441,8 +3460,8 @@ impl SoundFxApp {
                         && (response.clicked() || response.dragged())
                     {
                         let ratio = ((pointer.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
-                        *preview_cursor_secs =
-                            (ratio * duration).clamp(sound.trim_start_secs, sound.trim_end_secs);
+                        *preview_cursor_secs = (ratio * duration)
+                            .clamp(sound.display_trim_start(), sound.display_trim_end());
                         if response.clicked() {
                             seek_requested = true;
                         }
@@ -3503,7 +3522,7 @@ impl SoundFxApp {
 
                     if clamp_cursor_to_trim {
                         let clamped_cursor = (*preview_cursor_secs)
-                            .clamp(sound.trim_start_secs, sound.trim_end_secs);
+                            .clamp(sound.display_trim_start(), sound.display_trim_end());
                         if (clamped_cursor - *preview_cursor_secs).abs() > f32::EPSILON {
                             *preview_cursor_secs = clamped_cursor;
                             if trim_adjusting_active {
@@ -3544,7 +3563,7 @@ impl SoundFxApp {
                 ui.add_space(8.0);
             }
             ui.label(
-                RichText::new(format_time(sound.trim_start_secs))
+                RichText::new(format_time(sound.display_trim_start()))
                     .size(13.0)
                     .color(if dark_theme {
                         Color32::from_rgb(208, 196, 207)
@@ -3560,7 +3579,7 @@ impl SoundFxApp {
             );
             ui.separator();
             ui.label(
-                RichText::new(format_time(sound.trim_end_secs))
+                RichText::new(format_time(sound.display_trim_end()))
                     .size(13.0)
                     .color(if dark_theme {
                         Color32::from_rgb(208, 196, 207)
