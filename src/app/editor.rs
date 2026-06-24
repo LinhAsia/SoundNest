@@ -5313,7 +5313,6 @@ impl SoundFxApp {
             timeline_playhead_secs = secs;
             if let Some(state) = self.trim_timeline_state.as_mut() {
                 state.playhead_secs = secs;
-                state.selected_clip_id = None;
             }
             if ruler_response.dragged() || ruler_response.is_pointer_button_down_on() {
                 ctx.data_mut(|data| data.insert_temp(timeline_playhead_drag_id, true));
@@ -5448,9 +5447,6 @@ impl SoundFxApp {
                 }
                 timeline_playhead_secs = secs;
                 self.set_trim_timeline_playhead(sound_id, secs);
-                if let Some(state) = self.trim_timeline_state.as_mut() {
-                    state.selected_clip_id = None;
-                }
             }
 
             for (clip_index, clip) in row.clips.iter().enumerate() {
