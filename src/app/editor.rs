@@ -4233,6 +4233,8 @@ impl SoundFxApp {
                     .unwrap_or(0.25),
             );
         let mut next_drop_target = None;
+        let previous_zoom = zoom;
+        let timeline_pixels_per_sec = 120.0f32;
 
         if pending_drag_sound.is_some() {
             ui.label(
@@ -4249,9 +4251,6 @@ impl SoundFxApp {
             .ctx()
             .data(|data| data.get_temp::<f32>(trim_timeline_scroll_offset_id));
         let mut requested_scroll_offset: Option<f32> = None;
-        let timeline_pixels_per_sec = 120.0f32;
-        let timeline_world_width = (total_duration * timeline_pixels_per_sec * zoom)
-            .max(viewport_width);
 
         if let Some(drag_sound) = pending_drag_sound.as_ref()
             && let Some(pointer) = ctx.input(|input| input.pointer.hover_pos())
@@ -4306,7 +4305,8 @@ impl SoundFxApp {
         };
         if ctrl_scroll_y.abs() > f32::EPSILON {
             let current_offset = stored_scroll_offset.unwrap_or(0.0);
-            let current_content_width = timeline_world_width + 120.0;
+            let current_content_width =
+                (total_duration * timeline_pixels_per_sec * previous_zoom).max(viewport_width) + 120.0;
             let visible_x = pointer_pos
                 .map(|pointer| (pointer.x - ui.clip_rect().left()).clamp(0.0, viewport_width))
                 .unwrap_or(viewport_width * 0.5);
@@ -4326,6 +4326,9 @@ impl SoundFxApp {
             });
             ctx.request_repaint();
         }
+
+        let timeline_world_width = (total_duration * timeline_pixels_per_sec * zoom)
+            .max(viewport_width);
 
         let scroll_output = ScrollArea::horizontal()
             .id_salt((sound_id, "trim-timeline-mix-scroll-area"))
