@@ -1387,6 +1387,10 @@ impl SoundFxApp {
         egui::Id::new((sound_id, "trim-playhead-drag"))
     }
 
+    pub(super) fn trim_timeline_playhead_drag_id(sound_id: Uuid) -> egui::Id {
+        egui::Id::new((sound_id, "trim-timeline-playhead-drag"))
+    }
+
     pub(super) fn poll_vocal_separation_jobs(&mut self, ctx: &Context) {
         while let Ok(message) = self.vocal_separation_rx.try_recv() {
             let elapsed_secs = self.vocal_separation_elapsed_secs();
@@ -4462,6 +4466,7 @@ impl SoundFxApp {
         let snap_threshold_secs = ((visible_duration / shared_timeline_width) * 18.0).clamp(0.08, 1.0);
         let mut global_snap_x = None;
         let mut timeline_playhead_secs = state_snapshot.playhead_secs.max(0.0);
+        let timeline_playhead_drag_id = Self::trim_timeline_playhead_drag_id(sound_id);
         let tick_step = if visible_duration > 90.0 {
             15.0
         } else if visible_duration > 45.0 {
@@ -4527,10 +4532,28 @@ impl SoundFxApp {
                     * visible_duration)
                 .clamp(0.0, workspace_duration.max(0.05));
             timeline_playhead_secs = secs;
-            self.set_trim_timeline_playhead(sound_id, secs);
             if let Some(state) = self.trim_timeline_state.as_mut() {
+                state.playhead_secs = secs;
                 state.selected_clip_id = None;
             }
+            if ruler_response.dragged() || ruler_response.is_pointer_button_down_on() {
+                ctx.data_mut(|data| data.insert_temp(timeline_playhead_drag_id, true));
+            }
+            if ruler_response.clicked() {
+                self.set_trim_timeline_playhead(sound_id, secs);
+                ctx.data_mut(|data| data.remove::<bool>(timeline_playhead_drag_id));
+            }
+        }
+        if ruler_response.drag_stopped()
+            && ctx
+                .data(|data| data.get_temp::<bool>(timeline_playhead_drag_id))
+                .unwrap_or(false)
+        {
+            self.set_trim_timeline_playhead(sound_id, timeline_playhead_secs);
+            ctx.data_mut(|data| data.remove::<bool>(timeline_playhead_drag_id));
+        }
+        if !ctx.input(|input| input.pointer.primary_down()) {
+            ctx.data_mut(|data| data.remove::<bool>(timeline_playhead_drag_id));
         }
 
         for (row_index, row) in state_snapshot.rows.iter().enumerate() {
