@@ -1041,6 +1041,10 @@ impl SoundFxApp {
             ctx.memory_mut(|memory| memory.stop_text_input());
         }
 
+        let ctrl_modifiers = egui::Modifiers {
+            ctrl: true,
+            ..Default::default()
+        };
         let command_z = ctx.input(|input| {
             input.key_pressed(egui::Key::Z)
                 && (input.modifiers.ctrl || input.modifiers.command || input.modifiers.mac_cmd)
@@ -1053,35 +1057,28 @@ impl SoundFxApp {
                 && input.modifiers.shift
                 && !input.modifiers.alt
         });
-        let command_c = ctx.input(|input| {
-            input.events.iter().any(|event| matches!(event, egui::Event::Copy))
-                || (input.key_pressed(egui::Key::C)
-                    && (input.modifiers.ctrl
-                        || input.modifiers.command
-                        || input.modifiers.mac_cmd)
-                    && !input.modifiers.shift
-                    && !input.modifiers.alt)
-        });
-        let command_v = ctx.input(|input| {
-            input
-                .events
-                .iter()
-                .any(|event| matches!(event, egui::Event::Paste(_)))
-                || (input.key_pressed(egui::Key::V)
-                    && (input.modifiers.ctrl
-                        || input.modifiers.command
-                        || input.modifiers.mac_cmd)
-                    && !input.modifiers.shift
-                    && !input.modifiers.alt)
-        });
-        let split_shortcut = ctx.input(|input| {
-            input.key_pressed(egui::Key::B)
-                && !input.modifiers.ctrl
-                && !input.modifiers.command
-                && !input.modifiers.mac_cmd
-                && !input.modifiers.shift
-                && !input.modifiers.alt
-        });
+        let command_c = ctx.input_mut(|input| input.consume_key(ctrl_modifiers, egui::Key::C))
+            || ctx.input(|input| {
+                input.events.iter().any(|event| matches!(event, egui::Event::Copy))
+                    || (input.key_pressed(egui::Key::C)
+                        && (input.modifiers.command || input.modifiers.mac_cmd)
+                        && !input.modifiers.ctrl
+                        && !input.modifiers.shift
+                        && !input.modifiers.alt)
+            });
+        let command_v = ctx.input_mut(|input| input.consume_key(ctrl_modifiers, egui::Key::V))
+            || ctx.input(|input| {
+                input.events
+                    .iter()
+                    .any(|event| matches!(event, egui::Event::Paste(_)))
+                    || (input.key_pressed(egui::Key::V)
+                        && (input.modifiers.command || input.modifiers.mac_cmd)
+                        && !input.modifiers.ctrl
+                        && !input.modifiers.shift
+                        && !input.modifiers.alt)
+            });
+        let split_shortcut =
+            ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::B));
 
         if command_shift_z
             && let Some(snapshot) = self.trim_timeline_redo_stack.pop()
