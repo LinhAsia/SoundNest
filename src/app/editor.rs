@@ -627,7 +627,12 @@ impl SoundFxApp {
             return;
         }
 
-        self.sync_trim_timeline_playhead_from_audio(sound_id);
+        let timeline_playhead_drag_active = ctx
+            .data(|data| data.get_temp::<bool>(Self::trim_timeline_playhead_drag_id(sound_id)))
+            .unwrap_or(false);
+        if !timeline_playhead_drag_active {
+            self.sync_trim_timeline_playhead_from_audio(sound_id);
+        }
 
         let undo_modifiers = egui::Modifiers {
             ctrl: true,
@@ -4553,6 +4558,18 @@ impl SoundFxApp {
             ctx.data_mut(|data| data.remove::<bool>(timeline_playhead_drag_id));
         }
         if !ctx.input(|input| input.pointer.primary_down()) {
+            let drag_active = ctx
+                .data(|data| data.get_temp::<bool>(timeline_playhead_drag_id))
+                .unwrap_or(false);
+            if drag_active {
+                let committed_secs = self
+                    .trim_timeline_state
+                    .as_ref()
+                    .filter(|state| state.sound_id == sound_id)
+                    .map(|state| state.playhead_secs)
+                    .unwrap_or(timeline_playhead_secs);
+                self.set_trim_timeline_playhead(sound_id, committed_secs);
+            }
             ctx.data_mut(|data| data.remove::<bool>(timeline_playhead_drag_id));
         }
 
