@@ -104,7 +104,7 @@ impl SoundFxApp {
         if ctx.wants_keyboard_input() {
             return;
         }
-        if self.timeline_mode_active_for_selected().is_some() {
+        if self.timeline_mode_active_sound_id().is_some() {
             return;
         }
 

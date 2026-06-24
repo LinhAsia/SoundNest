@@ -180,58 +180,69 @@ impl SoundFxApp {
             playhead_secs: 0.0,
             snap_enabled: true,
             selected_clip_id: None,
-            rows: Self::default_trim_timeline_rows(sound_id),
+            rows: Self::default_trim_timeline_rows(),
         }
     }
 
-    fn default_trim_timeline_rows(sound_id: Uuid) -> Vec<TrimTimelineRow> {
+    fn default_trim_timeline_rows() -> Vec<TrimTimelineRow> {
         vec![
-            TrimTimelineRow {
-                clips: vec![TrimTimelineClip {
-                    id: Uuid::new_v4(),
-                    source_sound_id: sound_id,
-                    start_secs: 0.0,
-                    clip_start_secs: 0.0,
-                    clip_end_secs: 0.0,
-                }],
-            },
+            TrimTimelineRow::default(),
             TrimTimelineRow::default(),
             TrimTimelineRow::default(),
         ]
     }
 
-    fn sync_trim_timeline_state_for(&mut self, sound_id: Uuid) {
-        let mut created_new = false;
-        if self
+    fn resolve_trim_timeline_anchor_sound_id(&self, fallback_sound_id: Uuid) -> Uuid {
+        let contains_sound = |sound_id| self.sounds.iter().any(|sound| sound.id == sound_id);
+
+        if contains_sound(fallback_sound_id) {
+            return fallback_sound_id;
+        }
+        if let Some(sound_id) = self
             .trim_timeline_state
             .as_ref()
-            .is_none_or(|state| state.sound_id != sound_id)
+            .map(|state| state.sound_id)
+            .filter(|sound_id| contains_sound(*sound_id))
         {
-            self.trim_timeline_state = Some(Self::default_trim_timeline_state(sound_id));
+            return sound_id;
+        }
+        if let Some(sound_id) = self.trim_timeline_state.as_ref().and_then(|state| {
+            state
+                .rows
+                .iter()
+                .flat_map(|row| row.clips.iter())
+                .find_map(|clip| contains_sound(clip.source_sound_id).then_some(clip.source_sound_id))
+        }) {
+            return sound_id;
+        }
+        if let Some(sound_id) = self.selected.filter(|sound_id| contains_sound(*sound_id)) {
+            return sound_id;
+        }
+        self.sounds
+            .first()
+            .map(|sound| sound.id)
+            .unwrap_or(fallback_sound_id)
+    }
+
+    fn sync_trim_timeline_state_for(&mut self, sound_id: Uuid) -> Uuid {
+        let resolved_sound_id = self.resolve_trim_timeline_anchor_sound_id(sound_id);
+        if self.trim_timeline_state.is_none() {
+            self.trim_timeline_state = Some(Self::default_trim_timeline_state(resolved_sound_id));
             self.trim_timeline_view_start_secs = 0.0;
             self.trim_timeline_clip_delete_animating.clear();
             self.trim_timeline_segment_delete_animations.clear();
             self.trim_timeline_scrub_resume_pending = false;
-            created_new = true;
         }
 
         let timeline_zoom = self.trim_timeline_zoom;
         let timeline_view_start_secs = self.trim_timeline_view_start_secs.max(0.0);
 
         let Some(state) = self.trim_timeline_state.as_mut() else {
-            return;
+            return resolved_sound_id;
         };
+        state.sound_id = resolved_sound_id;
         if state.rows.is_empty() {
-            state.rows.push(TrimTimelineRow::default());
-        }
-        if created_new
-            && let Some(base_row) = state.rows.first_mut()
-            && let Some(base_clip) = base_row.clips.first_mut()
-            && let Some(base_sound) = self.sounds.iter().find(|sound| sound.id == sound_id)
-        {
-            let base_length = base_sound.trimmed_length();
-            base_clip.clip_start_secs = 0.0;
-            base_clip.clip_end_secs = base_length.max(0.05);
+            state.rows = Self::default_trim_timeline_rows();
         }
         let total_duration = state
             .rows
@@ -245,6 +256,53 @@ impl SoundFxApp {
         let workspace_duration =
             total_duration.max(timeline_view_start_secs + visible_duration) + workspace_padding_secs;
         state.playhead_secs = state.playhead_secs.clamp(0.0, workspace_duration.max(0.05));
+        resolved_sound_id
+    }
+
+    pub(super) fn timeline_mode_active_sound_id(&self) -> Option<Uuid> {
+        self.trim_timeline_state
+            .as_ref()
+            .filter(|state| state.enabled)
+            .map(|state| state.sound_id)
+    }
+
+    pub(super) fn toggle_timeline_mode(&mut self, ctx: &Context) {
+        let fallback_sound_id = self
+            .selected
+            .or_else(|| self.sounds.first().map(|sound| sound.id))
+            .unwrap_or_else(Uuid::nil);
+        self.sync_trim_timeline_state_for(fallback_sound_id);
+
+        let was_enabled = self
+            .trim_timeline_state
+            .as_ref()
+            .is_some_and(|state| state.enabled);
+        let mut open_workspace = false;
+        let mut clear_drop_target = false;
+
+        if let Some(state) = self.trim_timeline_state.as_mut() {
+            if !was_enabled {
+                state.selected_clip_id = None;
+                state.playhead_secs = 0.0;
+                if state.rows.is_empty() {
+                    state.rows = Self::default_trim_timeline_rows();
+                }
+                open_workspace = true;
+            } else {
+                clear_drop_target = true;
+            }
+            state.enabled = !was_enabled;
+        }
+
+        if open_workspace {
+            self.trim_timeline_view_start_secs = 0.0;
+            self.app_view = AppView::Editor;
+        }
+        if clear_drop_target {
+            self.trim_timeline_drop_target = None;
+        }
+        self.stop_preview();
+        ctx.request_repaint();
     }
 
     pub(super) fn trim_timeline_drag_capture_active(&self) -> bool {
@@ -587,7 +645,7 @@ impl SoundFxApp {
         let Some(target) = self.trim_timeline_drop_target.take() else {
             return false;
         };
-        let Some(selected_sound_id) = self.selected else {
+        let Some(selected_sound_id) = self.timeline_mode_active_sound_id() else {
             return false;
         };
         if self
@@ -598,7 +656,7 @@ impl SoundFxApp {
             return false;
         }
 
-        self.sync_trim_timeline_state_for(selected_sound_id);
+        let selected_sound_id = self.sync_trim_timeline_state_for(selected_sound_id);
         let Some(state) = self.trim_timeline_state.as_mut() else {
             return false;
         };
@@ -639,14 +697,6 @@ impl SoundFxApp {
         self.pending_sound_drag = None;
         self.refresh_trim_timeline_preview_after_edit(selected_sound_id);
         true
-    }
-
-    pub(super) fn timeline_mode_active_for_selected(&self) -> Option<Uuid> {
-        let sound_id = self.selected?;
-        self.trim_timeline_state
-            .as_ref()
-            .filter(|state| state.enabled && state.sound_id == sound_id)
-            .map(|state| state.sound_id)
     }
 
     fn push_trim_timeline_undo_snapshot(&mut self, before: TrimTimelineState) {
@@ -1109,7 +1159,7 @@ impl SoundFxApp {
 
     pub(super) fn handle_trim_timeline_hotkeys(&mut self, ctx: &Context) {
         const BASE_VISIBLE_SECS: f32 = 12.0;
-        let Some(sound_id) = self.timeline_mode_active_for_selected() else {
+        let Some(sound_id) = self.timeline_mode_active_sound_id() else {
             return;
         };
         if self.has_modal_panel() || self.show_record_review_panel {
@@ -1280,7 +1330,7 @@ impl SoundFxApp {
                 } else if let Some(audio) = self.audio.as_mut() {
                     audio.resume();
                 }
-            } else if self.timeline_mode_active_for_selected().is_some() {
+            } else if self.timeline_mode_active_sound_id().is_some() {
                 self.preview_timeline_mix_from_position(sound_id, timeline_restart_secs);
             }
             ctx.request_repaint();
@@ -1309,11 +1359,16 @@ impl SoundFxApp {
     }
 
     pub(super) fn start_trim_commit_job(&mut self, ctx: &Context, keep_old: bool) {
-        let Some(index) = self.selected_sound_index() else {
+        let fallback_sound_id = self
+            .timeline_mode_active_sound_id()
+            .or(self.selected)
+            .or_else(|| self.sounds.first().map(|sound| sound.id))
+            .unwrap_or_else(Uuid::nil);
+        let sound_id = self.sync_trim_timeline_state_for(fallback_sound_id);
+        let Some(index) = self.sounds.iter().position(|sound| sound.id == sound_id) else {
             return;
         };
 
-        let sound_id = self.sounds[index].id;
         if self.trim_commit_inflight.contains(&sound_id) {
             return;
         }
@@ -1769,7 +1824,7 @@ impl SoundFxApp {
         if self.has_modal_panel() || ctx.wants_keyboard_input() {
             return;
         }
-        if self.timeline_mode_active_for_selected().is_some() {
+        if self.timeline_mode_active_sound_id().is_some() {
             return;
         }
 
@@ -3135,12 +3190,12 @@ impl SoundFxApp {
     }
 
     pub(super) fn draw_editor(&mut self, ui: &mut Ui, ctx: &Context) {
-        if self.selected_sound_index().is_none() {
-            self.draw_empty_editor(ui);
+        self.handle_trim_undo_redo(ctx);
+        if let Some(sound_id) = self.timeline_mode_active_sound_id() {
+            self.draw_timeline_workspace(ui, ctx, sound_id);
             return;
         }
 
-        self.handle_trim_undo_redo(ctx);
         let Some(index) = self.selected_sound_index() else {
             self.draw_empty_editor(ui);
             return;
@@ -3220,8 +3275,6 @@ impl SoundFxApp {
         let mut start_music_job = false;
         let mut stop_vocal_job = false;
         let mut stop_music_job = false;
-        let mut save_mix_request = false;
-        let mut toggle_timeline_mix_request = false;
         let mut changed = false;
         let mut processed_export_dirty = false;
         let mut trim_history_commit: Option<TrimSnapshot> = None;
@@ -3281,11 +3334,6 @@ impl SoundFxApp {
         let tags_hint = self.t("editor.tags_hint");
         let tags_available_label = self.t("editor.tags_available");
         let available_tags = self.distinct_sound_tags();
-        self.sync_trim_timeline_state_for(sound_id);
-        let timeline_mix_enabled = self
-            .trim_timeline_state
-            .as_ref()
-            .is_some_and(|state| state.sound_id == sound_id && state.enabled);
 
         Frame::new()
             .fill(Self::surface_fill())
@@ -3300,7 +3348,7 @@ impl SoundFxApp {
             .inner_margin(Margin::same(14))
             .show(ui, |ui| {
                 let sound = &mut self.sounds[index];
-                let controls_width = 52.0 + 52.0 + 52.0 + 64.0 + 64.0 + 92.0 + 36.0;
+                let controls_width = 52.0 + 52.0 + 52.0 + 64.0 + 64.0 + 36.0;
                 let row_gap = 8.0;
                 let back_button_width = if self.editing_from_folder.is_some() {
                     42.0 + 8.0
@@ -3348,18 +3396,6 @@ impl SoundFxApp {
                         |ui| {
                             if Self::icon_action(ui, [52.0, 34.0], 0xe872, false, false).clicked() {
                                 delete_request = true;
-                            }
-                            let timeline_button = ui.add_sized(
-                                [92.0, 34.0],
-                                Self::action_button(
-                                    RichText::new("Timeline").size(11.5),
-                                    timeline_mix_enabled,
-                                    false,
-                                ),
-                            );
-                            Self::decorate_button_response(ui, &timeline_button);
-                            if timeline_button.clicked() {
-                                toggle_timeline_mix_request = true;
                             }
                             let spn = ui.add_sized(
                                 [64.0, 34.0],
@@ -3450,18 +3486,7 @@ impl SoundFxApp {
 
                 ui.add_space(12.0);
 
-                if timeline_mix_enabled {
-                    Frame::new()
-                        .fill(Self::panel_fill())
-                        .stroke(Stroke::new(1.0, Self::subtle_border_color()))
-                        .corner_radius(30.0)
-                        .inner_margin(Margin::same(22))
-                        .show(ui, |ui| {
-                            let save_request = self.render_trim_composer(ui, ctx, sound_id);
-                            save_mix_request |= save_request;
-                        });
-                } else {
-                    Frame::new()
+                Frame::new()
                         .fill(Self::panel_fill())
                         .stroke(Stroke::new(1.0, Self::subtle_border_color()))
                         .corner_radius(30.0)
@@ -3968,29 +3993,11 @@ impl SoundFxApp {
                     if drop_response.clicked() {
                         self.add_sound();
                     }
-                }
             });
-
-        if toggle_timeline_mix_request {
-            self.sync_trim_timeline_state_for(sound_id);
-            let mut timeline_enabled_now = false;
-            if let Some(state) = self.trim_timeline_state.as_mut() {
-                state.enabled = !state.enabled;
-                timeline_enabled_now = state.enabled;
-                if !state.enabled {
-                    self.trim_timeline_drop_target = None;
-                }
-            }
-            if timeline_enabled_now {
-                self.stop_preview();
-            }
-        }
 
         let sound_id = self.sounds[index].id;
         let sound_duration = self.sounds[index].safe_duration();
-        if !timeline_mix_enabled {
-            self.trim_timeline_zoom = trim_timeline_zoom;
-        }
+        self.trim_timeline_zoom = trim_timeline_zoom;
         if let Some(snapshot) = trim_history_commit {
             let current = TrimSnapshot::from_sound(&self.sounds[index]);
             self.push_trim_undo_snapshot(snapshot, current);
@@ -4038,10 +4045,6 @@ impl SoundFxApp {
 
         if normalize_request {
             self.start_normalize_job(sound_id);
-        }
-
-        if save_mix_request {
-            self.start_trim_commit_job(ctx, true);
         }
 
         if processed_export_dirty {
@@ -4103,6 +4106,37 @@ impl SoundFxApp {
                     Color32::from_rgb(122, 96, 111),
                 );
             });
+    }
+
+    fn draw_timeline_workspace(&mut self, ui: &mut Ui, ctx: &Context, sound_id: Uuid) {
+        let sound_id = self.sync_trim_timeline_state_for(sound_id);
+        let mut save_mix_request = false;
+
+        Frame::new()
+            .fill(Self::surface_fill())
+            .stroke(Stroke::new(1.0, Self::border_color()))
+            .shadow(Shadow {
+                offset: [0, 12],
+                blur: 28,
+                spread: 0,
+                color: Self::shadow_color(),
+            })
+            .corner_radius(36.0)
+            .inner_margin(Margin::same(14))
+            .show(ui, |ui| {
+                Frame::new()
+                    .fill(Self::panel_fill())
+                    .stroke(Stroke::new(1.0, Self::subtle_border_color()))
+                    .corner_radius(30.0)
+                    .inner_margin(Margin::same(22))
+                    .show(ui, |ui| {
+                        save_mix_request |= self.render_trim_composer(ui, ctx, sound_id);
+                    });
+            });
+
+        if save_mix_request {
+            self.start_trim_commit_job(ctx, true);
+        }
     }
 
     pub(super) fn draw_trim_timeline(
@@ -6224,7 +6258,7 @@ impl SoundFxApp {
                 timeline_state_changed = true;
             }
             if reset_rows {
-                state.rows = Self::default_trim_timeline_rows(sound_id);
+                state.rows = Self::default_trim_timeline_rows();
                 timeline_state_changed = true;
             }
             if let Some(row_index) = remove_row

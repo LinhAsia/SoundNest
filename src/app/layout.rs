@@ -170,7 +170,7 @@ impl SoundFxApp {
         let downloader_snapshot = self.downloader.snapshot();
         let download_titlebar_active = downloader_snapshot.running && !self.show_download_panel;
         ui.horizontal(|ui| {
-            let drag_width = (ui.available_width() - 564.0).max(180.0);
+            let drag_width = (ui.available_width() - 668.0).max(180.0);
             let drag_response = ui
                 .allocate_ui_with_layout(
                     vec2(drag_width, 44.0),
@@ -268,6 +268,19 @@ impl SoundFxApp {
                     }
                     self.library_tab = LibraryTab::Sounds;
                     self.library_current_folder = None;
+                }
+
+                let timeline_response = ui.add_sized(
+                    [92.0, 30.0],
+                    Self::titlebar_button(
+                        RichText::new("Timeline").size(11.5),
+                        self.timeline_mode_active_sound_id().is_some(),
+                        false,
+                    ),
+                );
+                Self::decorate_button_response(ui, &timeline_response);
+                if timeline_response.clicked() {
+                    self.toggle_timeline_mode(ctx);
                 }
 
                 let spn_response =
