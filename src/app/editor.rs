@@ -3352,11 +3352,16 @@ impl SoundFxApp {
 
         if toggle_timeline_mix_request {
             self.sync_trim_timeline_state_for(sound_id);
+            let mut timeline_enabled_now = false;
             if let Some(state) = self.trim_timeline_state.as_mut() {
                 state.enabled = !state.enabled;
+                timeline_enabled_now = state.enabled;
                 if !state.enabled {
                     self.trim_timeline_drop_target = None;
                 }
+            }
+            if timeline_enabled_now {
+                self.stop_preview();
             }
         }
 
