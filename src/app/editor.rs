@@ -193,6 +193,7 @@ impl SoundFxApp {
     }
 
     fn sync_trim_timeline_state_for(&mut self, sound_id: Uuid) {
+        let mut created_new = false;
         if self
             .trim_timeline_state
             .as_ref()
@@ -200,6 +201,7 @@ impl SoundFxApp {
         {
             self.trim_timeline_state = Some(Self::default_trim_timeline_state(sound_id));
             self.trim_timeline_view_start_secs = 0.0;
+            created_new = true;
         }
 
         let Some(state) = self.trim_timeline_state.as_mut() else {
@@ -208,33 +210,23 @@ impl SoundFxApp {
         if state.rows.is_empty() {
             state.rows.push(TrimTimelineRow::default());
         }
-        let base_row = &mut state.rows[0];
-        if base_row.clips.is_empty() {
-            base_row.clips.push(TrimTimelineClip {
-                id: Uuid::new_v4(),
-                source_sound_id: sound_id,
-                start_secs: 0.0,
-                clip_start_secs: 0.0,
-                clip_end_secs: 0.0,
-            });
-        } else {
-            let base_clip = &mut base_row.clips[0];
-            base_clip.source_sound_id = sound_id;
-            base_clip.start_secs = 0.0;
-        }
-        if let Some(base_sound) = self.sounds.iter().find(|sound| sound.id == sound_id) {
+        if created_new
+            && let Some(base_row) = state.rows.first_mut()
+            && let Some(base_clip) = base_row.clips.first_mut()
+            && let Some(base_sound) = self.sounds.iter().find(|sound| sound.id == sound_id)
+        {
             let base_length = base_sound.trimmed_length();
-            let base_clip = &mut base_row.clips[0];
-            base_clip.clip_start_secs = base_clip.clip_start_secs.clamp(0.0, base_length);
-            base_clip.clip_end_secs = if base_clip.clip_end_secs <= 0.0 {
-                base_length
-            } else {
-                base_clip
-                    .clip_end_secs
-                    .clamp(base_clip.clip_start_secs + 0.05, base_length)
-            };
-            state.playhead_secs = state.playhead_secs.clamp(0.0, base_length.max(0.05));
+            base_clip.clip_start_secs = 0.0;
+            base_clip.clip_end_secs = base_length.max(0.05);
         }
+        let total_duration = state
+            .rows
+            .iter()
+            .flat_map(|row| row.clips.iter())
+            .map(|clip| clip.start_secs.max(0.0) + (clip.clip_end_secs - clip.clip_start_secs).max(0.05))
+            .fold(0.0f32, f32::max)
+            .max(0.25);
+        state.playhead_secs = state.playhead_secs.clamp(0.0, total_duration.max(0.05));
     }
 
     pub(super) fn trim_timeline_drag_capture_active(&self) -> bool {
@@ -333,11 +325,7 @@ impl SoundFxApp {
                     })
             })
             .collect::<Vec<_>>();
-        let has_extra_mix = clips.len() > 1
-            || clips
-                .first()
-                .is_some_and(|(_, start_secs, _, _)| start_secs.abs() > 0.001);
-        has_extra_mix.then_some(clips)
+        (!clips.is_empty()).then_some(clips)
     }
 
     pub(super) fn finalize_pending_trim_timeline_drop(&mut self) -> bool {
@@ -1012,6 +1000,13 @@ impl SoundFxApp {
         if self.show_record_review_panel
             && let Some(draft) = self.recording_draft.as_ref()
             && audio.is_playing(draft.sound.id)
+        {
+            return true;
+        }
+        if self
+            .trim_timeline_preview_path
+            .as_ref()
+            .is_some_and(|path| audio.is_playing_file(path) && !audio.is_paused())
         {
             return true;
         }
@@ -4225,7 +4220,7 @@ impl SoundFxApp {
             .as_ref()
             .map(SoundEffect::trimmed_length)
             .unwrap_or(0.0);
-        let _total_duration = (self.trim_timeline_total_duration(&state_snapshot)
+        let total_duration = (self.trim_timeline_total_duration(&state_snapshot)
             + pending_drag_duration)
             .max(
                 self.sounds
@@ -4331,6 +4326,8 @@ impl SoundFxApp {
         }
         view_start_secs = requested_view_start_secs.unwrap_or(view_start_secs).max(0.0);
         let visible_duration = (base_visible_secs / zoom.max(0.1)).max(0.25);
+        let max_view_start_secs = (total_duration - visible_duration).max(0.0);
+        view_start_secs = view_start_secs.clamp(0.0, max_view_start_secs);
         let view_end_secs = view_start_secs + visible_duration;
 
         for (row_index, row) in state_snapshot.rows.iter().enumerate() {
