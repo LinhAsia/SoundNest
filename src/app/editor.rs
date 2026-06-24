@@ -4285,7 +4285,7 @@ impl SoundFxApp {
         let mut next_drop_target = None;
         let base_visible_secs = 12.0f32;
 
-        let row_height = 96.0;
+        let row_height = 92.0;
         let row_spacing = 0.0;
         let row_count = state_snapshot.rows.len().max(1);
         let viewport_width = ui.available_width().max(320.0);
@@ -4296,6 +4296,13 @@ impl SoundFxApp {
         let (viewport_rect, _) =
             ui.allocate_exact_size(vec2(viewport_width, viewport_height.max(row_height)), Sense::hover());
         let viewport_painter = ui.painter().with_clip_rect(viewport_rect);
+        viewport_painter.rect_filled(viewport_rect, 18.0, Self::surface_fill());
+        viewport_painter.rect_stroke(
+            viewport_rect,
+            18.0,
+            Stroke::new(1.0, Self::subtle_border_color()),
+            StrokeKind::Outside,
+        );
 
         if let Some(drag_sound) = pending_drag_sound.as_ref()
             && let Some(pointer) = ctx.input(|input| input.pointer.hover_pos())
@@ -4388,13 +4395,6 @@ impl SoundFxApp {
                 vec2(viewport_rect.width(), row_height),
             );
             let painter = viewport_painter.clone();
-            painter.rect_filled(row_rect, 18.0, Self::surface_fill());
-            painter.rect_stroke(
-                row_rect,
-                18.0,
-                Stroke::new(1.0, Self::subtle_border_color()),
-                StrokeKind::Outside,
-            );
 
             let label_rect = Rect::from_min_max(
                 Pos2::new(row_rect.left() + 12.0, row_rect.top() + 12.0),
@@ -4440,22 +4440,41 @@ impl SoundFxApp {
                 }
             }
 
+            let timeline_radius = if row_count <= 1 {
+                CornerRadius::same(14)
+            } else if row_index == 0 {
+                CornerRadius {
+                    nw: 14,
+                    ne: 14,
+                    sw: 0,
+                    se: 0,
+                }
+            } else if row_index + 1 == row_count {
+                CornerRadius {
+                    nw: 0,
+                    ne: 0,
+                    sw: 14,
+                    se: 14,
+                }
+            } else {
+                CornerRadius::ZERO
+            };
             let timeline_rect = Rect::from_min_max(
-                Pos2::new(label_rect.right() + 8.0, row_rect.top() + 12.0),
-                Pos2::new(remove_row_rect.left() - 10.0, row_rect.bottom() - 12.0),
+                Pos2::new(label_rect.right() + 8.0, row_rect.top()),
+                Pos2::new(remove_row_rect.left() - 10.0, row_rect.bottom()),
             );
             let row_hovered = ctx
                 .input(|input| input.pointer.hover_pos())
                 .is_some_and(|pointer| timeline_rect.contains(pointer));
             painter.rect_filled(
                 timeline_rect,
-                14.0,
+                timeline_radius,
                 Self::input_fill(),
             );
             if row_hovered && pending_drag_sound.is_some() {
                 painter.rect_stroke(
                     timeline_rect,
-                    14.0,
+                    timeline_radius,
                     Stroke::new(1.0, Color32::from_rgba_premultiplied(108, 231, 255, 92)),
                     StrokeKind::Outside,
                 );
