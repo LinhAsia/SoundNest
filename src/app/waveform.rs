@@ -395,7 +395,12 @@ impl SoundFxApp {
 
         let column_count = waveform.len().max(1);
         let step = rect.width() / column_count as f32;
-        let column_width = (step * 0.72).clamp(1.2, 4.0);
+        let column_width = (step * 0.72).clamp(1.2, 4.0).min(rect.width().max(1.0));
+        let stride = if column_count <= 1 {
+            0.0
+        } else {
+            ((rect.width() - column_width).max(0.0)) / (column_count - 1) as f32
+        };
         let baseline = rect.bottom() - 4.0;
         let min_height = 6.0;
         let max_height = (rect.height() - 8.0).max(min_height);
@@ -407,8 +412,16 @@ impl SoundFxApp {
 
         for (index, level) in waveform.iter().enumerate() {
             let amplitude = level.clamp(0.02, 1.0);
-            let left = rect.left() + index as f32 * step + (step - column_width) * 0.5;
-            let right = left + column_width;
+            let left = if column_count <= 1 {
+                rect.left()
+            } else {
+                rect.left() + index as f32 * stride
+            };
+            let right = if index + 1 >= column_count {
+                rect.right()
+            } else {
+                (left + column_width).min(rect.right())
+            };
             let height = (min_height + amplitude * max_height).min(max_height + min_height);
             let wave_rect = Rect::from_min_max(
                 Pos2::new(left, baseline - height),
