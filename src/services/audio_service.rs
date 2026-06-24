@@ -401,7 +401,8 @@ impl AudioEngine {
         let sink = self.sink.as_ref()?;
         let total_duration = self.current_total_duration_secs.max(0.05);
         let elapsed = sink.get_pos().as_secs_f32();
-        Some((elapsed / total_duration).clamp(0.0, 1.0))
+        let played = (self.current_start_offset_secs + elapsed).clamp(0.0, total_duration);
+        Some((played / total_duration).clamp(0.0, 1.0))
     }
 
     pub fn has_active_playback(&self) -> bool {

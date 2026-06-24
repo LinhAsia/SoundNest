@@ -196,7 +196,44 @@ impl SoundFxApp {
         let mut end_index = ((preview.len() as f32) * end_ratio).ceil() as usize;
         let start_index = start_index.min(preview.len().saturating_sub(1));
         end_index = end_index.clamp(start_index + 1, preview.len());
-        Self::compact_library_waveform(&preview[start_index..end_index], buckets)
+        Self::compact_timeline_waveform(&preview[start_index..end_index], buckets)
+    }
+
+    fn compact_timeline_waveform(samples: &[f32], buckets: usize) -> Vec<f32> {
+        if samples.is_empty() {
+            return Vec::new();
+        }
+
+        let bucket_count = buckets.clamp(18, 160).min(samples.len().max(1));
+        let mut preview = Vec::with_capacity(bucket_count);
+
+        for bucket_index in 0..bucket_count {
+            let start = ((bucket_index as f32 / bucket_count as f32) * samples.len() as f32).floor()
+                as usize;
+            let mut end = ((((bucket_index + 1) as f32) / bucket_count as f32)
+                * samples.len() as f32)
+                .ceil() as usize;
+            let start = start.min(samples.len().saturating_sub(1));
+            end = end.clamp(start + 1, samples.len());
+
+            let slice = &samples[start..end];
+            let peak = slice.iter().copied().fold(0.0_f32, f32::max);
+            preview.push(peak.powf(0.82));
+        }
+
+        let max_level = preview
+            .iter()
+            .copied()
+            .fold(0.0_f32, f32::max)
+            .max(f32::EPSILON);
+        for value in &mut preview {
+            *value = (*value / max_level).clamp(0.0, 1.0);
+            if *value > 0.0 {
+                *value = (0.14 + *value * 0.86).clamp(0.14, 1.0);
+            }
+        }
+
+        preview
     }
 
     pub(super) fn compact_library_waveform(samples: &[f32], buckets: usize) -> Vec<f32> {
@@ -334,6 +371,50 @@ impl SoundFxApp {
                     },
                 ),
             );
+        }
+    }
+
+    pub(super) fn paint_timeline_waveform_columns(
+        painter: &egui::Painter,
+        rect: Rect,
+        waveform: &[f32],
+        color: Color32,
+        highlight: bool,
+    ) {
+        painter.line_segment(
+            [
+                Pos2::new(rect.left(), rect.bottom() - 4.0),
+                Pos2::new(rect.right(), rect.bottom() - 4.0),
+            ],
+            Stroke::new(1.0, Color32::from_rgba_premultiplied(255, 255, 255, 88)),
+        );
+
+        if waveform.is_empty() {
+            return;
+        }
+
+        let column_count = waveform.len().max(1);
+        let step = rect.width() / column_count as f32;
+        let column_width = (step * 0.72).clamp(1.2, 4.0);
+        let baseline = rect.bottom() - 4.0;
+        let min_height = 6.0;
+        let max_height = (rect.height() - 8.0).max(min_height);
+        let wave_color = if highlight {
+            Color32::from_rgb(255, 230, 244)
+        } else {
+            color
+        };
+
+        for (index, level) in waveform.iter().enumerate() {
+            let amplitude = level.clamp(0.02, 1.0);
+            let left = rect.left() + index as f32 * step + (step - column_width) * 0.5;
+            let right = left + column_width;
+            let height = (min_height + amplitude * max_height).min(max_height + min_height);
+            let wave_rect = Rect::from_min_max(
+                Pos2::new(left, baseline - height),
+                Pos2::new(right, baseline),
+            );
+            painter.rect_filled(wave_rect, 1.5, wave_color);
         }
     }
 
