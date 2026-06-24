@@ -1100,29 +1100,20 @@ impl SoundFxApp {
     }
 
     fn refresh_trim_timeline_preview_after_edit(&mut self, sound_id: Uuid) {
-        let Some(playhead_secs) = self
+        if self
             .trim_timeline_state
             .as_ref()
-            .filter(|state| state.sound_id == sound_id)
-            .map(|state| state.playhead_secs)
-        else {
+            .is_none_or(|state| state.sound_id != sound_id)
+        {
             return;
-        };
-        let was_active = self
+        }
+        let preview_active = self
             .audio
             .as_ref()
             .is_some_and(|audio| self.trim_timeline_preview_path.as_ref().is_some_and(|path| audio.is_playing_file(path)));
-        let was_paused = self.audio.as_ref().is_some_and(|audio| audio.is_paused());
         self.trim_timeline_preview_dirty = true;
-        if was_active && !was_paused {
+        if preview_active {
             return;
-        }
-        if was_active {
-            self.stop_preview();
-            self.preview_timeline_mix_from_position(sound_id, playhead_secs);
-            if was_paused && let Some(audio) = self.audio.as_mut() {
-                audio.pause();
-            }
         }
     }
 
