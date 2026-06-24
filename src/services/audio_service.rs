@@ -416,6 +416,10 @@ impl AudioEngine {
         self.cached_audio.contains_key(asset_path)
     }
 
+    pub fn evict_cached_audio(&mut self, asset_path: &Path) {
+        self.cached_audio.remove(asset_path);
+    }
+
     pub fn insert_cached_audio(
         &mut self,
         asset_path: PathBuf,

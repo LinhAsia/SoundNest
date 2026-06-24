@@ -434,6 +434,7 @@ impl SoundFxApp {
             self.set_error_status("Audio unavailable");
             return;
         };
+        audio.evict_cached_audio(&preview_path);
         if let Err(error) = audio.play_file_from(&preview_path, start_secs.max(0.0)) {
             self.set_error_status(error);
             return;
@@ -443,6 +444,34 @@ impl SoundFxApp {
             && state.sound_id == sound_id
         {
             state.playhead_secs = start_secs.max(0.0);
+        }
+    }
+
+    fn set_trim_timeline_playhead(&mut self, sound_id: Uuid, playhead_secs: f32) {
+        let secs = playhead_secs.max(0.0);
+        if let Some(state) = self.trim_timeline_state.as_mut()
+            && state.sound_id == sound_id
+        {
+            state.playhead_secs = secs;
+        }
+
+        let preview_active = self
+            .audio
+            .as_ref()
+            .is_some_and(|audio| {
+                self.trim_timeline_preview_path
+                    .as_ref()
+                    .is_some_and(|path| audio.is_playing_file(path))
+            });
+        if !preview_active {
+            return;
+        }
+
+        let was_paused = self.audio.as_ref().is_some_and(|audio| audio.is_paused());
+        self.stop_preview();
+        self.preview_timeline_mix_from_position(sound_id, secs);
+        if was_paused && let Some(audio) = self.audio.as_mut() {
+            audio.pause();
         }
     }
 
@@ -4308,9 +4337,19 @@ impl SoundFxApp {
             0.0
         };
         if ctrl_scroll_y.abs() > f32::EPSILON {
+            let visible_duration_before_zoom = (base_visible_secs / zoom.max(0.1)).max(0.25);
+            let visible_ratio = pointer_pos
+                .map(|pointer| {
+                    ((pointer.x - viewport_rect.left()) / viewport_rect.width()).clamp(0.0, 1.0)
+                })
+                .unwrap_or(0.5);
+            let anchor_time = view_start_secs + visible_ratio * visible_duration_before_zoom;
             let zoom_factor = if ctrl_scroll_y > 0.0 { 1.12 } else { 1.0 / 1.12 };
             zoom = (zoom * zoom_factor).clamp(0.1, 8.0);
-            requested_view_start_secs = Some(view_start_secs);
+            let next_visible_duration = (base_visible_secs / zoom.max(0.1)).max(0.25);
+            requested_view_start_secs = Some(
+                (anchor_time - visible_ratio * next_visible_duration).max(0.0),
+            );
             ctx.input_mut(|input| {
                 input.smooth_scroll_delta = Vec2::ZERO;
                 input.raw_scroll_delta = Vec2::ZERO;
@@ -4392,12 +4431,16 @@ impl SoundFxApp {
             painter.rect_filled(
                 timeline_rect,
                 14.0,
-                if row_hovered && pending_drag_sound.is_some() {
-                    Color32::from_rgba_premultiplied(108, 231, 255, 18)
-                } else {
-                    Self::input_fill()
-                },
+                Self::input_fill(),
             );
+            if row_hovered && pending_drag_sound.is_some() {
+                painter.rect_stroke(
+                    timeline_rect,
+                    14.0,
+                    Stroke::new(1.0, Color32::from_rgba_premultiplied(108, 231, 255, 92)),
+                    StrokeKind::Outside,
+                );
+            }
             painter.line_segment(
                 [
                     Pos2::new(timeline_rect.left() + 10.0, timeline_rect.bottom() - 14.0),
@@ -4457,14 +4500,15 @@ impl SoundFxApp {
             );
             if timeline_click_response.clicked()
                 && let Some(pointer) = timeline_click_response.interact_pointer_pos()
-                && let Some(state) = self.trim_timeline_state.as_mut()
             {
                 let secs = (view_start_secs
                     + ((pointer.x - timeline_rect.left()) / timeline_rect.width()).clamp(0.0, 1.0)
                         * visible_duration)
                     .max(0.0);
-                state.playhead_secs = secs;
-                state.selected_clip_id = None;
+                self.set_trim_timeline_playhead(sound_id, secs);
+                if let Some(state) = self.trim_timeline_state.as_mut() {
+                    state.selected_clip_id = None;
+                }
             }
 
             for (clip_index, clip) in row.clips.iter().enumerate() {
@@ -4502,15 +4546,16 @@ impl SoundFxApp {
                         .with(("trim-mix-clip", sound_id, row_index, clip_index, sound.id)),
                     Sense::click_and_drag(),
                 );
+                let drag_anchor_id = ui.id().with(("trim-mix-drag-anchor", sound_id, clip.id));
                 let selected_clip = state_snapshot.selected_clip_id == Some(clip.id);
 
                 painter.rect_filled(
                     clip_rect,
                     12.0,
                     if selected_clip {
-                        Color32::from_rgba_premultiplied(108, 231, 255, 38)
+                        Color32::from_rgba_premultiplied(57, 145, 166, 210)
                     } else {
-                        Color32::from_rgba_premultiplied(214, 51, 132, 68)
+                        Color32::from_rgba_premultiplied(28, 98, 116, 170)
                     },
                 );
                 painter.rect_stroke(
@@ -4545,16 +4590,15 @@ impl SoundFxApp {
                     Pos2::new(clip_rect.right() - 10.0, clip_rect.top() + 24.0),
                 );
                 let waveform_rect = Rect::from_min_max(
-                    Pos2::new(clip_rect.left() + 10.0, clip_rect.top() + 30.0),
+                    Pos2::new(clip_rect.left() + 10.0, clip_rect.top() + 28.0),
                     Pos2::new(clip_rect.right() - 10.0, clip_rect.bottom() - 10.0),
                 );
-                Self::paint_waveform_bars(
+                Self::paint_timeline_waveform_columns(
                     &painter,
                     waveform_rect,
                     &preview,
-                    waveform_rect.left(),
-                    waveform_rect.right(),
-                    None,
+                    Color32::from_rgb(95, 241, 255),
+                    selected_clip,
                 );
                 painter.text(
                     title_rect.left_top(),
@@ -4570,9 +4614,29 @@ impl SoundFxApp {
                     ctx.set_cursor_icon(egui::CursorIcon::Grab);
                 }
                 if clip_response.clicked()
-                    && let Some(state) = self.trim_timeline_state.as_mut()
                 {
-                    state.selected_clip_id = Some(clip.id);
+                    let pointer_time = clip_response
+                        .interact_pointer_pos()
+                        .map(|pointer| {
+                            view_start_secs
+                                + ((pointer.x - timeline_rect.left()) / timeline_rect.width())
+                                    .clamp(0.0, 1.0)
+                                    * visible_duration
+                        })
+                        .unwrap_or(clip.start_secs);
+                    self.set_trim_timeline_playhead(sound_id, pointer_time);
+                    if let Some(state) = self.trim_timeline_state.as_mut() {
+                        state.selected_clip_id = Some(clip.id);
+                    }
+                }
+                if clip_response.drag_started()
+                    && let Some(pointer) = clip_response.interact_pointer_pos()
+                {
+                    let pointer_time = view_start_secs
+                        + ((pointer.x - timeline_rect.left()) / timeline_rect.width()).clamp(0.0, 1.0)
+                            * visible_duration;
+                    let grab_offset_secs = (pointer_time - clip.start_secs).clamp(0.0, clip_duration);
+                    ui.ctx().data_mut(|data| data.insert_temp(drag_anchor_id, grab_offset_secs));
                 }
                 if selected_clip
                     && clip_rect.contains(ctx.input(|input| input.pointer.hover_pos()).unwrap_or(clip_rect.center()))
@@ -4647,10 +4711,15 @@ impl SoundFxApp {
                             rect.contains(pointer).then_some(candidate_row)
                         })
                         .unwrap_or(row_index);
-                    let mut next_start = (view_start_secs
+                    let pointer_time = (view_start_secs
                         + ((pointer.x - timeline_rect.left()) / timeline_rect.width()).clamp(0.0, 1.0)
                             * visible_duration)
                         .max(0.0);
+                    let grab_offset_secs = ui
+                        .ctx()
+                        .data(|data| data.get_temp::<f32>(drag_anchor_id))
+                        .unwrap_or(0.0);
+                    let mut next_start = (pointer_time - grab_offset_secs).max(0.0);
                     if state.snap_enabled {
                         let mut snap_points = vec![0.0];
                         for existing_row in &state.rows {
@@ -4694,6 +4763,9 @@ impl SoundFxApp {
                     }
                 }
                 if clip_response.drag_stopped() {
+                    ui.ctx().data_mut(|data| {
+                        data.remove::<f32>(drag_anchor_id);
+                    });
                     timeline_state_changed = true;
                 }
 
@@ -4756,16 +4828,15 @@ impl SoundFxApp {
                         Pos2::new(ghost_rect.right() - 10.0, ghost_rect.top() + 24.0),
                     );
                     let ghost_waveform_rect = Rect::from_min_max(
-                        Pos2::new(ghost_rect.left() + 10.0, ghost_rect.top() + 30.0),
+                        Pos2::new(ghost_rect.left() + 10.0, ghost_rect.top() + 28.0),
                         Pos2::new(ghost_rect.right() - 10.0, ghost_rect.bottom() - 10.0),
                     );
-                    Self::paint_waveform_bars(
+                    Self::paint_timeline_waveform_columns(
                         &painter,
                         ghost_waveform_rect,
                         &ghost_waveform,
-                        ghost_waveform_rect.left(),
-                        ghost_waveform_rect.right(),
-                        None,
+                        Color32::from_rgb(95, 241, 255),
+                        true,
                     );
                     painter.text(
                         ghost_title_rect.left_top(),
