@@ -109,7 +109,7 @@ pub(super) struct DownloadSiteBadge {
     pub(super) color: Color32,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) enum DownloadSiteKind {
     Youtube,
     SoundCloud,
@@ -254,6 +254,7 @@ pub struct SoundFxApp {
     pub(super) myinstants_waveform_jobs: HashSet<String>,
     pub(super) myinstants_waveform_tx: Sender<MyinstantsWaveformMessage>,
     pub(super) myinstants_waveform_rx: Receiver<MyinstantsWaveformMessage>,
+    pub(super) download_site_icon_cache: RefCell<HashMap<DownloadSiteKind, TextureHandle>>,
     pub(super) vocal_waveform_cache: RefCell<HashMap<Uuid, Vec<f32>>>,
     pub(super) music_waveform_cache: RefCell<HashMap<Uuid, Vec<f32>>>,
     pub(super) library_waveform_preview_cache: RefCell<HashMap<String, Vec<f32>>>,
@@ -581,6 +582,7 @@ impl SoundFxApp {
             myinstants_waveform_jobs: HashSet::new(),
             myinstants_waveform_tx,
             myinstants_waveform_rx,
+            download_site_icon_cache: RefCell::new(HashMap::new()),
             vocal_waveform_cache: RefCell::new(HashMap::new()),
             music_waveform_cache: RefCell::new(HashMap::new()),
             library_waveform_preview_cache: RefCell::new(HashMap::new()),

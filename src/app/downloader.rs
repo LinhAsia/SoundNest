@@ -270,7 +270,54 @@ impl SoundFxApp {
         }
     }
 
-    pub(super) fn youtube_search_button(ui: &mut Ui, label: &str, enabled: bool) -> egui::Response {
+    fn download_site_icon_png_bytes(kind: DownloadSiteKind) -> &'static [u8] {
+        match kind {
+            DownloadSiteKind::Youtube => include_bytes!("../../assets/site-badges/youtube.png"),
+            DownloadSiteKind::SoundCloud => include_bytes!("../../assets/site-badges/soundcloud.png"),
+            DownloadSiteKind::Bandcamp => include_bytes!("../../assets/site-badges/bandcamp.png"),
+            DownloadSiteKind::TikTok => include_bytes!("../../assets/site-badges/tiktok.png"),
+            DownloadSiteKind::Facebook => include_bytes!("../../assets/site-badges/facebook.png"),
+            DownloadSiteKind::Instagram => include_bytes!("../../assets/site-badges/instagram.png"),
+            DownloadSiteKind::X => include_bytes!("../../assets/site-badges/x.png"),
+            DownloadSiteKind::Vimeo => include_bytes!("../../assets/site-badges/vimeo.png"),
+            DownloadSiteKind::Twitch => include_bytes!("../../assets/site-badges/twitch.png"),
+            DownloadSiteKind::GoogleDrive => {
+                include_bytes!("../../assets/site-badges/google-drive.png")
+            }
+        }
+    }
+
+    fn cached_download_site_icon_texture(
+        &self,
+        ctx: &Context,
+        kind: DownloadSiteKind,
+    ) -> Option<TextureHandle> {
+        if let Some(texture) = self.download_site_icon_cache.borrow().get(&kind).cloned() {
+            return Some(texture);
+        }
+
+        let icon = eframe::icon_data::from_png_bytes(Self::download_site_icon_png_bytes(kind)).ok()?;
+        let image = egui::ColorImage::from_rgba_unmultiplied(
+            [icon.width as usize, icon.height as usize],
+            &icon.rgba,
+        );
+        let texture = ctx.load_texture(
+            format!("download-site-icon-{kind:?}"),
+            image,
+            egui::TextureOptions::LINEAR,
+        );
+        self.download_site_icon_cache
+            .borrow_mut()
+            .insert(kind, texture.clone());
+        Some(texture)
+    }
+
+    pub(super) fn youtube_search_button(
+        &mut self,
+        ui: &mut Ui,
+        label: &str,
+        enabled: bool,
+    ) -> egui::Response {
         let desired = vec2(152.0, 36.0);
         let sense = if enabled {
             Sense::click()
@@ -308,7 +355,7 @@ impl SoundFxApp {
             Pos2::new(rect.left() + 18.0, rect.center().y),
             vec2(18.0, 18.0),
         );
-        Self::paint_download_site_icon(ui.painter(), icon_rect, badge);
+        self.paint_download_site_icon(ui, icon_rect, badge);
         ui.painter().text(
             Pos2::new(rect.left() + 34.0, rect.center().y),
             egui::Align2::LEFT_CENTER,
@@ -379,10 +426,22 @@ impl SoundFxApp {
     }
 
     pub(super) fn paint_download_site_icon(
-        painter: &egui::Painter,
+        &mut self,
+        ui: &mut Ui,
         rect: Rect,
         badge: DownloadSiteBadge,
     ) {
+        if let Some(texture) = self.cached_download_site_icon_texture(ui.ctx(), badge.kind) {
+            ui.painter().image(
+                texture.id(),
+                rect.shrink2(vec2(1.0, 1.0)),
+                Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                Color32::WHITE,
+            );
+            return;
+        }
+
+        let painter = ui.painter();
         let center = rect.center();
         let white = Color32::WHITE;
         let radius = rect.width().min(rect.height()) * 0.5;
@@ -676,7 +735,7 @@ impl SoundFxApp {
         }
     }
 
-    pub(super) fn render_download_site_badges(ui: &mut Ui) {
+    pub(super) fn render_download_site_badges(&mut self, ui: &mut Ui) {
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
             for badge in Self::download_site_badges() {
@@ -696,10 +755,8 @@ impl SoundFxApp {
                     .corner_radius(14.0)
                     .inner_margin(Margin::same(6))
                     .show(ui, |ui| {
-                        let (icon_rect, _) =
-                            ui.allocate_exact_size(vec2(24.0, 24.0), Sense::click());
-                        let painter = ui.painter_at(icon_rect);
-                        Self::paint_download_site_icon(&painter, icon_rect, badge);
+                        let (icon_rect, _) = ui.allocate_exact_size(vec2(24.0, 24.0), Sense::click());
+                        self.paint_download_site_icon(ui, icon_rect, badge);
                     })
                     .response
                     .on_hover_text(badge.name);
@@ -712,6 +769,7 @@ impl SoundFxApp {
     }
 
     pub(super) fn render_youtube_result_row(
+        &mut self,
         ui: &mut Ui,
         result: &YoutubeSearchResult,
         download_label: &str,
@@ -730,7 +788,7 @@ impl SoundFxApp {
                         color: Color32::from_rgb(255, 77, 141),
                     };
                     let (icon_rect, _) = ui.allocate_exact_size(vec2(24.0, 24.0), Sense::hover());
-                    Self::paint_download_site_icon(ui.painter(), icon_rect, badge);
+                    self.paint_download_site_icon(ui, icon_rect, badge);
                     ui.add_space(8.0);
                     ui.vertical(|ui| {
                         ui.add_sized(
@@ -1308,7 +1366,7 @@ impl SoundFxApp {
                         });
                     });
                     ui.add_space(8.0);
-                    Self::render_download_site_badges(ui);
+                    self.render_download_site_badges(ui);
 
                     ui.add_space(10.0);
 
@@ -1552,7 +1610,7 @@ impl SoundFxApp {
                         search_request = true;
                     }
                     ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                        let youtube_button = Self::youtube_search_button(
+                        let youtube_button = self.youtube_search_button(
                             ui,
                             &self.t("download.search_youtube"),
                             !snapshot.searching
@@ -1647,7 +1705,7 @@ impl SoundFxApp {
                                 .iter()
                                 .take(self.youtube_search_visible_count)
                             {
-                                if Self::render_youtube_result_row(
+                                if self.render_youtube_result_row(
                                     ui,
                                     result,
                                     &self.t("download.download"),
