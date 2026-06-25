@@ -209,31 +209,38 @@ impl SoundFxApp {
             return Vec::new();
         }
 
-        let bucket_count = buckets.clamp(18, 160).max(1);
+        let bucket_count = buckets.clamp(1, 256).max(1);
         let mut preview = Vec::with_capacity(bucket_count);
         let range_start = start_ratio.clamp(0.0, 1.0);
         let range_end = end_ratio.clamp(range_start, 1.0);
-        let range_span = (range_end - range_start).max(f32::EPSILON);
+        let start_index =
+            ((range_start * samples.len() as f32).floor() as usize).min(samples.len().saturating_sub(1));
+        let end_index = ((range_end * samples.len() as f32).ceil() as usize)
+            .clamp(start_index + 1, samples.len());
+        let range_len = (end_index - start_index).max(1);
 
         for bucket_index in 0..bucket_count {
-            let left_progress =
-                range_start + range_span * ((bucket_index as f32 + 0.22) / bucket_count as f32);
-            let center_progress =
-                range_start + range_span * ((bucket_index as f32 + 0.50) / bucket_count as f32);
-            let right_progress =
-                range_start + range_span * ((bucket_index as f32 + 0.78) / bucket_count as f32);
-            let left = Self::sample_waveform_level(samples, left_progress);
-            let center = Self::sample_waveform_level(samples, center_progress);
-            let right = Self::sample_waveform_level(samples, right_progress);
-            let level = (left * 0.24 + center * 0.52 + right * 0.24).clamp(0.0, 1.0);
-            preview.push(level);
+            let bucket_start = start_index
+                + (((bucket_index as f32 / bucket_count as f32) * range_len as f32).floor() as usize)
+                    .min(range_len.saturating_sub(1));
+            let mut bucket_end = start_index
+                + (((((bucket_index + 1) as f32) / bucket_count as f32) * range_len as f32).ceil()
+                    as usize);
+            bucket_end = bucket_end.clamp(bucket_start + 1, end_index);
+
+            let slice = &samples[bucket_start..bucket_end];
+            let mut peak = 0.0_f32;
+            let mut energy = 0.0_f32;
+            for sample in slice {
+                peak = peak.max(*sample);
+                energy += sample * sample;
+            }
+            let rms = (energy / slice.len() as f32).sqrt();
+            preview.push((peak * 0.76 + rms * 0.24).clamp(0.0, 1.0));
         }
 
         for value in &mut preview {
-            *value = value.clamp(0.0, 1.0);
-            if *value > 0.0 {
-                *value = (0.14 + *value * 0.86).clamp(0.14, 1.0);
-            }
+            *value = Self::wave_strip_level(*value).clamp(0.02, 1.0);
         }
 
         preview

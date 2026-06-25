@@ -435,7 +435,7 @@ impl SoundFxApp {
     }
 
     fn trim_timeline_waveform_bars(width: f32) -> usize {
-        ((width / 4.2).round() as usize).clamp(24, 168)
+        ((width / 4.2).round() as usize).clamp(4, 168)
     }
 
     fn trim_timeline_resolve_row_start(
