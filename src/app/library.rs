@@ -1091,14 +1091,30 @@ impl SoundFxApp {
         let (row_outer_rect, _) =
             ui.allocate_exact_size(vec2(row_width, row_outer_height), Sense::hover());
         let row_rect = Rect::from_min_size(row_outer_rect.min, vec2(row_width, row_height));
+        let row_hovered =
+            !self.has_modal_panel() && Self::pointer_within_rect(ui.ctx(), row_rect);
         let inner_rect = row_rect.shrink2(vec2(10.0, (row_padding_y as f32 * 0.75).max(6.0)));
         let viewport_clip_rect = ui.clip_rect();
         let row_painter = ui.painter().with_clip_rect(viewport_clip_rect);
-        row_painter.rect_filled(row_rect, 14.0, Self::surface_fill());
+        let row_fill = if row_hovered {
+            if self.dark_theme {
+                Color32::from_rgb(46, 28, 42)
+            } else {
+                Color32::from_rgb(255, 239, 247)
+            }
+        } else {
+            Self::surface_fill()
+        };
+        let row_stroke = if row_hovered {
+            Color32::from_rgb(227, 82, 149)
+        } else {
+            Self::border_color()
+        };
+        row_painter.rect_filled(row_rect, 14.0, row_fill);
         row_painter.rect_stroke(
             row_rect,
             14.0,
-            Stroke::new(1.0, Self::border_color()),
+            Stroke::new(if row_hovered { 1.5 } else { 1.0 }, row_stroke),
             StrokeKind::Inside,
         );
         let actions_width = if self.folder_import_select_mode.is_none() {
@@ -1757,6 +1773,10 @@ impl SoundFxApp {
                         .input(|input| input.pointer.hover_pos())
                         .is_some_and(|pos| tile_rect.contains(pos));
                 let hovered = !modal_open && pointer_hover;
+                let is_playing = self
+                    .audio
+                    .as_ref()
+                    .is_some_and(|audio| audio.is_playing(sound.id));
 
                 if hovered {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
@@ -1946,12 +1966,18 @@ impl SoundFxApp {
                                         let play_btn = Self::icon_action(
                                             ui,
                                             action_button_size,
-                                            if is_loading { 0xe5d5 } else { 0xe037 },
-                                            is_loading,
+                                            if is_playing {
+                                                0xe047
+                                            } else if is_loading {
+                                                0xe5d5
+                                            } else {
+                                                0xe037
+                                            },
+                                            is_loading || is_playing,
                                             false,
                                         );
                                         if play_btn.clicked() {
-                                            if is_loading {
+                                            if is_loading || is_playing {
                                                 self.stop_preview();
                                             } else {
                                                 preview_sound = Some(sound.id);
@@ -1969,6 +1995,11 @@ impl SoundFxApp {
                                     ui.add_space(8.0);
                                     ui.horizontal(|ui| {
                                         ui.spacing_mut().item_spacing.x = action_gap;
+                                        let action_row_width =
+                                            action_button_width * 3.0 + action_gap * 2.0;
+                                        ui.add_space(
+                                            ((inner_size - action_row_width) * 0.5).max(0.0),
+                                        );
                                         if Self::favorite_button_sized(
                                             ui,
                                             sound.favorite,
@@ -1982,21 +2013,27 @@ impl SoundFxApp {
                                         let is_loading = self
                                             .pending_preview_after_preload
                                             .is_some_and(|(id, _)| id == sound.id);
-                                        if Self::icon_action(
+                                        let play_btn = Self::icon_action(
                                             ui,
                                             action_button_size,
-                                            if is_loading { 0xe5d5 } else { 0xe037 },
-                                            is_loading,
+                                            if is_playing {
+                                                0xe047
+                                            } else if is_loading {
+                                                0xe5d5
+                                            } else {
+                                                0xe037
+                                            },
+                                            is_loading || is_playing,
                                             false,
-                                        )
-                                        .clicked()
-                                        {
-                                            if is_loading {
+                                        );
+                                        if play_btn.clicked() {
+                                            if is_loading || is_playing {
                                                 self.stop_preview();
                                             } else {
                                                 preview_sound = Some(sound.id);
                                             }
                                         }
+                                        play_btn_response = Some(play_btn);
                                         if Self::icon_action(
                                             ui,
                                             action_button_size,
