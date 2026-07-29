@@ -7,6 +7,7 @@ use std::io::BufReader;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 use uuid::Uuid;
 
 pub fn calculate_normalization_gain(asset_path: &Path) -> Result<f32> {
@@ -54,53 +55,6 @@ struct CachedAudio {
     samples: Arc<[f32]>,
 }
 
-struct SharedSamplesSource {
-    samples: Arc<[f32]>,
-    index: usize,
-    end: usize,
-    channels: u16,
-    sample_rate: u32,
-}
-
-impl Iterator for SharedSamplesSource {
-    type Item = f32;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.index >= self.end {
-            return None;
-        }
-        let sample = self.samples.get(self.index).copied();
-        self.index = self.index.saturating_add(1);
-        sample
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = self.end.saturating_sub(self.index);
-        (remaining, Some(remaining))
-    }
-}
-
-impl Source for SharedSamplesSource {
-    fn current_frame_len(&self) -> Option<usize> {
-        Some(self.end.saturating_sub(self.index) / self.channels.max(1) as usize)
-    }
-
-    fn channels(&self) -> u16 {
-        self.channels
-    }
-
-    fn sample_rate(&self) -> u32 {
-        self.sample_rate
-    }
-
-    fn total_duration(&self) -> Option<std::time::Duration> {
-        let frames = self.end.saturating_sub(self.index) / self.channels.max(1) as usize;
-        Some(std::time::Duration::from_secs_f32(
-            frames as f32 / self.sample_rate.max(1) as f32,
-        ))
-    }
-}
-
 pub struct AudioEngine {
     _stream: OutputStream,
     handle: OutputStreamHandle,
@@ -143,6 +97,10 @@ impl AudioEngine {
         asset_path: &Path,
         start_position_secs: f32,
     ) -> Result<()> {
+        if !sound.needs_processed_export() {
+            return self.play_sound_streaming(sound, asset_path, start_position_secs);
+        }
+
         self.stop();
 
         self.ensure_cached_audio(asset_path)?;
@@ -221,17 +179,6 @@ impl AudioEngine {
     ) -> Result<()> {
         self.stop();
 
-        self.ensure_cached_audio(asset_path)?;
-        let cached = self
-            .cached_audio
-            .get(asset_path)
-            .expect("cached audio should exist after ensure_cached_audio");
-        let channels = cached.channels;
-        let sample_rate = cached.sample_rate;
-        if cached.samples.is_empty() {
-            bail!("audio file is empty");
-        }
-
         let speed = sound.speed.clamp(0.25, 2.0);
         let total_duration_secs = sound.trimmed_length().max(0.05);
         let original_offset_secs = if sound.has_cutout() {
@@ -240,18 +187,8 @@ impl AudioEngine {
             (start_position_secs - sound.trim_start_secs).clamp(0.0, total_duration_secs)
         };
         let file_offset_secs = (original_offset_secs / speed).clamp(0.0, total_duration_secs);
-        let total_frames = cached.samples.len() / channels as usize;
-        let start_frame = ((file_offset_secs * sample_rate as f32).floor() as usize)
-            .min(total_frames.saturating_sub(1));
-        let start_sample = start_frame * channels as usize;
-
-        let preview = SharedSamplesSource {
-            samples: Arc::clone(&cached.samples),
-            index: start_sample,
-            end: cached.samples.len(),
-            channels,
-            sample_rate,
-        };
+        let preview = open_audio_decoder(asset_path)?
+            .skip_duration(Duration::from_secs_f32(file_offset_secs));
 
         let sink = Sink::try_new(&self.handle).context("unable to create audio sink")?;
         sink.append(preview);
@@ -267,6 +204,35 @@ impl AudioEngine {
         Ok(())
     }
 
+    fn play_sound_streaming(
+        &mut self,
+        sound: &SoundEffect,
+        asset_path: &Path,
+        start_position_secs: f32,
+    ) -> Result<()> {
+        self.stop();
+
+        let start_offset_secs =
+            (start_position_secs - sound.trim_start_secs).clamp(0.0, sound.trimmed_length());
+        let file_offset_secs = sound.trim_start_secs + start_offset_secs;
+        let remaining_secs = (sound.trim_end_secs - file_offset_secs).max(0.001);
+        let preview = open_audio_decoder(asset_path)?
+            .skip_duration(Duration::from_secs_f32(file_offset_secs))
+            .take_duration(Duration::from_secs_f32(remaining_secs));
+        let sink = Sink::try_new(&self.handle).context("unable to create audio sink")?;
+        sink.append(preview);
+        sink.play();
+
+        self.current_id = Some(sound.id);
+        self.current_file_path = None;
+        self.current_total_duration_secs = sound.trimmed_length();
+        self.current_sound = Some(sound.clone());
+        self.current_start_offset_secs = start_offset_secs;
+        self.current_speed = 1.0;
+        self.sink = Some(sink);
+        Ok(())
+    }
+
     pub fn play_file(&mut self, asset_path: &Path) -> Result<()> {
         self.play_file_from(asset_path, 0.0)
     }
@@ -274,33 +240,14 @@ impl AudioEngine {
     pub fn play_file_from(&mut self, asset_path: &Path, start_position_secs: f32) -> Result<()> {
         self.stop();
 
-        self.ensure_cached_audio(asset_path)?;
-        let cached = self
-            .cached_audio
-            .get(asset_path)
-            .expect("cached audio should exist after ensure_cached_audio");
-        let channels = cached.channels;
-        let sample_rate = cached.sample_rate;
-        if cached.samples.is_empty() {
-            bail!("audio file is empty");
-        }
-
-        let total_duration_secs =
-            cached.samples.len() as f32 / channels.max(1) as f32 / sample_rate.max(1) as f32;
-        let total_frames = cached.samples.len() / channels as usize;
+        let decoder = open_audio_decoder(asset_path)?;
+        let total_duration_secs = decoder
+            .total_duration()
+            .map(|duration| duration.as_secs_f32())
+            .unwrap_or(0.05)
+            .max(0.05);
         let start_offset_secs = start_position_secs.clamp(0.0, total_duration_secs.max(0.0));
-        let start_frame = ((start_offset_secs * sample_rate as f32).floor() as usize)
-            .min(total_frames.saturating_sub(1));
-        let start_offset_secs = start_frame as f32 / sample_rate as f32;
-        let start_sample = start_frame * channels as usize;
-
-        let preview = SharedSamplesSource {
-            samples: Arc::clone(&cached.samples),
-            index: start_sample,
-            end: cached.samples.len(),
-            channels,
-            sample_rate,
-        };
+        let preview = decoder.skip_duration(Duration::from_secs_f32(start_offset_secs));
         let sink = Sink::try_new(&self.handle).context("unable to create audio sink")?;
         sink.append(preview);
         sink.play();
@@ -492,6 +439,12 @@ fn decode_audio_file(asset_path: &Path) -> Result<(u16, u32, Vec<f32>)> {
         Ok((channels, sample_rate, samples))
     }))
     .map_err(|_| anyhow::anyhow!("audio decoder crashed while reading {}", path.display()))?
+}
+
+fn open_audio_decoder(asset_path: &Path) -> Result<Decoder<BufReader<File>>> {
+    let file = File::open(asset_path)
+        .with_context(|| format!("unable to open {}", asset_path.display()))?;
+    Decoder::new(BufReader::new(file)).context("unsupported audio file")
 }
 
 fn soften_sample_edges(samples: &mut [f32], channels: u16, sample_rate: u32, fade_ms: f32) {

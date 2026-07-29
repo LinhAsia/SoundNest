@@ -87,7 +87,7 @@ impl SoundFxApp {
                     self.startup.sound_waveform = waveform;
                     self.startup.sound_duration_sec = duration_sec;
                     if self.startup.phase == TransitionPhase::Intro {
-                        self.startup.duration_sec = duration_sec.max(DEFAULT_INTRO_DURATION_SEC);
+                        self.startup.duration_sec = DEFAULT_INTRO_DURATION_SEC;
                     }
                 }
             }

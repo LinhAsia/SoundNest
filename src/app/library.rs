@@ -1266,7 +1266,7 @@ impl SoundFxApp {
                 (play_rect.right() + 8.0).min(row_rect.right()),
                 row_rect.top(),
             ),
-            row_rect.right_bottom(),
+            Pos2::new(actions_rect.left().min(row_rect.right()), row_rect.bottom()),
         );
         let response = ui.interact(
             row_interactive_rect,
@@ -1274,27 +1274,27 @@ impl SoundFxApp {
             Sense::click_and_drag(),
         );
         if response.hovered() {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
         }
         let titlebar_drag_active = self.titlebar_drag_active(ui.ctx());
         if titlebar_drag_active {
             self.pending_sound_drag = None;
-        } else if response.drag_started() {
+        } else if Self::pointer_primary_pressed_within(ui.ctx(), row_interactive_rect) {
             self.pending_sound_drag = Some(sound.id);
-        } else if response.drag_stopped() {
-            if !self.trim_timeline_drag_capture_active() {
-                self.pending_sound_drag = None;
-            }
-        } else if response.dragged()
-            && self.pending_sound_drag == Some(sound.id)
+        } else if self.pending_sound_drag == Some(sound.id)
             && Self::pointer_primary_drag_ready(ui.ctx())
         {
             if !self.trim_timeline_drag_capture_active() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
                 if let Err(error) = self.drag_sound_file_out(ui.ctx(), sound) {
                     self.set_error_status(error);
                 }
                 self.pending_sound_drag = None;
             }
+        } else if !ui.ctx().input(|input| input.pointer.primary_down())
+            && self.pending_sound_drag == Some(sound.id)
+        {
+            self.pending_sound_drag = None;
         }
         let over_action = favorite_response
             .as_ref()

@@ -84,18 +84,20 @@ impl SoundFxApp {
             return;
         }
 
+        let row_height = self.inline_folder_sound_row_outer_height();
         ScrollArea::vertical()
             .auto_shrink([false, false])
-            .show_rows(
-                ui,
-                self.inline_folder_sound_row_outer_height(),
-                sounds.len(),
-                |ui, row_range| {
-                    for row_index in row_range {
-                        self.draw_inline_folder_sound_row(ui, &sounds[row_index]);
-                    }
-                },
-            );
+            .show_viewport(ui, |ui, viewport| {
+                let first_row = (viewport.top() / row_height).floor().max(0.0) as usize;
+                let last_row = ((viewport.bottom() / row_height).ceil() as usize)
+                    .saturating_add(1)
+                    .min(sounds.len());
+                ui.set_min_height(row_height * sounds.len() as f32);
+                ui.add_space(first_row as f32 * row_height);
+                for sound in &sounds[first_row.min(sounds.len())..last_row] {
+                    self.draw_inline_folder_sound_row(ui, sound);
+                }
+            });
     }
 
     fn external_drop_preview_details(&self, ctx: &Context) -> Option<(String, bool, usize)> {

@@ -54,7 +54,9 @@ impl SoundFxApp {
         };
         self.myinstants_preview_audio_url = None;
 
-        if !audio.has_cached_audio(&asset_path) {
+        let needs_preload = sound.needs_processed_export()
+            && !Storage::processed_export_exists(self.storage.root_dir(), &sound);
+        if needs_preload && !audio.has_cached_audio(&asset_path) {
             if let Some(error) = self.audio_preload_failures.get(&asset_path) {
                 self.pending_preview_after_preload = None;
                 self.set_error_status(format!("Unable to load audio preview: {error}"));
