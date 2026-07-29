@@ -46,14 +46,23 @@ impl SoundFxApp {
 
     pub(super) fn library_row_gap(&self) -> f32 {
         if self.library_row_thickness <= 2 {
-            16.0
+            10.0
         } else {
-            18.0
+            12.0
         }
     }
 
     pub(super) fn inline_folder_sound_row_height(&self) -> f32 {
-        (self.library_list_row_height() + 8.0).clamp(116.0, 152.0)
+        match self
+            .library_row_thickness
+            .clamp(LIBRARY_ROW_MIN_THICKNESS, LIBRARY_ROW_MAX_THICKNESS)
+        {
+            1 => 72.0,
+            2 => 76.0,
+            3 => 80.0,
+            4 => 86.0,
+            _ => 92.0,
+        }
     }
 
     pub(super) fn inline_folder_sound_row_outer_height(&self) -> f32 {
