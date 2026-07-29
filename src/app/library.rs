@@ -2647,6 +2647,7 @@ impl SoundFxApp {
                                     }
                                 }
                             }
+                            ui.advance_cursor_after_rect(row_rect);
                         }
                     },
                 );

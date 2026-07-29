@@ -1,6 +1,8 @@
 use crate::storage::{SoundEffect, apply_sound_effects};
 use anyhow::{Context, Result, bail};
-use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source, buffer::SamplesBuffer};
+use rodio::{
+    Decoder, OutputStream, OutputStreamHandle, Sample, Sink, Source, buffer::SamplesBuffer,
+};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
@@ -53,6 +55,71 @@ struct CachedAudio {
     channels: u16,
     sample_rate: u32,
     samples: Arc<[f32]>,
+}
+
+struct PanicSafeSource<S> {
+    inner: S,
+    failed: bool,
+}
+
+impl<S> PanicSafeSource<S> {
+    fn new(inner: S) -> Self {
+        Self {
+            inner,
+            failed: false,
+        }
+    }
+}
+
+impl<S> Iterator for PanicSafeSource<S>
+where
+    S: Source,
+    S::Item: Sample,
+{
+    type Item = S::Item;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.failed {
+            return None;
+        }
+        match catch_unwind(AssertUnwindSafe(|| self.inner.next())) {
+            Ok(sample) => sample,
+            Err(_) => {
+                self.failed = true;
+                None
+            }
+        }
+    }
+}
+
+impl<S> Source for PanicSafeSource<S>
+where
+    S: Source,
+    S::Item: Sample,
+{
+    fn current_frame_len(&self) -> Option<usize> {
+        catch_unwind(AssertUnwindSafe(|| self.inner.current_frame_len()))
+            .ok()
+            .flatten()
+    }
+
+    fn channels(&self) -> u16 {
+        catch_unwind(AssertUnwindSafe(|| self.inner.channels()))
+            .unwrap_or(1)
+            .max(1)
+    }
+
+    fn sample_rate(&self) -> u32 {
+        catch_unwind(AssertUnwindSafe(|| self.inner.sample_rate()))
+            .unwrap_or(44_100)
+            .max(1)
+    }
+
+    fn total_duration(&self) -> Option<Duration> {
+        catch_unwind(AssertUnwindSafe(|| self.inner.total_duration()))
+            .ok()
+            .flatten()
+    }
 }
 
 pub struct AudioEngine {
@@ -191,7 +258,7 @@ impl AudioEngine {
             .skip_duration(Duration::from_secs_f32(file_offset_secs));
 
         let sink = Sink::try_new(&self.handle).context("unable to create audio sink")?;
-        sink.append(preview);
+        sink.append(PanicSafeSource::new(preview));
         sink.play();
 
         self.current_id = Some(sound.id);
@@ -220,7 +287,7 @@ impl AudioEngine {
             .skip_duration(Duration::from_secs_f32(file_offset_secs))
             .take_duration(Duration::from_secs_f32(remaining_secs));
         let sink = Sink::try_new(&self.handle).context("unable to create audio sink")?;
-        sink.append(preview);
+        sink.append(PanicSafeSource::new(preview));
         sink.play();
 
         self.current_id = Some(sound.id);
@@ -249,7 +316,7 @@ impl AudioEngine {
         let start_offset_secs = start_position_secs.clamp(0.0, total_duration_secs.max(0.0));
         let preview = decoder.skip_duration(Duration::from_secs_f32(start_offset_secs));
         let sink = Sink::try_new(&self.handle).context("unable to create audio sink")?;
-        sink.append(preview);
+        sink.append(PanicSafeSource::new(preview));
         sink.play();
 
         self.current_id = None;
@@ -442,9 +509,13 @@ fn decode_audio_file(asset_path: &Path) -> Result<(u16, u32, Vec<f32>)> {
 }
 
 fn open_audio_decoder(asset_path: &Path) -> Result<Decoder<BufReader<File>>> {
-    let file = File::open(asset_path)
-        .with_context(|| format!("unable to open {}", asset_path.display()))?;
-    Decoder::new(BufReader::new(file)).context("unsupported audio file")
+    let path = asset_path.to_path_buf();
+    catch_unwind(AssertUnwindSafe(|| {
+        let file =
+            File::open(&path).with_context(|| format!("unable to open {}", path.display()))?;
+        Decoder::new(BufReader::new(file)).context("unsupported audio file")
+    }))
+    .map_err(|_| anyhow::anyhow!("audio decoder crashed while opening {}", path.display()))?
 }
 
 fn soften_sample_edges(samples: &mut [f32], channels: u16, sample_rate: u32, fade_ms: f32) {
@@ -473,5 +544,64 @@ fn soften_sample_edges(samples: &mut [f32], channels: u16, sample_rate: u32, fad
             samples[start_base + channel] *= fade_in;
             samples[end_base + channel] *= fade_out;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct PanickingSource {
+        yielded: bool,
+    }
+
+    impl Iterator for PanickingSource {
+        type Item = i16;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            if self.yielded {
+                panic!("simulated decoder failure");
+            }
+            self.yielded = true;
+            Some(42)
+        }
+    }
+
+    impl Source for PanickingSource {
+        fn current_frame_len(&self) -> Option<usize> {
+            None
+        }
+
+        fn channels(&self) -> u16 {
+            1
+        }
+
+        fn sample_rate(&self) -> u32 {
+            44_100
+        }
+
+        fn total_duration(&self) -> Option<Duration> {
+            None
+        }
+    }
+
+    #[test]
+    fn streaming_decoder_panic_ends_source_without_escaping() {
+        let mut source = PanicSafeSource::new(PanickingSource { yielded: false });
+        assert_eq!(source.next(), Some(42));
+        assert_eq!(source.next(), None);
+        assert_eq!(source.next(), None);
+    }
+
+    #[test]
+    fn rapidly_switching_streams_keeps_audio_engine_alive() {
+        let Ok(mut audio) = AudioEngine::new() else {
+            return;
+        };
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/default-startup.wav");
+        for _ in 0..50 {
+            audio.play_file(&path).expect("test audio should stream");
+        }
+        audio.stop();
     }
 }
