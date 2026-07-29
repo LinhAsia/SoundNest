@@ -1351,6 +1351,7 @@ impl SoundFxApp {
         if open_sound {
             self.open_sound_from_library(sound.id);
         }
+        ui.advance_cursor_after_rect(row_outer_rect);
     }
 
     pub(super) fn draw_library_grid(&mut self, ui: &mut Ui) {

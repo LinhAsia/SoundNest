@@ -521,12 +521,12 @@ impl SoundFxApp {
             .ok()
             .flatten()
             .unwrap_or(false);
-        let pitch_capture_devices = list_capture_devices().unwrap_or_default();
-        let selected_pitch_input_device = pitch_capture_devices.first().cloned();
-        let record_capture_devices = pitch_capture_devices.clone();
-        let selected_record_input_device = record_capture_devices.first().cloned();
-        let stream_input_capture_devices = pitch_capture_devices.clone();
-        let selected_stream_input_device = stream_input_capture_devices.first().cloned();
+        let pitch_capture_devices = Vec::new();
+        let selected_pitch_input_device = None;
+        let record_capture_devices = Vec::new();
+        let selected_record_input_device = None;
+        let stream_input_capture_devices = Vec::new();
+        let selected_stream_input_device = None;
         let record_hotkeys = storage
             .load_record_hotkeys()
             .unwrap_or_default()
