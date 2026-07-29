@@ -85,7 +85,21 @@ impl SoundFxApp {
 
         match playback {
             Ok(()) => self.clear_status(),
-            Err(error) => self.set_error_status(error),
+            Err(error) => {
+                if let Some(preload_error) = self.audio_preload_failures.get(&asset_path) {
+                    self.set_error_status(format!(
+                        "Unable to load audio preview: {preload_error}"
+                    ));
+                    return;
+                }
+                self.schedule_audio_preload(asset_path.clone());
+                if self.audio_preload_inflight.contains(&asset_path) {
+                    self.pending_preview_after_preload = Some((sound.id, start_position_secs));
+                    self.status = Some(format!("Repairing preview for {}...", sound.name));
+                } else {
+                    self.set_error_status(error);
+                }
+            }
         }
     }
 
