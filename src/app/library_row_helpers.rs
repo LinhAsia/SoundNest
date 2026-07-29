@@ -46,9 +46,9 @@ impl SoundFxApp {
 
     pub(super) fn library_row_gap(&self) -> f32 {
         if self.library_row_thickness <= 2 {
-            10.0
+            8.0
         } else {
-            12.0
+            10.0
         }
     }
 
@@ -57,11 +57,11 @@ impl SoundFxApp {
             .library_row_thickness
             .clamp(LIBRARY_ROW_MIN_THICKNESS, LIBRARY_ROW_MAX_THICKNESS)
         {
-            1 => 72.0,
-            2 => 76.0,
-            3 => 80.0,
-            4 => 86.0,
-            _ => 92.0,
+            1 => 60.0,
+            2 => 64.0,
+            3 => 68.0,
+            4 => 74.0,
+            _ => 80.0,
         }
     }
 

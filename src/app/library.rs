@@ -380,78 +380,80 @@ impl SoundFxApp {
                 Frame::new()
                     .fill(fill)
                     .stroke(Stroke::new(1.0, stroke))
-                    .corner_radius(16.0)
-                    .inner_margin(Margin::symmetric(12, 10))
+                    .corner_radius(8.0)
+                    .inner_margin(Margin::symmetric(8, 5))
                     .show(ui, |ui| {
                         let mut delete_btn_response = None;
                         let mut rename_btn_response = None;
                         let mut import_btn_response = None;
                         let mut paste_btn_response = None;
                         ui.horizontal(|ui| {
-                            let icon_gap = 18.0;
+                            let icon_gap = 16.0;
                             if has_children {
                                 ui.label(Self::icon(
                                     if is_collapsed { 0xe5cc } else { 0xe5cf },
-                                    18.0,
+                                    16.0,
                                     folder_accent,
                                 ));
                             } else {
                                 ui.add_space(icon_gap);
                             }
-                            ui.add_space(8.0);
-                            ui.label(Self::icon(folder_icon_code, 18.0, folder_accent));
-                            ui.add_space(8.0);
-                            ui.vertical(|ui| {
-                                if is_editing {
-                                    let response = ui.add_sized(
-                                        [ui.available_width().max(120.0), 20.0],
-                                        egui::TextEdit::singleline(&mut self.folder_rename_name),
-                                    );
-                                    if response.lost_focus()
-                                        || (response.has_focus()
-                                            && ui
-                                                .input(|input| input.key_pressed(egui::Key::Enter)))
-                                    {
-                                        let new_name = self.folder_rename_name.trim().to_owned();
-                                        if !new_name.is_empty() {
-                                            *rename_commit = Some((folder.id, new_name));
-                                        }
-                                        *finish_editing = true;
+                            ui.add_space(6.0);
+                            ui.label(Self::icon(folder_icon_code, 16.0, folder_accent));
+                            ui.add_space(6.0);
+                            if is_editing {
+                                let response = ui.add_sized(
+                                    [220.0, 21.0],
+                                    egui::TextEdit::singleline(&mut self.folder_rename_name),
+                                );
+                                if response.lost_focus()
+                                    || (response.has_focus()
+                                        && ui.input(|input| input.key_pressed(egui::Key::Enter)))
+                                {
+                                    let new_name = self.folder_rename_name.trim().to_owned();
+                                    if !new_name.is_empty() {
+                                        *rename_commit = Some((folder.id, new_name));
                                     }
-                                } else {
-                                    ui.add(
-                                        egui::Label::new(
-                                            RichText::new(&folder.name)
-                                                .size(13.2)
-                                                .color(Self::strong_text_color())
-                                                .strong(),
-                                        )
-                                        .truncate(),
-                                    );
+                                    *finish_editing = true;
                                 }
-                                let desc = if subfolders_count > 0 && direct_count > 0 {
-                                    self.t("library.folder_info_mixed")
-                                        .replace("{folders}", &subfolders_count.to_string())
-                                        .replace("{direct}", &direct_count.to_string())
-                                        .replace("{total}", &total_count.to_string())
-                                } else if subfolders_count > 0 {
-                                    self.t("library.folder_info_folders_only")
-                                        .replace("{folders}", &subfolders_count.to_string())
-                                } else if direct_count > 0 {
-                                    self.t("library.folder_info_sounds")
-                                        .replace("{count}", &total_count.to_string())
-                                } else {
-                                    self.t("library.empty_folder")
-                                };
-                                ui.label(
+                            } else {
+                                ui.add_sized(
+                                    [220.0, 21.0],
+                                    egui::Label::new(
+                                        RichText::new(&folder.name)
+                                            .size(12.5)
+                                            .color(Self::strong_text_color())
+                                            .strong(),
+                                    )
+                                    .truncate(),
+                                );
+                            }
+                            let desc = if subfolders_count > 0 && direct_count > 0 {
+                                self.t("library.folder_info_mixed")
+                                    .replace("{folders}", &subfolders_count.to_string())
+                                    .replace("{direct}", &direct_count.to_string())
+                                    .replace("{total}", &total_count.to_string())
+                            } else if subfolders_count > 0 {
+                                self.t("library.folder_info_folders_only")
+                                    .replace("{folders}", &subfolders_count.to_string())
+                            } else if direct_count > 0 {
+                                self.t("library.folder_info_sounds")
+                                    .replace("{count}", &total_count.to_string())
+                            } else {
+                                self.t("library.empty_folder")
+                            };
+                            ui.add_sized(
+                                [150.0, 21.0],
+                                egui::Label::new(
                                     RichText::new(desc)
                                         .size(11.0)
                                         .color(Self::muted_text_color()),
-                                );
-                            });
+                                )
+                                .truncate(),
+                            );
                             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                                 let delete_btn =
-                                    Self::icon_action(ui, [36.0, 30.0], 0xe872, false, false);
+                                    Self::icon_action(ui, [30.0, 26.0], 0xe872, false, false);
                                 Self::decorate_button_response(ui, &delete_btn);
                                 if delete_btn.clicked() {
                                     *delete_folder_id = Some(folder.id);
@@ -459,7 +461,7 @@ impl SoundFxApp {
                                 delete_btn_response = Some(delete_btn);
                                 if !is_editing {
                                     let rename_btn =
-                                        Self::icon_action(ui, [36.0, 30.0], 0xe254, false, false);
+                                        Self::icon_action(ui, [30.0, 26.0], 0xe254, false, false);
                                     Self::decorate_button_response(ui, &rename_btn);
                                     if rename_btn.clicked() {
                                         *rename_folder_id = Some(folder.id);
@@ -472,16 +474,16 @@ impl SoundFxApp {
                                 {
                                     ui.add_space(6.0);
                                     let import_btn = ui.add_sized(
-                                        [102.0, 30.0],
+                                        [92.0, 26.0],
                                         Button::new(
                                             RichText::new(format!(
                                                 "+ {}",
                                                 self.t("library.import_sound_to_folder")
                                             ))
-                                            .size(11.5),
+                                            .size(10.8),
                                         )
                                         .fill(Color32::from_rgb(227, 82, 149))
-                                        .corner_radius(10.0),
+                                        .corner_radius(6.0),
                                     );
                                     Self::decorate_button_response(ui, &import_btn);
                                     if import_btn.clicked() {
@@ -492,14 +494,14 @@ impl SoundFxApp {
                                     let paste_btn = ui
                                         .add_enabled_ui(clipboard_paste_ready, |ui| {
                                             ui.add_sized(
-                                                [58.0, 30.0],
+                                                [52.0, 26.0],
                                                 Button::new(
                                                     RichText::new(self.t("common.paste"))
-                                                        .size(11.5),
+                                                        .size(10.8),
                                                 )
                                                 .fill(folder_accent)
                                                 .stroke(Stroke::new(1.0, folder_accent_soft))
-                                                .corner_radius(10.0),
+                                                .corner_radius(6.0),
                                             )
                                         })
                                         .inner;
@@ -750,10 +752,10 @@ impl SoundFxApp {
         let row = Frame::new()
             .fill(fill)
             .stroke(Stroke::new(1.0, stroke))
-            .corner_radius(16.0)
-            .inner_margin(Margin::symmetric(12, 10))
+            .corner_radius(8.0)
+            .inner_margin(Margin::symmetric(8, 6))
             .show(ui, |ui| {
-                ui.set_width(card_width - 24.0);
+                ui.set_width(card_width - 16.0);
                 ui.vertical(|ui| {
                     ui.horizontal(|ui| {
                         if has_children {
@@ -767,10 +769,10 @@ impl SoundFxApp {
                         }
                         ui.label(Self::icon(folder_icon_code, 16.0, card_accent));
                     });
-                    ui.add_space(6.0);
+                    ui.add_space(4.0);
                     if is_editing {
                         let response = ui.add_sized(
-                            [card_width - 24.0, 20.0],
+                            [card_width - 16.0, 20.0],
                             egui::TextEdit::singleline(&mut self.folder_rename_name),
                         );
                         if response.lost_focus()
@@ -813,17 +815,17 @@ impl SoundFxApp {
                             .size(11.0)
                             .color(Self::muted_text_color()),
                     );
-                    ui.add_space(8.0);
+                    ui.add_space(6.0);
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
-                        let rename_btn = Self::icon_action(ui, [36.0, 30.0], 0xe254, false, false);
+                        let rename_btn = Self::icon_action(ui, [30.0, 26.0], 0xe254, false, false);
                         Self::decorate_button_response(ui, &rename_btn);
                         if rename_btn.clicked() {
                             *rename_folder_id = Some(folder.id);
                         }
                         rename_btn_response = Some(rename_btn);
 
-                        let delete_btn = Self::icon_action(ui, [36.0, 30.0], 0xe872, false, false);
+                        let delete_btn = Self::icon_action(ui, [30.0, 26.0], 0xe872, false, false);
                         Self::decorate_button_response(ui, &delete_btn);
                         if delete_btn.clicked() {
                             *delete_folder_id = Some(folder.id);
@@ -2529,7 +2531,7 @@ impl SoundFxApp {
                                     ACTIVE_UI_REPAINT_MS,
                                 ));
                             }
-                            let row_height = self.library_list_row_height().max(108.0);
+                            let row_height = self.library_list_row_height();
                             let (row_rect, _) =
                                 ui.allocate_exact_size(vec2(row_width, row_height), Sense::hover());
                             let visible_row_rect = row_rect.intersect(ui.clip_rect());

@@ -70,11 +70,11 @@ impl SoundFxApp {
             .library_row_thickness
             .clamp(LIBRARY_ROW_MIN_THICKNESS, LIBRARY_ROW_MAX_THICKNESS)
         {
-            1 => 108.0,
-            2 => 116.0,
-            3 => 124.0,
-            4 => 134.0,
-            _ => 144.0,
+            1 => 80.0,
+            2 => 86.0,
+            3 => 92.0,
+            4 => 100.0,
+            _ => 108.0,
         }
     }
 
