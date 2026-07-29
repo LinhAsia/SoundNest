@@ -644,6 +644,7 @@ impl Storage {
         base_sound: &SoundEffect,
         clips: &[(SoundEffect, f32, f32, f32)],
         keep_old: bool,
+        output_name: &str,
     ) -> Result<SoundEffect> {
         let mixed_clips = Self::build_timeline_mixed_clips_at(root_dir, clips, true)?;
         let staging_path = root_dir
@@ -658,7 +659,7 @@ impl Storage {
         if keep_old {
             let import_result =
                 Self::import_sound_at(root_dir, &staging_path).map(|mut imported_sound| {
-                    imported_sound.name = committed_trimmed_sound_name(base_sound);
+                    imported_sound.name = output_name.to_owned();
                     imported_sound.folder_id = base_sound.folder_id;
                     imported_sound
                 });
@@ -666,7 +667,9 @@ impl Storage {
             return import_result;
         }
 
-        let target_file = sound_asset_file_name(&base_sound.name, base_sound.id, "wav");
+        let mut output_sound = base_sound.clone();
+        output_sound.name = output_name.to_owned();
+        let target_file = sound_asset_file_name(&output_sound.name, output_sound.id, "wav");
         let temp_path = root_dir
             .join("sounds")
             .join(format!("{}.timeline.tmp.wav", base_sound.id));
@@ -675,7 +678,7 @@ impl Storage {
         }
         fs::rename(&staging_path, &temp_path)
             .with_context(|| format!("unable to stage {}", temp_path.display()))?;
-        Self::finalize_rendered_sound_replacement(root_dir, base_sound, target_file, &temp_path)
+        Self::finalize_rendered_sound_replacement(root_dir, &output_sound, target_file, &temp_path)
     }
 
     pub fn export_timeline_mix_preview_at(

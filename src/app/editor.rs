@@ -4,6 +4,18 @@ use clipboard_win::Getter;
 
 const TRIM_HISTORY_LIMIT: usize = 128;
 
+fn next_default_sound_name<'a>(names: impl IntoIterator<Item = &'a str>) -> String {
+    let names = names.into_iter().collect::<Vec<_>>();
+    (1usize..)
+        .map(|index| format!("Sound {index}"))
+        .find(|candidate| {
+            names
+                .iter()
+                .all(|name| !name.eq_ignore_ascii_case(candidate))
+        })
+        .expect("unbounded sound numbering should always find a name")
+}
+
 impl SoundFxApp {
     pub(super) fn sync_editor_tags_input(&mut self) {
         let Some(index) = self.selected_sound_index() else {
@@ -1436,6 +1448,14 @@ impl SoundFxApp {
 
         let sound = self.sounds[index].clone();
         let timeline_clips = self.collect_trim_timeline_render_clips(sound_id);
+        let timeline_output_name = timeline_clips.as_ref().map(|_| {
+            let entered = self.trim_commit_output_name.trim();
+            if entered.is_empty() {
+                next_default_sound_name(self.sounds.iter().map(|sound| sound.name.as_str()))
+            } else {
+                entered.to_owned()
+            }
+        });
         if timeline_clips.is_some() {
             self.stop_preview();
         }
@@ -1444,7 +1464,13 @@ impl SoundFxApp {
         self.trim_commit_inflight.insert(sound_id);
         thread::spawn(move || {
             let result = if let Some(timeline_clips) = timeline_clips {
-                Storage::commit_timeline_mix_at(&root_dir, &sound, &timeline_clips, keep_old)
+                Storage::commit_timeline_mix_at(
+                    &root_dir,
+                    &sound,
+                    &timeline_clips,
+                    keep_old,
+                    timeline_output_name.as_deref().unwrap_or("Sound 1"),
+                )
             } else if keep_old {
                 Storage::duplicate_trimmed_sound_at(&root_dir, &sound)
             } else {
@@ -4115,6 +4141,7 @@ impl SoundFxApp {
         }
 
         if commit_trim_request {
+            self.trim_commit_output_name.clear();
             self.show_trim_commit_panel = true;
         }
         if open_spn_export_request {
@@ -4196,7 +4223,8 @@ impl SoundFxApp {
             });
 
         if save_mix_request {
-            self.start_trim_commit_job(ctx, true);
+            self.trim_commit_output_name.clear();
+            self.show_trim_commit_panel = true;
         }
     }
 
@@ -6419,8 +6447,25 @@ impl SoundFxApp {
         let mut close_request = false;
         let mut keep_old = false;
         let mut replace_current = false;
+        let timeline_mix = self
+            .timeline_mode_active_sound_id()
+            .and_then(|sound_id| self.collect_trim_timeline_render_clips(sound_id))
+            .is_some();
+        let automatic_name = timeline_mix.then(|| {
+            next_default_sound_name(self.sounds.iter().map(|sound| sound.name.as_str()))
+        });
+        let desired_size = if timeline_mix {
+            vec2(380.0, 250.0)
+        } else {
+            vec2(360.0, 180.0)
+        };
+        let minimum_size = if timeline_mix {
+            vec2(300.0, 220.0)
+        } else {
+            vec2(280.0, 160.0)
+        };
         let (_panel_bounds, panel_size, panel_pos) =
-            self.centered_modal_placement(ctx, vec2(360.0, 180.0), vec2(280.0, 160.0), 0.0);
+            self.centered_modal_placement(ctx, desired_size, minimum_size, 0.0);
 
         egui::Window::new("")
             .id(egui::Id::new("trim-commit-panel"))
@@ -6456,6 +6501,24 @@ impl SoundFxApp {
                 });
 
                 ui.add_space(14.0);
+                if timeline_mix {
+                    ui.label(
+                        RichText::new("Output name")
+                            .size(13.0)
+                            .color(Self::strong_text_color())
+                            .strong(),
+                    );
+                    ui.add_space(6.0);
+                    ui.add_sized(
+                        [ui.available_width(), 32.0],
+                        TextEdit::singleline(&mut self.trim_commit_output_name)
+                            .hint_text(format!(
+                                "Leave blank for {}",
+                                automatic_name.as_deref().unwrap_or("Sound 1")
+                            )),
+                    );
+                    ui.add_space(12.0);
+                }
                 ui.label(
                     RichText::new("Keep old file?")
                         .size(15.0)
@@ -6498,5 +6561,18 @@ impl SoundFxApp {
             self.show_trim_commit_panel = false;
             self.commit_selected_trimmed_sound(ctx);
         }
+    }
+}
+
+#[cfg(test)]
+mod timeline_name_tests {
+    use super::next_default_sound_name;
+
+    #[test]
+    fn default_timeline_name_uses_first_available_number() {
+        assert_eq!(
+            next_default_sound_name(["Sound 1", "other", "sound 2"]),
+            "Sound 3"
+        );
     }
 }
