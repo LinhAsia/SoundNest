@@ -797,7 +797,6 @@ impl SoundFxApp {
         if self.trim_timeline_clip_delete_animating.contains_key(&clip_id) {
             return false;
         }
-        self.stop_preview();
         self.trim_timeline_clip_delete_animating
             .insert(clip_id, Instant::now());
         ctx.request_repaint();
@@ -1267,15 +1266,37 @@ impl SoundFxApp {
     pub(super) fn poll_timeline_mix_jobs(&mut self, ctx: &Context) {
         while let Ok(msg) = self.timeline_mix_rx.try_recv() {
             match msg {
-                TimelineMixMessage::Ready { sound_id: _, preview_path, resume_secs: _ } => {
+                TimelineMixMessage::Ready { sound_id, preview_path, resume_secs } => {
                     self.pending_timeline_mix_restart = None;
                     if let Some(audio) = self.audio.as_mut() {
                         audio.evict_cached_audio(&preview_path);
                     }
-                    // ponytail: don't restart audio - current playback keeps running
-                    // uninterrupted. dirty=false so next Space press uses this new mix.
-                    self.trim_timeline_preview_path = Some(preview_path);
+                    let current_live_secs = self
+                        .audio
+                        .as_ref()
+                        .and_then(|audio| {
+                            self.trim_timeline_preview_path
+                                .as_ref()
+                                .and_then(|path| audio.playback_position_secs_for_file(path))
+                                .or_else(|| audio.playback_position_secs(sound_id))
+                        })
+                        .unwrap_or(resume_secs);
+                    let was_playing = self
+                        .audio
+                        .as_ref()
+                        .is_some_and(|audio| {
+                            self.trim_timeline_preview_path
+                                .as_ref()
+                                .is_some_and(|path| audio.is_playing_file(path))
+                                || audio.is_playing(sound_id)
+                        });
+                    self.trim_timeline_preview_path = Some(preview_path.clone());
                     self.trim_timeline_preview_dirty = false;
+                    if was_playing {
+                        if let Some(audio) = self.audio.as_mut() {
+                            let _ = audio.play_file_from(&preview_path, current_live_secs);
+                        }
+                    }
                     ctx.request_repaint();
                 }
                 TimelineMixMessage::Failed => {
@@ -5693,7 +5714,6 @@ impl SoundFxApp {
                         timeline_state_changed = true;
                     }
                 }
-                self.stop_preview();
             }
 
             let remove_row_rect = Rect::from_min_size(
