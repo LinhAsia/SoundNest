@@ -69,7 +69,7 @@ impl eframe::App for SoundFxApp {
             ctx.request_repaint_after(Duration::from_millis(JOB_POLL_REPAINT_MS));
         }
         if self.playback_needs_live_repaint() {
-            ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
+            ctx.request_repaint();
         }
 
         if self.download_was_running
