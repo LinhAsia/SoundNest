@@ -170,3 +170,12 @@ pub(crate) enum StreamDriverMessage {
     ProbeFinished(Result<bool, String>),
     Finished(Result<bool, String>),
 }
+
+pub(crate) enum TimelineMixMessage {
+    Ready {
+        sound_id: Uuid,
+        preview_path: PathBuf,
+        resume_secs: f32,
+    },
+    Failed,
+}

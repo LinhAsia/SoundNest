@@ -17,6 +17,7 @@ impl eframe::App for SoundFxApp {
         self.poll_processed_export_jobs(ctx);
         self.poll_trim_commit_jobs(ctx);
         self.poll_audio_preload_jobs(ctx);
+        self.poll_timeline_mix_jobs(ctx);
         self.poll_recording_review_jobs(ctx);
         self.poll_library_import_jobs(ctx);
         self.poll_normalize_jobs(ctx);

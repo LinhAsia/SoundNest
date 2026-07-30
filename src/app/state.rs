@@ -416,6 +416,9 @@ pub struct SoundFxApp {
     pub(super) audio_preload_failures: HashMap<PathBuf, String>,
     pub(super) audio_preload_tx: Sender<AudioPreloadMessage>,
     pub(super) audio_preload_rx: Receiver<AudioPreloadMessage>,
+    pub(super) timeline_mix_tx: Sender<TimelineMixMessage>,
+    pub(super) timeline_mix_rx: Receiver<TimelineMixMessage>,
+    pub(super) pending_timeline_mix_restart: Option<(Uuid, f32)>,
     pub(super) library_import_job: Option<ActiveLibraryImport>,
     pub(super) library_import_tx: Sender<LibraryImportMessage>,
     pub(super) library_import_rx: Receiver<LibraryImportMessage>,
@@ -492,6 +495,7 @@ impl SoundFxApp {
         let (processed_export_tx, processed_export_rx) = mpsc::channel();
         let (trim_commit_tx, trim_commit_rx) = mpsc::channel();
         let (audio_preload_tx, audio_preload_rx) = mpsc::channel();
+        let (timeline_mix_tx, timeline_mix_rx) = mpsc::channel();
         let (recording_review_tx, recording_review_rx) = mpsc::channel();
         let (library_import_tx, library_import_rx) = mpsc::channel();
         let (normalize_tx, normalize_rx) = mpsc::channel();
@@ -769,6 +773,9 @@ impl SoundFxApp {
             audio_preload_failures: HashMap::new(),
             audio_preload_tx,
             audio_preload_rx,
+            timeline_mix_tx,
+            timeline_mix_rx,
+            pending_timeline_mix_restart: None,
             library_import_job: None,
             library_import_tx,
             library_import_rx,

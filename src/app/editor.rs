@@ -1204,7 +1204,7 @@ impl SoundFxApp {
             return;
         };
         let fallback_playhead_secs = timeline_state.playhead_secs.max(0.0);
-        let (preview_active, was_paused, current_playhead_secs) = self
+        let current_playhead_secs = self
             .audio
             .as_ref()
             .map(|audio| {
@@ -1212,22 +1212,18 @@ impl SoundFxApp {
                     .trim_timeline_preview_path
                     .as_ref()
                     .is_some_and(|path| audio.is_playing_file(path));
-                let direct_sound_active = audio.is_playing(sound_id);
-                let active = preview_active || direct_sound_active;
-                let current_playhead_secs = if preview_active {
+                if preview_active {
                     self.trim_timeline_preview_path
                         .as_ref()
                         .and_then(|path| audio.playback_position_secs_for_file(path))
                         .unwrap_or(fallback_playhead_secs)
-                } else if direct_sound_active {
-                    audio.playback_position_secs(sound_id)
-                        .unwrap_or(fallback_playhead_secs)
+                } else if audio.is_playing(sound_id) {
+                    audio.playback_position_secs(sound_id).unwrap_or(fallback_playhead_secs)
                 } else {
                     fallback_playhead_secs
-                };
-                (active, active && audio.is_paused(), current_playhead_secs)
+                }
             })
-            .unwrap_or((false, false, fallback_playhead_secs));
+            .unwrap_or(fallback_playhead_secs);
 
         if let Some(state) = self.trim_timeline_state.as_mut()
             && state.sound_id == sound_id
@@ -1235,7 +1231,66 @@ impl SoundFxApp {
             state.playhead_secs = current_playhead_secs.max(0.0);
         }
         self.trim_timeline_preview_dirty = true;
+
+        // Capture what we need for background thread
+        let Some(index) = self.sounds.iter().position(|s| s.id == sound_id) else {
+            return;
+        };
+        let Some(clips) = self.collect_trim_timeline_render_clips(sound_id) else {
+            return;
+        };
+        let sound = self.sounds[index].clone();
+        let root_dir = self.storage.root_dir().to_path_buf();
+        let tx = self.timeline_mix_tx.clone();
+        let resume_secs = current_playhead_secs.max(0.0);
+
+        // Build mix in background; UI stays responsive
+        self.pending_timeline_mix_restart = Some((sound_id, resume_secs));
+        thread::spawn(move || {
+            match Storage::export_timeline_mix_preview_at(&root_dir, &sound, &clips) {
+                Ok(preview_path) => {
+                    let _ = tx.send(TimelineMixMessage::Ready { sound_id, preview_path, resume_secs });
+                }
+                Err(_) => {
+                    let _ = tx.send(TimelineMixMessage::Failed);
+                }
+            }
+        });
     }
+
+    pub(super) fn poll_timeline_mix_jobs(&mut self, ctx: &Context) {
+        while let Ok(msg) = self.timeline_mix_rx.try_recv() {
+            match msg {
+                TimelineMixMessage::Ready { sound_id, preview_path, resume_secs } => {
+                    self.pending_timeline_mix_restart = None;
+                    if let Some(audio) = self.audio.as_mut() {
+                        audio.evict_cached_audio(&preview_path);
+                    }
+                    let was_playing = self
+                        .audio
+                        .as_ref()
+                        .is_some_and(|audio| {
+                            self.trim_timeline_preview_path
+                                .as_ref()
+                                .is_some_and(|path| audio.is_playing_file(path))
+                                || audio.is_playing(sound_id)
+                        });
+                    self.trim_timeline_preview_path = Some(preview_path.clone());
+                    self.trim_timeline_preview_dirty = false;
+                    if was_playing {
+                        if let Some(audio) = self.audio.as_mut() {
+                            let _ = audio.play_file_from(&preview_path, resume_secs);
+                        }
+                    }
+                    ctx.request_repaint();
+                }
+                TimelineMixMessage::Failed => {
+                    self.pending_timeline_mix_restart = None;
+                }
+            }
+        }
+    }
+
 
     pub(super) fn handle_trim_timeline_hotkeys(&mut self, ctx: &Context) {
         const BASE_VISIBLE_SECS: f32 = 12.0;
