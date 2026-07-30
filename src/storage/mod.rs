@@ -629,7 +629,17 @@ impl Storage {
         clips
             .iter()
             .map(|(sound, start_secs, clip_start_secs, clip_end_secs)| {
-                Self::export_processed_sound_at(root_dir, sound).map(|path| MixedAudioClip {
+                let path = if sound.needs_processed_export() {
+                    let export_path = Self::processed_export_path(root_dir, sound);
+                    if export_path.exists() {
+                        export_path
+                    } else {
+                        Self::export_processed_sound_at(root_dir, sound)?
+                    }
+                } else {
+                    sound.playback_asset_path(root_dir)
+                };
+                Ok(MixedAudioClip {
                     path,
                     start_secs: (*start_secs - start_offset).max(0.0),
                     clip_start_secs: *clip_start_secs,
