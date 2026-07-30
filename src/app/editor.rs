@@ -5892,16 +5892,14 @@ impl SoundFxApp {
                         .ctx()
                         .data(|data| data.get_temp::<TrimTimelineClip>(left_edge_original_id))
                         .unwrap_or_else(|| clip.clone());
-                    if self.trim_timeline_resize_clip_edge_to_pointer(
+                    self.trim_timeline_resize_clip_edge_to_pointer(
                         sound_id,
                         row_index,
                         clip_index,
                         &original_clip,
                         pointer_time,
                         true,
-                    ) {
-                        timeline_state_changed = true;
-                    }
+                    );
                 }
                 if !clip_is_deleting
                     && right_edge_dragging
@@ -5914,16 +5912,14 @@ impl SoundFxApp {
                         .ctx()
                         .data(|data| data.get_temp::<TrimTimelineClip>(right_edge_original_id))
                         .unwrap_or_else(|| clip.clone());
-                    if self.trim_timeline_resize_clip_edge_to_pointer(
+                    self.trim_timeline_resize_clip_edge_to_pointer(
                         sound_id,
                         row_index,
                         clip_index,
                         &original_clip,
                         pointer_time,
                         false,
-                    ) {
-                        timeline_state_changed = true;
-                    }
+                    );
                 }
                 if !clip_is_deleting && selected_clip {
                     let playhead_time = timeline_playhead_secs.max(0.0);

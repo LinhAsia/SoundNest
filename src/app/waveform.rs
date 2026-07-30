@@ -184,15 +184,14 @@ impl SoundFxApp {
         clip_end_secs: f32,
         buckets: usize,
     ) -> Vec<f32> {
-        let preview = Self::trimmed_waveform_preview_from_samples(sound, samples);
-        if preview.is_empty() {
-            return preview;
+        if samples.is_empty() {
+            return Vec::new();
         }
 
-        let clip_duration = sound.trimmed_length().max(0.05);
-        let start_ratio = (clip_start_secs / clip_duration).clamp(0.0, 1.0);
-        let end_ratio = (clip_end_secs / clip_duration).clamp(start_ratio, 1.0);
-        Self::resample_timeline_waveform(&preview, start_ratio, end_ratio, buckets)
+        let total_duration = sound.safe_duration().max(0.05);
+        let start_ratio = (clip_start_secs / total_duration).clamp(0.0, 1.0);
+        let end_ratio = (clip_end_secs / total_duration).clamp(start_ratio, 1.0);
+        Self::resample_timeline_waveform(samples, start_ratio, end_ratio, buckets)
     }
 
     pub(super) fn compact_timeline_waveform(samples: &[f32], buckets: usize) -> Vec<f32> {
