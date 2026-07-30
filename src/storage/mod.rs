@@ -612,9 +612,6 @@ impl Storage {
         clips: &[(SoundEffect, f32, f32, f32)],
         trim_outer_silence: bool,
     ) -> Result<Vec<MixedAudioClip>> {
-        if clips.is_empty() {
-            bail!("timeline mix is empty");
-        }
 
         let start_offset = if trim_outer_silence {
             clips
