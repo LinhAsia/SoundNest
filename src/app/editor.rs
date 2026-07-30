@@ -662,7 +662,7 @@ impl SoundFxApp {
                     })
             })
             .collect::<Vec<_>>();
-        (!clips.is_empty()).then_some(clips)
+        Some(clips)
     }
 
     pub(super) fn finalize_pending_trim_timeline_drop(&mut self) -> bool {
@@ -1080,8 +1080,6 @@ impl SoundFxApp {
             return;
         };
         let Some(clips) = self.collect_trim_timeline_render_clips(sound_id) else {
-            let sound = self.sounds[index].clone();
-            self.preview_sound_from_position(sound_id, Some(start_secs.clamp(0.0, sound.trimmed_length())));
             return;
         };
         let sound = self.sounds[index].clone();
@@ -1238,10 +1236,6 @@ impl SoundFxApp {
             return;
         };
         let Some(clips) = self.collect_trim_timeline_render_clips(sound_id) else {
-            self.stop_preview();
-            self.trim_timeline_preview_path = None;
-            self.trim_timeline_preview_dirty = false;
-            self.pending_timeline_mix_restart = None;
             return;
         };
         let sound = self.sounds[index].clone();

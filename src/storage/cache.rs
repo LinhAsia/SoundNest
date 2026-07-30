@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, bail};
 use hound::{SampleFormat, WavSpec, WavWriter};
 use rodio::{Decoder, Source};
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::BufReader;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
@@ -192,7 +192,23 @@ pub(crate) fn write_mixed_wav(clips: &[MixedAudioClip], target_path: &Path) -> R
     const TARGET_CHANNELS: u16 = 2;
 
     if clips.is_empty() {
-        bail!("no clips to mix");
+        let total_frames = (60.0 * TARGET_SAMPLE_RATE as f32) as usize;
+        let mixed = vec![0i16; total_frames * TARGET_CHANNELS as usize];
+        let spec = WavSpec {
+            channels: TARGET_CHANNELS,
+            sample_rate: TARGET_SAMPLE_RATE,
+            bits_per_sample: 16,
+            sample_format: SampleFormat::Int,
+        };
+        if let Some(parent) = target_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let mut writer = WavWriter::create(target_path, spec)?;
+        for sample in mixed {
+            writer.write_sample(sample)?;
+        }
+        writer.finalize()?;
+        return Ok(());
     }
 
     let mut prepared = Vec::with_capacity(clips.len());
