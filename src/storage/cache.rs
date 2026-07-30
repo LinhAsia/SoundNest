@@ -72,9 +72,33 @@ pub(super) fn analyze_audio_file(path: &Path, buckets: usize) -> Result<AudioAna
     })
 }
 
+use std::sync::{Arc, Mutex, OnceLock};
+
+#[derive(Clone)]
+struct CachedAudioFile {
+    channels: u16,
+    sample_rate: u32,
+    samples: Arc<[f32]>,
+}
+
+fn get_audio_file_ram_cache() -> &'static Mutex<std::collections::HashMap<PathBuf, CachedAudioFile>> {
+    static CACHE: OnceLock<Mutex<std::collections::HashMap<PathBuf, CachedAudioFile>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
 fn decode_audio_file(path: &Path) -> Result<DecodedAudio> {
     let path_buf = path.to_path_buf();
-    catch_unwind(AssertUnwindSafe(|| -> Result<DecodedAudio> {
+    if let Ok(guard) = get_audio_file_ram_cache().lock() {
+        if let Some(cached) = guard.get(&path_buf) {
+            return Ok(DecodedAudio {
+                channels: cached.channels,
+                sample_rate: cached.sample_rate,
+                samples: cached.samples.as_ref().to_vec(),
+            });
+        }
+    }
+
+    let decoded = catch_unwind(AssertUnwindSafe(|| -> Result<DecodedAudio> {
         let decoder = open_decoder(&path_buf)?;
         let channels = decoder.channels();
         let sample_rate = decoder.sample_rate();
@@ -90,7 +114,20 @@ fn decode_audio_file(path: &Path) -> Result<DecodedAudio> {
             samples,
         })
     }))
-    .map_err(|_| anyhow::anyhow!("audio decoder crashed while reading {}", path_buf.display()))?
+    .map_err(|_| anyhow::anyhow!("audio decoder crashed while reading {}", path_buf.display()))??;
+
+    if let Ok(mut guard) = get_audio_file_ram_cache().lock() {
+        guard.insert(
+            path_buf,
+            CachedAudioFile {
+                channels: decoded.channels,
+                sample_rate: decoded.sample_rate,
+                samples: Arc::from(decoded.samples.clone()),
+            },
+        );
+    }
+
+    Ok(decoded)
 }
 
 pub(super) fn write_processed_wav(
