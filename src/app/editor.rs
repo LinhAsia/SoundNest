@@ -1235,15 +1235,6 @@ impl SoundFxApp {
             state.playhead_secs = current_playhead_secs.max(0.0);
         }
         self.trim_timeline_preview_dirty = true;
-        if !preview_active {
-            return;
-        }
-
-        self.stop_preview();
-        self.preview_timeline_mix_from_position(sound_id, current_playhead_secs.max(0.0));
-        if was_paused && let Some(audio) = self.audio.as_mut() {
-            audio.pause();
-        }
     }
 
     pub(super) fn handle_trim_timeline_hotkeys(&mut self, ctx: &Context) {
