@@ -1236,7 +1236,6 @@ impl SoundFxApp {
         }
         self.trim_timeline_preview_dirty = true;
         if !preview_active {
-            self.prepare_trim_timeline_preview_mix(sound_id);
             return;
         }
 
