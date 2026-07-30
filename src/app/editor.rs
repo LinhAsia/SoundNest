@@ -1152,6 +1152,11 @@ impl SoundFxApp {
     }
 
     fn sync_trim_timeline_playhead_from_audio(&mut self, sound_id: Uuid) {
+        // Don't update while a new mix is being built – the old sink is still playing
+        // so its position is meaningless for the new arrangement.
+        if self.pending_timeline_mix_restart.is_some() {
+            return;
+        }
         let Some(preview_path) = self.trim_timeline_preview_path.clone() else {
             return;
         };
@@ -5181,6 +5186,37 @@ impl SoundFxApp {
                 ui.add_space(6.0);
                 ui.add(egui::Spinner::new().size(14.0));
             }
+            ui.add_space(6.0);
+            let help = ui.add_sized(
+                [24.0, 24.0],
+                Button::new(Self::icon(0xe887, 16.0, Color32::from_rgb(214, 51, 132)))
+                    .fill(Self::surface_fill())
+                    .stroke(Stroke::new(1.0, Self::border_color()))
+                    .corner_radius(12.0),
+            );
+            if help.hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Help);
+            }
+            help.on_hover_ui_at_pointer(|ui| {
+                ui.set_max_width(280.0);
+                ui.label(
+                    RichText::new("Timeline mix shortcuts")
+                        .size(13.0)
+                        .color(Self::strong_text_color())
+                        .strong(),
+                );
+                ui.add_space(4.0);
+                ui.label("Space: play or pause");
+                ui.label("S: restart from beginning");
+                ui.label("A / D: pan timeline left or right");
+                ui.label("B: split selected clip at playhead");
+                ui.label("Delete: delete selected clip");
+                ui.label("Ctrl + C: copy selected clip");
+                ui.label("Ctrl + V: paste clip");
+                ui.label("Ctrl + Z: undo");
+                ui.label("Ctrl + Shift + Z: redo");
+                ui.label("Ctrl + mouse wheel: zoom");
+            });
             ui.add_space(10.0);
 
             let trim_left_button = ui

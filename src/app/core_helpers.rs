@@ -203,7 +203,9 @@ impl SoundFxApp {
             audio.stop();
         }
         self.finalize_close_cleanup(ctx);
-        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        // ponytail: background preload/decode threads may be running; process::exit is
+        // the only reliable way to close instantly without joining them.
+        std::process::exit(0);
     }
 
     pub(crate) fn stop_recording_for_close(&mut self, _ctx: &Context) {
