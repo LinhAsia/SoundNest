@@ -1174,6 +1174,27 @@ impl SoundFxApp {
         state.playhead_secs = played_secs.max(0.0);
     }
 
+    fn prepare_trim_timeline_preview_mix(&mut self, sound_id: Uuid) {
+        let Some(index) = self.sounds.iter().position(|sound| sound.id == sound_id) else {
+            return;
+        };
+        let Some(clips) = self.collect_trim_timeline_render_clips(sound_id) else {
+            return;
+        };
+        let sound = self.sounds[index].clone();
+        if let Ok(preview_path) = Storage::export_timeline_mix_preview_at(
+            self.storage.root_dir(),
+            &sound,
+            &clips,
+        ) {
+            if let Some(audio) = self.audio.as_mut() {
+                audio.evict_cached_audio(&preview_path);
+            }
+            self.trim_timeline_preview_path = Some(preview_path);
+            self.trim_timeline_preview_dirty = false;
+        }
+    }
+
     fn refresh_trim_timeline_preview_after_edit(&mut self, sound_id: Uuid) {
         let Some(timeline_state) = self
             .trim_timeline_state
@@ -1215,6 +1236,7 @@ impl SoundFxApp {
         }
         self.trim_timeline_preview_dirty = true;
         if !preview_active {
+            self.prepare_trim_timeline_preview_mix(sound_id);
             return;
         }
 
@@ -1232,6 +1254,62 @@ impl SoundFxApp {
         };
         if self.has_modal_panel() || self.show_record_review_panel {
             return;
+        }
+
+        if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Space)) {
+            let (is_playing, is_paused) = self
+                .audio
+                .as_ref()
+                .map(|audio| {
+                    let playing = self
+                        .trim_timeline_preview_path
+                        .as_ref()
+                        .is_some_and(|path| audio.is_playing_file(path))
+                        || audio.is_playing(sound_id);
+                    (playing, playing && audio.is_paused())
+                })
+                .unwrap_or((false, false));
+
+            let timeline_restart_secs = self
+                .trim_timeline_state
+                .as_ref()
+                .filter(|state| state.sound_id == sound_id)
+                .map(|state| {
+                    let total_duration = self.trim_timeline_total_duration(state);
+                    if state.playhead_secs >= total_duration - 0.05 {
+                        0.0
+                    } else {
+                        state.playhead_secs.max(0.0)
+                    }
+                })
+                .unwrap_or(0.0);
+            if is_playing && !is_paused {
+                if let Some(audio) = self.audio.as_mut() {
+                    audio.pause();
+                }
+            } else if is_playing && is_paused {
+                if self.trim_timeline_preview_dirty {
+                    self.stop_preview();
+                    self.preview_timeline_mix_from_position(sound_id, timeline_restart_secs);
+                } else if let Some(audio) = self.audio.as_mut() {
+                    audio.resume();
+                }
+            } else if self.timeline_mode_active_sound_id().is_some() {
+                if self.trim_timeline_preview_dirty {
+                    self.preview_timeline_mix_from_position(sound_id, timeline_restart_secs);
+                } else if let Some(path) = self.trim_timeline_preview_path.clone() {
+                    if let Some(audio) = self.audio.as_mut() {
+                        if let Err(_) = audio.play_file_from(&path, timeline_restart_secs) {
+                            self.preview_timeline_mix_from_position(sound_id, timeline_restart_secs);
+                        }
+                    } else {
+                        self.preview_timeline_mix_from_position(sound_id, timeline_restart_secs);
+                    }
+                } else {
+                    self.preview_timeline_mix_from_position(sound_id, timeline_restart_secs);
+                }
+            }
+            ctx.request_repaint();
         }
 
         let timeline_playhead_drag_active = ctx
