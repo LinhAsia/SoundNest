@@ -87,16 +87,22 @@ impl SoundFxApp {
     }
 
     pub(crate) fn schedule_audio_preload(&mut self, asset_path: PathBuf) {
-        if self
-            .audio
-            .as_ref()
-            .is_some_and(|audio| audio.has_cached_audio(&asset_path))
+        if self.audio_preload_queued.contains(&asset_path)
+            || self
+                .audio
+                .as_ref()
+                .is_some_and(|audio| audio.has_cached_audio(&asset_path))
             || self.audio_preload_inflight.contains(&asset_path)
             || self.audio_preload_failures.contains_key(&asset_path)
         {
             return;
         }
 
+        if self.audio_preload_inflight.len() >= 2 {
+            return;
+        }
+
+        self.audio_preload_queued.insert(asset_path.clone());
         self.audio_preload_inflight.insert(asset_path.clone());
         let tx = self.audio_preload_tx.clone();
         thread::spawn(move || {
