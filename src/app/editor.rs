@@ -1152,11 +1152,6 @@ impl SoundFxApp {
     }
 
     fn sync_trim_timeline_playhead_from_audio(&mut self, sound_id: Uuid) {
-        // Don't update while a new mix is being built – the old sink is still playing
-        // so its position is meaningless for the new arrangement.
-        if self.pending_timeline_mix_restart.is_some() {
-            return;
-        }
         let Some(preview_path) = self.trim_timeline_preview_path.clone() else {
             return;
         };
@@ -1266,37 +1261,15 @@ impl SoundFxApp {
     pub(super) fn poll_timeline_mix_jobs(&mut self, ctx: &Context) {
         while let Ok(msg) = self.timeline_mix_rx.try_recv() {
             match msg {
-                TimelineMixMessage::Ready { sound_id, preview_path, resume_secs } => {
+                TimelineMixMessage::Ready { sound_id: _, preview_path, resume_secs: _ } => {
                     self.pending_timeline_mix_restart = None;
                     if let Some(audio) = self.audio.as_mut() {
                         audio.evict_cached_audio(&preview_path);
                     }
-                    let current_live_secs = self
-                        .audio
-                        .as_ref()
-                        .and_then(|audio| {
-                            self.trim_timeline_preview_path
-                                .as_ref()
-                                .and_then(|path| audio.playback_position_secs_for_file(path))
-                                .or_else(|| audio.playback_position_secs(sound_id))
-                        })
-                        .unwrap_or(resume_secs);
-                    let was_playing = self
-                        .audio
-                        .as_ref()
-                        .is_some_and(|audio| {
-                            self.trim_timeline_preview_path
-                                .as_ref()
-                                .is_some_and(|path| audio.is_playing_file(path))
-                                || audio.is_playing(sound_id)
-                        });
-                    self.trim_timeline_preview_path = Some(preview_path.clone());
+                    // ponytail: don't restart audio - current playback keeps running
+                    // uninterrupted. dirty=false so next Space press uses this new mix.
+                    self.trim_timeline_preview_path = Some(preview_path);
                     self.trim_timeline_preview_dirty = false;
-                    if was_playing {
-                        if let Some(audio) = self.audio.as_mut() {
-                            let _ = audio.play_file_from(&preview_path, current_live_secs);
-                        }
-                    }
                     ctx.request_repaint();
                 }
                 TimelineMixMessage::Failed => {
