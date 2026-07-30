@@ -645,6 +645,7 @@ impl SoundFxApp {
         let clips = state
             .rows
             .iter()
+            .filter(|row| !row.muted)
             .flat_map(|row| row.clips.iter())
             .filter_map(|clip| {
                 self.sounds
@@ -796,6 +797,7 @@ impl SoundFxApp {
         if self.trim_timeline_clip_delete_animating.contains_key(&clip_id) {
             return false;
         }
+        self.stop_preview();
         self.trim_timeline_clip_delete_animating
             .insert(clip_id, Instant::now());
         ctx.request_repaint();
@@ -1237,6 +1239,10 @@ impl SoundFxApp {
             return;
         };
         let Some(clips) = self.collect_trim_timeline_render_clips(sound_id) else {
+            self.stop_preview();
+            self.trim_timeline_preview_path = None;
+            self.trim_timeline_preview_dirty = false;
+            self.pending_timeline_mix_restart = None;
             return;
         };
         let sound = self.sounds[index].clone();
@@ -5629,8 +5635,8 @@ impl SoundFxApp {
             let painter = viewport_painter.clone();
 
             let label_rect = Rect::from_min_max(
-                Pos2::new(row_rect.left() + 12.0, row_rect.top() + 12.0),
-                Pos2::new(row_rect.left() + 84.0, row_rect.bottom() - 12.0),
+                Pos2::new(row_rect.left() + 12.0, row_rect.top() + 6.0),
+                Pos2::new(row_rect.left() + 84.0, row_rect.top() + 20.0),
             );
             painter.text(
                 label_rect.left_top(),
@@ -5639,6 +5645,56 @@ impl SoundFxApp {
                 FontId::proportional(11.5),
                 Self::muted_text_color(),
             );
+
+            let row_is_muted = row.muted;
+            let mute_rect = Rect::from_min_size(
+                Pos2::new(row_rect.left() + 10.0, row_rect.top() + 22.0),
+                vec2(58.0, 20.0),
+            );
+            let mute_bg = if row_is_muted {
+                Color32::from_rgb(180, 40, 60)
+            } else {
+                Self::panel_fill()
+            };
+            painter.rect_filled(mute_rect, 6.0, mute_bg);
+            painter.rect_stroke(
+                mute_rect,
+                6.0,
+                Stroke::new(1.0, if row_is_muted { Color32::from_rgb(220, 60, 80) } else { Self::border_color() }),
+                StrokeKind::Outside,
+            );
+            let mute_icon = if row_is_muted { 0xe04f } else { 0xe050 };
+            painter.text(
+                Pos2::new(mute_rect.left() + 5.0, mute_rect.center().y),
+                Align2::LEFT_CENTER,
+                char::from_u32(mute_icon).unwrap_or('?').to_string(),
+                FontId::proportional(12.0),
+                if row_is_muted { Color32::WHITE } else { Self::muted_text_color() },
+            );
+            painter.text(
+                Pos2::new(mute_rect.left() + 20.0, mute_rect.center().y),
+                Align2::LEFT_CENTER,
+                if row_is_muted { "Muted" } else { "Mute" },
+                FontId::proportional(11.0),
+                if row_is_muted { Color32::WHITE } else { Self::muted_text_color() },
+            );
+            let mute_response = ui.interact(
+                mute_rect,
+                ui.id().with(("trim-mix-mute-row", sound_id, row_index)),
+                Sense::click(),
+            );
+            if mute_response.hovered() {
+                ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+            if mute_response.clicked() {
+                if let Some(state) = self.trim_timeline_state.as_mut() {
+                    if let Some(r) = state.rows.get_mut(row_index) {
+                        r.muted = !r.muted;
+                        timeline_state_changed = true;
+                    }
+                }
+                self.stop_preview();
+            }
 
             let remove_row_rect = Rect::from_min_size(
                 Pos2::new(row_rect.right() - 36.0, row_rect.center().y - 14.0),

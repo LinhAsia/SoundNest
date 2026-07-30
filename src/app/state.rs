@@ -146,6 +146,7 @@ pub(crate) struct TrimTimelineClip {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct TrimTimelineRow {
     pub(crate) clips: Vec<TrimTimelineClip>,
+    pub(crate) muted: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
