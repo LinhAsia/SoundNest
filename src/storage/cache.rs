@@ -156,6 +156,37 @@ pub(super) fn write_processed_wav(
     Ok(())
 }
 
+fn decode_audio_file_segment(
+    path: &Path,
+    start_secs: f32,
+    end_secs: f32,
+) -> Result<DecodedAudio> {
+    let path_buf = path.to_path_buf();
+    let start_secs = start_secs.max(0.0);
+    let duration_secs = (end_secs - start_secs).max(0.05);
+
+    catch_unwind(AssertUnwindSafe(|| -> Result<DecodedAudio> {
+        let decoder = open_decoder(&path_buf)?;
+        let channels = decoder.channels();
+        let sample_rate = decoder.sample_rate();
+        let segmented = decoder
+            .skip_duration(std::time::Duration::from_secs_f32(start_secs))
+            .take_duration(std::time::Duration::from_secs_f32(duration_secs));
+        let samples = segmented.convert_samples::<f32>().collect::<Vec<_>>();
+
+        if samples.is_empty() {
+            bail!("audio file segment is empty");
+        }
+
+        Ok(DecodedAudio {
+            channels,
+            sample_rate,
+            samples,
+        })
+    }))
+    .map_err(|_| anyhow::anyhow!("audio decoder crashed while reading {}", path_buf.display()))?
+}
+
 pub(crate) fn write_mixed_wav(clips: &[MixedAudioClip], target_path: &Path) -> Result<()> {
     const TARGET_SAMPLE_RATE: u32 = 44_100;
     const TARGET_CHANNELS: u16 = 2;
@@ -167,17 +198,11 @@ pub(crate) fn write_mixed_wav(clips: &[MixedAudioClip], target_path: &Path) -> R
     let mut prepared = Vec::with_capacity(clips.len());
     let mut total_frames = 0usize;
     for clip in clips {
-        let decoded = decode_audio_file(&clip.path)?;
+        let decoded = decode_audio_file_segment(&clip.path, clip.clip_start_secs, clip.clip_end_secs)?;
         let mut stereo = convert_to_stereo(&decoded.samples, decoded.channels.max(1));
         if decoded.sample_rate.max(1) != TARGET_SAMPLE_RATE {
             stereo = resample_stereo_linear(&stereo, decoded.sample_rate.max(1), TARGET_SAMPLE_RATE);
         }
-        stereo = slice_stereo_segment(
-            &stereo,
-            TARGET_SAMPLE_RATE,
-            clip.clip_start_secs,
-            clip.clip_end_secs,
-        );
         soften_sample_edges(&mut stereo, TARGET_CHANNELS, TARGET_SAMPLE_RATE, EXPORT_POP_FADE_MS);
         let frames = stereo.len() / TARGET_CHANNELS as usize;
         let start_frame = (clip.start_secs.max(0.0) * TARGET_SAMPLE_RATE as f32).round() as usize;

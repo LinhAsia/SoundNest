@@ -696,6 +696,16 @@ impl Storage {
         base_sound: &SoundEffect,
         clips: &[(SoundEffect, f32, f32, f32)],
     ) -> Result<PathBuf> {
+        if clips.len() == 1 {
+            let (sound, start_secs, clip_start, clip_end) = &clips[0];
+            if !sound.needs_processed_export()
+                && *start_secs <= 0.001
+                && *clip_start <= 0.001
+                && *clip_end >= sound.safe_duration() - 0.05
+            {
+                return Ok(sound.playback_asset_path(root_dir));
+            }
+        }
         let mixed_clips = Self::build_timeline_mixed_clips_at(root_dir, clips, false)?;
         let preview_path = root_dir
             .join("exports")
