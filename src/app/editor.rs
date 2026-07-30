@@ -1266,6 +1266,16 @@ impl SoundFxApp {
                     if let Some(audio) = self.audio.as_mut() {
                         audio.evict_cached_audio(&preview_path);
                     }
+                    let current_live_secs = self
+                        .audio
+                        .as_ref()
+                        .and_then(|audio| {
+                            self.trim_timeline_preview_path
+                                .as_ref()
+                                .and_then(|path| audio.playback_position_secs_for_file(path))
+                                .or_else(|| audio.playback_position_secs(sound_id))
+                        })
+                        .unwrap_or(resume_secs);
                     let was_playing = self
                         .audio
                         .as_ref()
@@ -1279,7 +1289,7 @@ impl SoundFxApp {
                     self.trim_timeline_preview_dirty = false;
                     if was_playing {
                         if let Some(audio) = self.audio.as_mut() {
-                            let _ = audio.play_file_from(&preview_path, resume_secs);
+                            let _ = audio.play_file_from(&preview_path, current_live_secs);
                         }
                     }
                     ctx.request_repaint();
@@ -5167,6 +5177,10 @@ impl SoundFxApp {
                     .color(Self::strong_text_color())
                     .strong(),
             );
+            if self.pending_timeline_mix_restart.is_some() {
+                ui.add_space(6.0);
+                ui.add(egui::Spinner::new().size(14.0));
+            }
             ui.add_space(10.0);
 
             let trim_left_button = ui
