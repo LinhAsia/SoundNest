@@ -193,6 +193,7 @@ impl SoundFxApp {
             snap_enabled: true,
             selected_clip_id: None,
             rows: Self::default_trim_timeline_rows(),
+            timeline_is_playing: false,
         }
     }
 
@@ -1260,30 +1261,20 @@ impl SoundFxApp {
     pub(super) fn poll_timeline_mix_jobs(&mut self, ctx: &Context) {
         while let Ok(msg) = self.timeline_mix_rx.try_recv() {
             match msg {
-                TimelineMixMessage::Ready { sound_id, preview_path, resume_secs } => {
+                TimelineMixMessage::Ready { sound_id: _, preview_path, resume_secs } => {
                     self.pending_timeline_mix_restart = None;
                     if let Some(audio) = self.audio.as_mut() {
                         audio.evict_cached_audio(&preview_path);
                     }
-                    let current_live_secs = self
-                        .audio
-                        .as_ref()
-                        .and_then(|audio| {
-                            self.trim_timeline_preview_path
-                                .as_ref()
-                                .and_then(|path| audio.playback_position_secs_for_file(path))
-                                .or_else(|| audio.playback_position_secs(sound_id))
-                        })
-                        .unwrap_or(resume_secs);
                     let was_playing = self
-                        .audio
+                        .trim_timeline_state
                         .as_ref()
-                        .is_some_and(|audio| {
-                            self.trim_timeline_preview_path
-                                .as_ref()
-                                .is_some_and(|path| audio.is_playing_file(path))
-                                || audio.is_playing(sound_id)
-                        });
+                        .is_some_and(|state| state.timeline_is_playing);
+                    let current_live_secs = self
+                        .trim_timeline_state
+                        .as_ref()
+                        .map(|state| state.playhead_secs)
+                        .unwrap_or(resume_secs);
                     self.trim_timeline_preview_path = Some(preview_path.clone());
                     self.trim_timeline_preview_dirty = false;
                     if was_playing {
@@ -1311,57 +1302,38 @@ impl SoundFxApp {
         }
 
         if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Space)) {
-            let (is_playing, is_paused) = self
-                .audio
-                .as_ref()
-                .map(|audio| {
-                    let playing = self
-                        .trim_timeline_preview_path
-                        .as_ref()
-                        .is_some_and(|path| audio.is_playing_file(path))
-                        || audio.is_playing(sound_id);
-                    (playing, playing && audio.is_paused())
-                })
-                .unwrap_or((false, false));
-
-            let timeline_restart_secs = self
+            let is_currently_playing = self
                 .trim_timeline_state
                 .as_ref()
-                .filter(|state| state.sound_id == sound_id)
-                .map(|state| {
-                    let total_duration = self.trim_timeline_total_duration(state);
-                    if state.playhead_secs >= total_duration - 0.05 {
-                        0.0
-                    } else {
-                        state.playhead_secs.max(0.0)
-                    }
-                })
-                .unwrap_or(0.0);
-            if is_playing && !is_paused {
+                .is_some_and(|state| state.timeline_is_playing);
+
+            if is_currently_playing {
+                if let Some(state) = self.trim_timeline_state.as_mut() {
+                    state.timeline_is_playing = false;
+                }
                 if let Some(audio) = self.audio.as_mut() {
                     audio.pause();
                 }
-            } else if is_playing && is_paused {
-                if self.trim_timeline_preview_dirty {
-                    self.stop_preview();
-                    self.preview_timeline_mix_from_position(sound_id, timeline_restart_secs);
-                } else if let Some(audio) = self.audio.as_mut() {
-                    audio.resume();
-                }
-            } else if self.timeline_mode_active_sound_id().is_some() {
-                if self.trim_timeline_preview_dirty {
-                    self.preview_timeline_mix_from_position(sound_id, timeline_restart_secs);
-                } else if let Some(path) = self.trim_timeline_preview_path.clone() {
-                    if let Some(audio) = self.audio.as_mut() {
-                        if let Err(_) = audio.play_file_from(&path, timeline_restart_secs) {
-                            self.preview_timeline_mix_from_position(sound_id, timeline_restart_secs);
+            } else {
+                let timeline_restart_secs = self
+                    .trim_timeline_state
+                    .as_ref()
+                    .filter(|state| state.sound_id == sound_id)
+                    .map(|state| {
+                        let total_duration = self.trim_timeline_total_duration(state);
+                        if state.playhead_secs >= total_duration - 0.05 {
+                            0.0
+                        } else {
+                            state.playhead_secs.max(0.0)
                         }
-                    } else {
-                        self.preview_timeline_mix_from_position(sound_id, timeline_restart_secs);
-                    }
-                } else {
-                    self.preview_timeline_mix_from_position(sound_id, timeline_restart_secs);
+                    })
+                    .unwrap_or(0.0);
+
+                if let Some(state) = self.trim_timeline_state.as_mut() {
+                    state.timeline_is_playing = true;
+                    state.playhead_secs = timeline_restart_secs;
                 }
+                self.preview_timeline_mix_from_position(sound_id, timeline_restart_secs);
             }
             ctx.request_repaint();
         }
@@ -1369,8 +1341,49 @@ impl SoundFxApp {
         let timeline_playhead_drag_active = ctx
             .data(|data| data.get_temp::<bool>(Self::trim_timeline_playhead_drag_id(sound_id)))
             .unwrap_or(false);
+
         if !timeline_playhead_drag_active {
-            self.sync_trim_timeline_playhead_from_audio(sound_id);
+            let is_playing = self
+                .trim_timeline_state
+                .as_ref()
+                .is_some_and(|state| state.timeline_is_playing);
+
+            if is_playing {
+                let dt = ctx.input(|input| input.stable_dt).clamp(0.001, 0.1);
+                let audio_pos = self.audio.as_ref().and_then(|audio| {
+                    self.trim_timeline_preview_path
+                        .as_ref()
+                        .and_then(|path| audio.playback_position_secs_for_file(path))
+                });
+
+                let total_duration = self
+                    .trim_timeline_state
+                    .as_ref()
+                    .map(|state| self.trim_timeline_total_duration(state))
+                    .unwrap_or(0.25);
+
+                if let Some(state) = self.trim_timeline_state.as_mut() {
+                    let mut next_pos = state.playhead_secs + dt;
+                    if let Some(apos) = audio_pos {
+                        if (apos - next_pos).abs() > 0.12 {
+                            next_pos = apos;
+                        }
+                    }
+                    if next_pos >= total_duration {
+                        state.playhead_secs = total_duration;
+                        state.timeline_is_playing = false;
+                    } else {
+                        state.playhead_secs = next_pos;
+                    }
+                }
+                if let Some(state) = self.trim_timeline_state.as_ref()
+                    && !state.timeline_is_playing
+                    && let Some(audio) = self.audio.as_mut()
+                {
+                    audio.stop();
+                }
+                ctx.request_repaint();
+            }
         }
         let selected_clip_active = self
             .trim_timeline_state
@@ -2000,6 +2013,13 @@ impl SoundFxApp {
             return true;
         }
         if self
+            .trim_timeline_state
+            .as_ref()
+            .is_some_and(|state| state.enabled && state.timeline_is_playing)
+        {
+            return true;
+        }
+        if self
             .trim_timeline_preview_path
             .as_ref()
             .is_some_and(|path| audio.is_playing_file(path) && !audio.is_paused())
@@ -2502,6 +2522,9 @@ impl SoundFxApp {
     pub(super) fn stop_preview(&mut self) {
         if let Some(audio) = self.audio.as_mut() {
             audio.stop();
+        }
+        if let Some(state) = self.trim_timeline_state.as_mut() {
+            state.timeline_is_playing = false;
         }
         self.myinstants_preview_audio_url = None;
         self.pending_preview_after_preload = None;

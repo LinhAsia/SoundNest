@@ -157,6 +157,7 @@ pub(crate) struct TrimTimelineState {
     pub(crate) snap_enabled: bool,
     pub(crate) selected_clip_id: Option<Uuid>,
     pub(crate) rows: Vec<TrimTimelineRow>,
+    pub(crate) timeline_is_playing: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
