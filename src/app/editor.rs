@@ -5772,23 +5772,31 @@ impl SoundFxApp {
                 && let Some(pointer) = timeline_click_response.interact_pointer_pos()
             {
                 ui.ctx().memory_mut(|memory| memory.stop_text_input());
-                let desired_secs = (view_start_secs
-                    + ((pointer.x - timeline_rect.left()) / timeline_rect.width()).clamp(0.0, 1.0)
-                        * visible_duration)
-                    .max(0.0);
-                let (secs, snapped_point) = Self::trim_timeline_snap_playhead(
-                    desired_secs,
-                    &timeline_snap_points,
-                    timeline_snap_enabled,
-                    snap_threshold_secs,
-                );
-                if let Some(snap_point) = snapped_point {
-                    let snap_ratio =
-                        ((snap_point - view_start_secs) / visible_duration).clamp(0.0, 1.0);
-                    global_snap_x = Some(shared_timeline_left + snap_ratio * shared_timeline_width);
+                let is_playing = self.audio.as_ref().is_some_and(|audio| {
+                    self.trim_timeline_preview_path
+                        .as_ref()
+                        .is_some_and(|path| audio.is_playing_file(path))
+                        && !audio.is_paused()
+                });
+                if !is_playing {
+                    let desired_secs = (view_start_secs
+                        + ((pointer.x - timeline_rect.left()) / timeline_rect.width()).clamp(0.0, 1.0)
+                            * visible_duration)
+                        .max(0.0);
+                    let (secs, snapped_point) = Self::trim_timeline_snap_playhead(
+                        desired_secs,
+                        &timeline_snap_points,
+                        timeline_snap_enabled,
+                        snap_threshold_secs,
+                    );
+                    if let Some(snap_point) = snapped_point {
+                        let snap_ratio =
+                            ((snap_point - view_start_secs) / visible_duration).clamp(0.0, 1.0);
+                        global_snap_x = Some(shared_timeline_left + snap_ratio * shared_timeline_width);
+                    }
+                    timeline_playhead_secs = secs;
+                    self.set_trim_timeline_playhead(sound_id, secs);
                 }
-                timeline_playhead_secs = secs;
-                self.set_trim_timeline_playhead(sound_id, secs);
             }
 
             for (clip_index, clip) in row.clips.iter().enumerate() {
@@ -6039,19 +6047,27 @@ impl SoundFxApp {
                     && clip_response.clicked()
                 {
                     ui.ctx().memory_mut(|memory| memory.stop_text_input());
-                    let pointer_time = clip_response
-                        .interact_pointer_pos()
-                        .map(|pointer| {
-                            view_start_secs
-                                + ((pointer.x - timeline_rect.left()) / timeline_rect.width())
-                                    .clamp(0.0, 1.0)
-                                    * visible_duration
-                        })
-                        .unwrap_or(clip.start_secs);
-                    timeline_playhead_secs = pointer_time;
-                    self.set_trim_timeline_playhead(sound_id, pointer_time);
                     if let Some(state) = self.trim_timeline_state.as_mut() {
                         state.selected_clip_id = Some(clip.id);
+                    }
+                    let is_playing = self.audio.as_ref().is_some_and(|audio| {
+                        self.trim_timeline_preview_path
+                            .as_ref()
+                            .is_some_and(|path| audio.is_playing_file(path))
+                            && !audio.is_paused()
+                    });
+                    if !is_playing {
+                        let pointer_time = clip_response
+                            .interact_pointer_pos()
+                            .map(|pointer| {
+                                view_start_secs
+                                    + ((pointer.x - timeline_rect.left()) / timeline_rect.width())
+                                        .clamp(0.0, 1.0)
+                                        * visible_duration
+                            })
+                            .unwrap_or(clip.start_secs);
+                        timeline_playhead_secs = pointer_time;
+                        self.set_trim_timeline_playhead(sound_id, pointer_time);
                     }
                 }
                 if !clip_is_deleting
