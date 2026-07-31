@@ -5491,13 +5491,22 @@ impl SoundFxApp {
             + workspace_padding_secs;
         let max_view_start_secs = (workspace_duration - visible_duration).max(0.0);
         view_start_secs = view_start_secs.clamp(0.0, max_view_start_secs);
-        let view_end_secs = view_start_secs + visible_duration;
+        let mut view_end_secs = view_start_secs + visible_duration;
         let shared_timeline_left = viewport_rect.left() + 92.0;
         let shared_timeline_right = viewport_rect.right() - 46.0;
         let shared_timeline_width = (shared_timeline_right - shared_timeline_left).max(1.0);
         let snap_threshold_secs = ((visible_duration / shared_timeline_width) * 18.0).clamp(0.08, 1.0);
         let mut global_snap_x = None;
         let mut timeline_playhead_secs = state_snapshot.playhead_secs.max(0.0);
+        if state_snapshot.timeline_is_playing {
+            if timeline_playhead_secs >= view_end_secs - 0.05 {
+                view_start_secs = timeline_playhead_secs;
+                view_end_secs = view_start_secs + visible_duration;
+            } else if timeline_playhead_secs < view_start_secs {
+                view_start_secs = timeline_playhead_secs;
+                view_end_secs = view_start_secs + visible_duration;
+            }
+        }
         let timeline_playhead_drag_id = Self::trim_timeline_playhead_drag_id(sound_id);
         let timeline_snap_points = Self::trim_timeline_collect_snap_points(&state_snapshot.rows, None);
         let timeline_snap_enabled = state_snapshot.snap_enabled;
@@ -5948,10 +5957,18 @@ impl SoundFxApp {
                     Self::border_color()
                 }
                 .linear_multiply(1.0 - delete_progress.unwrap_or(0.0) * 0.3);
-                let title_color = Self::strong_text_color()
-                    .linear_multiply(1.0 - delete_progress.unwrap_or(0.0) * 0.35);
-                let waveform_color = Color32::from_rgb(241, 78, 162)
-                    .linear_multiply(1.0 - delete_progress.unwrap_or(0.0) * 0.2);
+                let title_color = if row_is_muted {
+                    Color32::from_rgba_premultiplied(100, 95, 105, 120)
+                } else {
+                    Self::strong_text_color()
+                }
+                .linear_multiply(1.0 - delete_progress.unwrap_or(0.0) * 0.35);
+                let waveform_color = if row_is_muted {
+                    Color32::from_rgba_premultiplied(45, 40, 48, 60)
+                } else {
+                    Color32::from_rgb(241, 78, 162)
+                }
+                .linear_multiply(1.0 - delete_progress.unwrap_or(0.0) * 0.2);
 
                 painter.rect_filled(
                     rendered_clip_rect,
