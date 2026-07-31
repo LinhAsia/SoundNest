@@ -1203,33 +1203,7 @@ impl SoundFxApp {
         else {
             return;
         };
-        let fallback_playhead_secs = timeline_state.playhead_secs.max(0.0);
-        let current_playhead_secs = self
-            .audio
-            .as_ref()
-            .map(|audio| {
-                let preview_active = self
-                    .trim_timeline_preview_path
-                    .as_ref()
-                    .is_some_and(|path| audio.is_playing_file(path));
-                if preview_active {
-                    self.trim_timeline_preview_path
-                        .as_ref()
-                        .and_then(|path| audio.playback_position_secs_for_file(path))
-                        .unwrap_or(fallback_playhead_secs)
-                } else if audio.is_playing(sound_id) {
-                    audio.playback_position_secs(sound_id).unwrap_or(fallback_playhead_secs)
-                } else {
-                    fallback_playhead_secs
-                }
-            })
-            .unwrap_or(fallback_playhead_secs);
-
-        if let Some(state) = self.trim_timeline_state.as_mut()
-            && state.sound_id == sound_id
-        {
-            state.playhead_secs = current_playhead_secs.max(0.0);
-        }
+        let current_playhead_secs = timeline_state.playhead_secs.max(0.0);
         self.trim_timeline_preview_dirty = true;
 
         // Capture what we need for background thread
@@ -5773,11 +5747,23 @@ impl SoundFxApp {
             let row_hovered = ctx
                 .input(|input| input.pointer.hover_pos())
                 .is_some_and(|pointer| timeline_rect.contains(pointer));
+            let track_bg = if row_is_muted {
+                Color32::from_rgb(18, 18, 22)
+            } else {
+                Self::input_fill()
+            };
             painter.rect_filled(
                 timeline_rect,
                 timeline_radius,
-                Self::input_fill(),
+                track_bg,
             );
+            if row_is_muted {
+                painter.rect_filled(
+                    row_rect,
+                    0.0,
+                    Color32::from_rgba_premultiplied(0, 0, 0, 110),
+                );
+            }
             if row_hovered && pending_drag_sound.is_some() {
                 painter.rect_stroke(
                     timeline_rect,
