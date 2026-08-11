@@ -260,12 +260,14 @@ impl SoundFxApp {
         }
 
         let panel_width = ui.available_width().max(160.0);
-        let columns = if panel_width >= 520.0 {
+        let columns = if panel_width >= 620.0 {
+            7
+        } else if panel_width >= 480.0 {
+            6
+        } else if panel_width >= 300.0 {
             4
-        } else if panel_width >= 340.0 {
-            3
         } else {
-            2
+            3
         };
         let column_gap = 8.0;
         let cell_width = ((panel_width - 14.0 - column_gap * (columns - 1) as f32)
