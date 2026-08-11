@@ -169,7 +169,7 @@ impl SoundFxApp {
         deduped
     }
 
-    pub(super) fn tag_chip_button(ui: &mut Ui, label: &str, active: bool) -> egui::Response {
+    fn tag_chip<'a>(label: &'a str, active: bool) -> Button<'a> {
         let fill = if active {
             Color32::from_rgb(227, 82, 149)
         } else if Self::dark_theme_enabled() {
@@ -189,12 +189,25 @@ impl SoundFxApp {
         } else {
             Self::strong_text_color()
         };
-        let response = ui.add(
-            Button::new(RichText::new(label).size(11.5).color(text_color))
-                .fill(fill)
-                .stroke(Stroke::new(1.0, stroke))
-                .corner_radius(999.0),
-        );
+        Button::new(RichText::new(label).size(11.5).color(text_color))
+            .fill(fill)
+            .stroke(Stroke::new(1.0, stroke))
+            .corner_radius(999.0)
+    }
+
+    pub(super) fn tag_chip_button(ui: &mut Ui, label: &str, active: bool) -> egui::Response {
+        let response = ui.add(Self::tag_chip(label, active));
+        Self::decorate_button_response(ui, &response);
+        response
+    }
+
+    fn tag_chip_button_sized(
+        ui: &mut Ui,
+        label: &str,
+        active: bool,
+        size: Vec2,
+    ) -> egui::Response {
+        let response = ui.add_sized(size, Self::tag_chip(label, active));
         Self::decorate_button_response(ui, &response);
         response
     }
@@ -246,38 +259,73 @@ impl SoundFxApp {
             return;
         }
 
+        let panel_width = ui.available_width().max(160.0);
+        let columns = if panel_width >= 520.0 {
+            4
+        } else if panel_width >= 340.0 {
+            3
+        } else {
+            2
+        };
+        let column_gap = 8.0;
+        let cell_width = ((panel_width - 14.0 - column_gap * (columns - 1) as f32)
+            / columns as f32)
+            .max(64.0);
+        let item_count = tags.len() + 1;
+        let row_count = item_count.div_ceil(columns);
+        let all_label = self.t("library.tag_all");
+
         ScrollArea::vertical()
             .id_salt("library-tag-filter-scroll")
             .max_height(176.0)
             .auto_shrink([false, true])
-            .show(ui, |ui| {
-                ui.set_min_width(ui.available_width());
-                ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
-                    if Self::tag_chip_button(
-                        ui,
-                        &self.t("library.tag_all"),
-                        active_filters.is_empty(),
-                    )
-                    .clicked()
-                    {
-                        self.library_audio_tag_filters.clear();
-                    }
+            .show_rows(ui, 32.0, row_count, |ui, row_range| {
+                ui.set_min_width(panel_width);
+                for row in row_range {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = column_gap;
+                        for column in 0..columns {
+                            let item_index = row * columns + column;
+                            if item_index >= item_count {
+                                break;
+                            }
+                            if item_index == 0 {
+                                if Self::tag_chip_button_sized(
+                                    ui,
+                                    &all_label,
+                                    active_filters.is_empty(),
+                                    vec2(cell_width, 24.0),
+                                )
+                                .clicked()
+                                {
+                                    self.library_audio_tag_filters.clear();
+                                }
+                                continue;
+                            }
 
-                    for tag in tags {
-                        let active = active_filters
-                            .iter()
-                            .any(|value| value.eq_ignore_ascii_case(&tag));
-                        if Self::tag_chip_button(ui, &tag, active).clicked() {
-                            if active {
-                                self.library_audio_tag_filters
-                                    .retain(|value| !value.eq_ignore_ascii_case(&tag));
-                            } else {
-                                self.library_audio_tag_filters.push(tag);
+                            let tag = &tags[item_index - 1];
+                            let active = active_filters
+                                .iter()
+                                .any(|value| value.eq_ignore_ascii_case(tag));
+                            if Self::tag_chip_button_sized(
+                                ui,
+                                tag,
+                                active,
+                                vec2(cell_width, 24.0),
+                            )
+                            .clicked()
+                            {
+                                if active {
+                                    self.library_audio_tag_filters
+                                        .retain(|value| !value.eq_ignore_ascii_case(tag));
+                                } else {
+                                    self.library_audio_tag_filters.push(tag.clone());
+                                }
                             }
                         }
-                    }
-                });
+                    });
+                    ui.add_space(8.0);
+                }
             });
     }
 
