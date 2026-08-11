@@ -6294,7 +6294,9 @@ impl SoundFxApp {
                     volume_line_rect,
                     ui.id().with(("trim-mix-volume", sound_id, clip.id)),
                     Sense::drag(),
-                );
+                )
+                .on_hover_text("Drag up to increase volume, down to decrease");
+                let volume_adjusting = volume_response.hovered() || volume_response.dragged();
                 if (clip_response.hovered() || volume_response.dragged()) && !clip_is_deleting {
                     painter.line_segment(
                         [
@@ -6311,11 +6313,13 @@ impl SoundFxApp {
                         / rendered_clip_rect.height().max(1.0)
                         * 5.0)
                         .clamp(0.0, 5.0);
-                    let selected_ids = if selected_clip && !state_snapshot.selected_clip_ids.is_empty() {
-                        state_snapshot.selected_clip_ids.clone()
-                    } else {
-                        HashSet::from([clip.id])
-                    };
+                    let selected_ids = self
+                        .trim_timeline_state
+                        .as_ref()
+                        .filter(|state| state.selected_clip_ids.contains(&clip.id))
+                        .map(|state| state.selected_clip_ids.clone())
+                        .filter(|selected| !selected.is_empty())
+                        .unwrap_or_else(|| HashSet::from([clip.id]));
                     if let Some(state) = self.trim_timeline_state.as_mut() {
                         for target in state.rows.iter_mut().flat_map(|row| row.clips.iter_mut()) {
                             if selected_ids.contains(&target.id) {
@@ -6339,7 +6343,9 @@ impl SoundFxApp {
                     && right_button_down
                     && hover_pos.is_some_and(|pointer| clip_hit_rect.contains(pointer));
 
-                if edge_dragging || left_edge_response.hovered() || right_edge_response.hovered() {
+                if volume_adjusting {
+                    ctx.set_cursor_icon(egui::CursorIcon::ResizeVertical);
+                } else if edge_dragging || left_edge_response.hovered() || right_edge_response.hovered() {
                     ctx.set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
                 } else if clip_response.dragged_by(egui::PointerButton::Primary) {
                     ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
