@@ -1,8 +1,8 @@
 use super::*;
 
 impl SoundFxApp {
-    pub(super) fn active_audio_tag_filter(&self) -> Option<&str> {
-        self.library_audio_tag_filter.as_deref()
+    pub(super) fn active_audio_tag_filters(&self) -> &[String] {
+        &self.library_audio_tag_filters
     }
 
     pub(super) fn mark_sound_copied(&mut self, ctx: &Context, sound_id: Uuid) {
@@ -122,29 +122,20 @@ impl SoundFxApp {
         tags.join(", ")
     }
 
-    pub(super) fn sound_tag_matches_filter(tags: &[String], filter: Option<&str>) -> bool {
-        match filter {
-            Some(filter) => tags.iter().any(|tag| tag.eq_ignore_ascii_case(filter)),
-            None => true,
-        }
-    }
-
-    pub(super) fn has_sound_tag(&self, tag: &str) -> bool {
-        self.sounds.iter().any(|sound| {
-            sound
-                .tags
-                .iter()
-                .any(|sound_tag| sound_tag.eq_ignore_ascii_case(tag))
+    pub(super) fn sound_tag_matches_filters(tags: &[String], filters: &[String]) -> bool {
+        filters.iter().all(|filter| {
+            tags.iter()
+                .any(|tag| tag.eq_ignore_ascii_case(filter))
         })
     }
 
     pub(super) fn reconcile_library_audio_tag_filter(&mut self) {
-        let Some(active_filter) = self.library_audio_tag_filter.as_deref() else {
-            return;
-        };
-        if !self.has_sound_tag(active_filter) {
-            self.library_audio_tag_filter = None;
-        }
+        let available = self.distinct_sound_tags();
+        self.library_audio_tag_filters.retain(|active| {
+            available
+                .iter()
+                .any(|tag| tag.eq_ignore_ascii_case(active))
+        });
     }
 
     pub(super) fn library_sound_query_matches(sound: &SoundEffect, query: &str) -> bool {
@@ -209,16 +200,10 @@ impl SoundFxApp {
     }
 
     fn library_tag_toggle_label(&self) -> String {
-        let active_tag_count = usize::from(self.library_audio_tag_filter.is_some());
         if self.library_audio_tags_expanded {
             format!(
                 "{} Hide Tags",
                 Self::icon(0xe5ce, 13.0, Self::strong_text_color()).text()
-            )
-        } else if active_tag_count > 0 {
-            format!(
-                "{} Tags ({active_tag_count})",
-                Self::icon(0xe5cf, 13.0, Self::strong_text_color()).text()
             )
         } else {
             format!(
@@ -230,7 +215,25 @@ impl SoundFxApp {
 
     pub(super) fn draw_library_tag_toggle(&mut self, ui: &mut Ui) {
         let toggle_label = self.library_tag_toggle_label();
-        if Self::tag_chip_button(ui, &toggle_label, self.library_audio_tags_expanded).clicked() {
+        let selected_count = self.library_audio_tag_filters.len();
+        let response = Self::tag_chip_button(
+            ui,
+            &toggle_label,
+            self.library_audio_tags_expanded || selected_count > 0,
+        );
+        if selected_count > 0 {
+            let badge_center = Pos2::new(response.rect.right() - 2.0, response.rect.top() + 2.0);
+            ui.painter()
+                .circle_filled(badge_center, 8.0, Color32::from_rgb(247, 191, 64));
+            ui.painter().text(
+                badge_center,
+                Align2::CENTER_CENTER,
+                selected_count,
+                FontId::proportional(10.0),
+                Color32::from_rgb(55, 39, 8),
+            );
+        }
+        if response.clicked() {
             self.library_audio_tags_expanded = !self.library_audio_tags_expanded;
         }
     }
@@ -238,26 +241,44 @@ impl SoundFxApp {
     pub(super) fn draw_library_tag_filter_row(&mut self, ui: &mut Ui) {
         self.reconcile_library_audio_tag_filter();
         let tags = self.distinct_sound_tags();
-        let active_filter = self.library_audio_tag_filter.clone();
+        let active_filters = self.library_audio_tag_filters.clone();
         if !self.library_audio_tags_expanded || tags.is_empty() {
             return;
         }
 
-        ui.add_space(8.0);
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
-            let all_active = active_filter.is_none();
-            if Self::tag_chip_button(ui, &self.t("library.tag_all"), all_active).clicked() {
-                self.library_audio_tag_filter = None;
-            }
+        ScrollArea::vertical()
+            .id_salt("library-tag-filter-scroll")
+            .max_height(176.0)
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
+                    if Self::tag_chip_button(
+                        ui,
+                        &self.t("library.tag_all"),
+                        active_filters.is_empty(),
+                    )
+                    .clicked()
+                    {
+                        self.library_audio_tag_filters.clear();
+                    }
 
-            for tag in tags {
-                let active = active_filter.as_deref().is_some_and(|value| value == tag);
-                if Self::tag_chip_button(ui, &tag, active).clicked() {
-                    self.library_audio_tag_filter = if active { None } else { Some(tag) };
-                }
-            }
-        });
+                    for tag in tags {
+                        let active = active_filters
+                            .iter()
+                            .any(|value| value.eq_ignore_ascii_case(&tag));
+                        if Self::tag_chip_button(ui, &tag, active).clicked() {
+                            if active {
+                                self.library_audio_tag_filters
+                                    .retain(|value| !value.eq_ignore_ascii_case(&tag));
+                            } else {
+                                self.library_audio_tag_filters.push(tag);
+                            }
+                        }
+                    }
+                });
+            });
     }
 
     pub(super) fn draw_sound_tag_picker(
@@ -298,5 +319,25 @@ impl SoundFxApp {
             tags.push(normalized);
         }
         *input = Self::join_tags(&tags);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tag_filter_requires_every_selected_tag() {
+        let tags = vec!["meme".to_owned(), "short".to_owned(), "funny".to_owned()];
+
+        assert!(SoundFxApp::sound_tag_matches_filters(&tags, &[]));
+        assert!(SoundFxApp::sound_tag_matches_filters(
+            &tags,
+            &["MEME".to_owned(), "short".to_owned()]
+        ));
+        assert!(!SoundFxApp::sound_tag_matches_filters(
+            &tags,
+            &["meme".to_owned(), "music".to_owned()]
+        ));
     }
 }

@@ -73,16 +73,18 @@ impl SoundFxApp {
         include_descendants: bool,
     ) -> Vec<usize> {
         let normalized_query = self.library_audio_query.trim().to_ascii_lowercase();
-        let active_tag_filter = self
-            .active_audio_tag_filter()
-            .map(|value| value.to_ascii_lowercase());
+        let active_tag_filters = self
+            .active_audio_tag_filters()
+            .iter()
+            .map(|value| value.to_ascii_lowercase())
+            .collect::<Vec<_>>();
         let cache_key = format!(
             "folder:{:?}|desc:{}|import:{:?}|favorites:{}|tag:{:?}|query:{}|len:{}",
             folder_id,
             include_descendants,
             self.folder_import_select_mode,
             self.library_favorites_only_audio,
-            active_tag_filter,
+            active_tag_filters,
             normalized_query,
             self.sounds.len()
         );
@@ -125,7 +127,7 @@ impl SoundFxApp {
             {
                 continue;
             }
-            if !Self::sound_tag_matches_filter(&sound.tags, active_tag_filter.as_deref()) {
+            if !Self::sound_tag_matches_filters(&sound.tags, &active_tag_filters) {
                 continue;
             }
             if self.library_favorites_only_audio && !sound.favorite {
@@ -156,7 +158,7 @@ impl SoundFxApp {
         } else {
             folder_id.map(|root_id| HashSet::from([root_id]))
         };
-        let active_tag_filter = self.active_audio_tag_filter();
+        let active_tag_filters = self.active_audio_tag_filters();
         let filtered = self
             .sounds
             .iter()
@@ -172,7 +174,7 @@ impl SoundFxApp {
                 }
             })
             .filter(|sound| Self::library_sound_query_matches(sound, &self.library_audio_query))
-            .filter(|sound| Self::sound_tag_matches_filter(&sound.tags, active_tag_filter))
+            .filter(|sound| Self::sound_tag_matches_filters(&sound.tags, active_tag_filters))
             .filter(|sound| !self.library_favorites_only_audio || sound.favorite)
             .cloned()
             .collect::<Vec<_>>();
@@ -182,7 +184,7 @@ impl SoundFxApp {
     }
 
     pub(super) fn direct_sounds_for_folder(&self, folder_id: Option<Uuid>) -> Vec<SoundEffect> {
-        let active_tag_filter = self.active_audio_tag_filter();
+        let active_tag_filters = self.active_audio_tag_filters();
         let filtered = self
             .sounds
             .iter()
@@ -194,7 +196,7 @@ impl SoundFxApp {
                 }
             })
             .filter(|sound| Self::library_sound_query_matches(sound, &self.library_audio_query))
-            .filter(|sound| Self::sound_tag_matches_filter(&sound.tags, active_tag_filter))
+            .filter(|sound| Self::sound_tag_matches_filters(&sound.tags, active_tag_filters))
             .filter(|sound| !self.library_favorites_only_audio || sound.favorite)
             .cloned()
             .collect::<Vec<_>>();

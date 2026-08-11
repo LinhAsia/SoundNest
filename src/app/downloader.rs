@@ -151,7 +151,7 @@ impl SoundFxApp {
                 self.folder_import_select_mode = None;
                 self.selected = Some(sound.id);
                 self.library_audio_query.clear();
-                self.library_audio_tag_filter = None;
+                self.library_audio_tag_filters.clear();
                 self.library_favorites_only_audio = false;
                 self.sounds.insert(0, sound);
                 self.save_now();

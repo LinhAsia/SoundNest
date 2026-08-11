@@ -322,7 +322,7 @@ impl SoundFxApp {
                                 self.selected = Some(sound.id);
                                 self.sounds.insert(0, sound);
                             }
-                            self.library_audio_tag_filter = None;
+                            self.library_audio_tag_filters.clear();
                             self.library_current_folder = target_folder_id;
                             self.save_now();
                             self.status = Some(format!("Imported {imported_count} sound(s)"));

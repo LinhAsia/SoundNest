@@ -1403,7 +1403,7 @@ impl SoundFxApp {
                         self.folder_import_animating.clear();
                         self.folder_import_select_mode = None;
                         self.library_audio_query.clear();
-                        self.library_audio_tag_filter = None;
+                        self.library_audio_tag_filters.clear();
                         self.mark_dirty(ui.ctx());
                     }
                 }

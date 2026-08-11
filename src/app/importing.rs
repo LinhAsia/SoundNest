@@ -88,7 +88,7 @@ impl SoundFxApp {
             self.sounds.insert(0, sound);
         }
 
-        self.library_audio_tag_filter = None;
+        self.library_audio_tag_filters.clear();
         if target_folder_id.is_some() {
             self.library_current_folder = target_folder_id;
         }
