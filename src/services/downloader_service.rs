@@ -7,7 +7,7 @@ use std::io::{Read, Write};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
@@ -268,9 +268,11 @@ fn run_download_job(
     ensure_ffmpeg_installed(state, bin_dir, cancel_requested)?;
     ensure_not_cancelled(cancel_requested)?;
 
-    update_state(state, "deno", Some(0.0), None);
-    ensure_deno_installed(state, bin_dir, cancel_requested)?;
-    ensure_not_cancelled(cancel_requested)?;
+    if url.contains("youtube.com") || url.contains("youtu.be") {
+        update_state(state, "deno", Some(0.0), None);
+        ensure_deno_installed(state, bin_dir, cancel_requested)?;
+        ensure_not_cancelled(cancel_requested)?;
+    }
 
     update_state(state, "Download", None, None);
     let ytdlp_exe = bin_dir.join("yt-dlp.exe");
@@ -283,6 +285,14 @@ fn run_download_job(
         bin_dir.to_string_lossy().to_string(),
         "--newline".to_owned(),
         "--no-playlist".to_owned(),
+        "--socket-timeout".to_owned(),
+        "15".to_owned(),
+        "--retries".to_owned(),
+        "3".to_owned(),
+        "--fragment-retries".to_owned(),
+        "3".to_owned(),
+        "--concurrent-fragments".to_owned(),
+        "4".to_owned(),
         "--windows-filenames".to_owned(),
         "--force-overwrites".to_owned(),
         "--print".to_owned(),
@@ -291,7 +301,7 @@ fn run_download_job(
         "--audio-format".to_owned(),
         "mp3".to_owned(),
         "--audio-quality".to_owned(),
-        "0".to_owned(),
+        "192K".to_owned(),
         "-o".to_owned(),
         output_template.to_string_lossy().to_string(),
     ];
@@ -335,7 +345,9 @@ fn run_ytdlp_download_attempt(
     active_process_id: &Arc<Mutex<Option<u32>>>,
 ) -> Result<PathBuf> {
     let mut cmd = Command::new(&ytdlp_exe);
-    cmd.args(args);
+    cmd.args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     #[cfg(windows)]
     cmd.creation_flags(0x08000000);
 
@@ -523,7 +535,7 @@ fn ensure_ytdlp_installed(
     cancel_requested: &Arc<AtomicBool>,
 ) -> Result<()> {
     let ytdlp_path = bin_dir.join("yt-dlp.exe");
-    if ytdlp_path.exists() && validate_tool(&ytdlp_path, "--version").is_ok() {
+    if ytdlp_path.exists() {
         update_state(state, "yt-dlp ready", Some(1.0), None);
         return Ok(());
     }
@@ -584,8 +596,6 @@ fn ensure_ffmpeg_installed(
     if ffmpeg_path.exists()
         && ffprobe_path.exists()
         && marker_path.exists()
-        && validate_tool(&ffmpeg_path, "-version").is_ok()
-        && validate_tool(&ffprobe_path, "-version").is_ok()
     {
         update_state(state, "ffmpeg ready", Some(1.0), None);
         return Ok(());
@@ -621,7 +631,7 @@ fn ensure_deno_installed(
     cancel_requested: &Arc<AtomicBool>,
 ) -> Result<()> {
     let deno_path = bin_dir.join("deno.exe");
-    if deno_path.exists() && validate_tool(&deno_path, "--version").is_ok() {
+    if deno_path.exists() {
         update_state(state, "deno ready", Some(1.0), None);
         return Ok(());
     }

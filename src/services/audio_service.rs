@@ -13,14 +13,19 @@ use std::time::Duration;
 use uuid::Uuid;
 
 pub fn calculate_normalization_gain(asset_path: &Path) -> Result<f32> {
-    let (_channels, _sample_rate, samples) = decode_audio_file(asset_path)?;
-    if samples.is_empty() {
+    let mut sample_count = 0u64;
+    let mut sum_squares = 0.0f64;
+    let mut max_peak = 0.0f32;
+    for sample in PanicSafeSource::new(open_audio_decoder(asset_path)?).convert_samples::<f32>() {
+        sample_count += 1;
+        sum_squares += (sample as f64) * (sample as f64);
+        max_peak = max_peak.max(sample.abs());
+    }
+    if sample_count == 0 {
         bail!("audio file is empty");
     }
 
-    let mean_square =
-        samples.iter().map(|&sample| sample * sample).sum::<f32>() / samples.len() as f32;
-    let current_rms = mean_square.sqrt();
+    let current_rms = (sum_squares / sample_count as f64).sqrt() as f32;
 
     if current_rms < 0.00001 {
         return Ok(1.0);
@@ -30,14 +35,6 @@ pub fn calculate_normalization_gain(asset_path: &Path) -> Result<f32> {
     let mut gain = target_rms / current_rms;
 
     // Prevent massive clipping distortion on transient effects
-    let mut max_peak = 0.0f32;
-    for &s in &samples {
-        let abs = s.abs();
-        if abs > max_peak {
-            max_peak = abs;
-        }
-    }
-
     if max_peak > 0.0 {
         let peak_with_gain = max_peak * gain;
         let safety_max = 29000.0 / 32768.0; // Matches audiobookmaker safety max (~0.885)
@@ -605,5 +602,12 @@ mod tests {
             audio.play_file(&path).expect("test audio should stream");
         }
         audio.stop();
+    }
+
+    #[test]
+    fn normalization_streams_audio_without_buffering_the_file() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/default-startup.wav");
+        let gain = calculate_normalization_gain(&path).expect("test audio should normalize");
+        assert!(gain.is_finite() && gain > 0.0);
     }
 }
