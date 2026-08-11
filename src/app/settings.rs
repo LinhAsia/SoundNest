@@ -420,8 +420,6 @@ impl SoundFxApp {
         let mut animation_changed = false;
         let mut install_stream_driver = false;
         let mut uninstall_stream_driver = false;
-        let available_languages = self.localization.available_languages();
-        let mut selected_language = self.localization.current_code().to_owned();
         let (_panel_bounds, panel_size, panel_pos) =
             self.centered_modal_placement(ctx, vec2(520.0, 700.0), vec2(320.0, 360.0), 0.0);
 
@@ -459,27 +457,6 @@ impl SoundFxApp {
                 });
 
                 ui.add_space(14.0);
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(self.t("settings.language"))
-                            .size(12.5)
-                            .color(Self::muted_text_color()),
-                    );
-                    Self::with_dark_combo_visuals(ui, |ui| {
-                        ComboBox::from_id_salt("settings-language")
-                            .width(140.0)
-                            .selected_text(
-                                RichText::new(self.localization.current_name())
-                                    .color(Self::strong_text_color()),
-                            )
-                            .show_ui(ui, |ui| {
-                                for (code, name) in &available_languages {
-                                    ui.selectable_value(&mut selected_language, code.clone(), name);
-                                }
-                            });
-                    });
-                });
-                ui.add_space(12.0);
                 Frame::new()
                     .fill(Self::surface_fill())
                     .stroke(Stroke::new(1.0, Self::border_color()))
@@ -615,12 +592,6 @@ impl SoundFxApp {
                 self.startup.duration_sec = 0.0;
                 self.startup_sound_played = true;
             }
-        }
-        if selected_language != self.localization.current_code() {
-            self.localization.set_current_code(&selected_language);
-            let _ = self
-                .storage
-                .save_language_code(self.localization.current_code());
         }
         if install_stream_driver {
             self.start_stream_driver_install(ctx);

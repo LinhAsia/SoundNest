@@ -14,7 +14,8 @@ struct LocaleFile {
 
 #[derive(Clone, Debug, Deserialize)]
 struct LocaleDefinition {
-    name: String,
+    #[serde(rename = "name")]
+    _name: String,
     #[serde(flatten)]
     strings: BTreeMap<String, String>,
 }
@@ -65,21 +66,6 @@ impl Localization {
 
     pub fn current_code(&self) -> &str {
         &self.current_code
-    }
-
-    pub fn current_name(&self) -> String {
-        self.languages
-            .get(&self.current_code)
-            .or_else(|| self.languages.get(&self.default_code))
-            .map(|language| language.name.clone())
-            .unwrap_or_else(|| self.current_code.clone())
-    }
-
-    pub fn available_languages(&self) -> Vec<(String, String)> {
-        self.languages
-            .iter()
-            .map(|(code, language)| (code.clone(), language.name.clone()))
-            .collect()
     }
 
     pub fn set_current_code(&mut self, code: &str) {

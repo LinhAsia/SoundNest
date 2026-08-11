@@ -185,7 +185,7 @@ impl SoundFxApp {
         let downloader_snapshot = self.downloader.snapshot();
         let download_titlebar_active = downloader_snapshot.running && !self.show_download_panel;
         ui.horizontal(|ui| {
-            let drag_width = (ui.available_width() - 668.0).max(180.0);
+            let drag_width = (ui.available_width() - 718.0).max(180.0);
             ui.allocate_ui_with_layout(
                     vec2(drag_width, 44.0),
                     egui::Layout::left_to_right(Align::Center),
@@ -303,6 +303,25 @@ impl SoundFxApp {
                     if self.settings_startup_candidate.is_none() {
                         self.settings_startup_candidate = self.selected;
                     }
+                }
+
+                let language_response = ui.add_sized(
+                    [42.0, 30.0],
+                    Self::titlebar_button(
+                        RichText::new(self.localization.current_code().to_uppercase()).size(11.5),
+                        false,
+                        false,
+                    ),
+                );
+                Self::decorate_button_response(ui, &language_response);
+                if language_response.clicked() {
+                    let language_code = if self.localization.current_code() == "en" {
+                        "vi"
+                    } else {
+                        "en"
+                    };
+                    self.localization.set_current_code(language_code);
+                    let _ = self.storage.save_language_code(language_code);
                 }
 
                 if Self::icon_titlebar(ui, [42.0, 30.0], 0xe061, false, false).clicked() {
