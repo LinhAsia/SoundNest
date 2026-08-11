@@ -62,7 +62,7 @@ impl SoundFxApp {
         };
 
         match self.copy_sound_file_to_clipboard(&self.sounds[index]) {
-            Ok(()) => self.clear_status(),
+            Ok(()) => self.status = Some(self.t("library.copied_to_clipboard")),
             Err(error) => self.set_error_status(error),
         }
     }
@@ -1151,29 +1151,6 @@ impl SoundFxApp {
         }
     }
 
-    fn sync_trim_timeline_playhead_from_audio(&mut self, sound_id: Uuid) {
-        let Some(preview_path) = self.trim_timeline_preview_path.clone() else {
-            return;
-        };
-        let Some(audio) = self.audio.as_ref() else {
-            return;
-        };
-        if !audio.is_playing_file(&preview_path) || audio.is_paused() {
-            return;
-        }
-        let Some(played_secs) = audio.playback_position_secs_for_file(&preview_path) else {
-            return;
-        };
-        let Some(state) = self
-            .trim_timeline_state
-            .as_mut()
-            .filter(|state| state.sound_id == sound_id)
-        else {
-            return;
-        };
-        state.playhead_secs = played_secs.max(0.0);
-    }
-
     fn prepare_trim_timeline_preview_mix(&mut self, sound_id: Uuid) {
         let Some(index) = self.sounds.iter().position(|sound| sound.id == sound_id) else {
             return;
@@ -1323,31 +1300,31 @@ impl SoundFxApp {
                 .is_some_and(|state| state.timeline_is_playing);
 
             if is_playing {
-                let dt = ctx.input(|input| input.stable_dt).clamp(0.001, 0.1);
+                let preview_ready = !self.trim_timeline_preview_dirty
+                    && self.pending_timeline_mix_restart.is_none();
                 let audio_pos = self.audio.as_ref().and_then(|audio| {
                     self.trim_timeline_preview_path
                         .as_ref()
                         .and_then(|path| audio.playback_position_secs_for_file(path))
                 });
-
                 let total_duration = self
                     .trim_timeline_state
                     .as_ref()
                     .map(|state| self.trim_timeline_total_duration(state))
                     .unwrap_or(0.25);
 
-                if let Some(state) = self.trim_timeline_state.as_mut() {
-                    let mut next_pos = state.playhead_secs + dt;
-                    if let Some(apos) = audio_pos {
-                        if (apos - next_pos).abs() > 0.12 {
-                            next_pos = apos;
-                        }
-                    }
-                    if next_pos >= total_duration {
+                if let Some(state) = self.trim_timeline_state.as_mut()
+                    && let Some(audio_pos) = audio_pos
+                {
+                    state.playhead_secs = audio_pos.clamp(0.0, total_duration);
+                    if state.playhead_secs >= total_duration - 0.001 {
                         state.playhead_secs = total_duration;
                         state.timeline_is_playing = false;
-                    } else {
-                        state.playhead_secs = next_pos;
+                    }
+                } else if preview_ready && self.trim_timeline_preview_path.is_some() {
+                    if let Some(state) = self.trim_timeline_state.as_mut() {
+                        state.playhead_secs = total_duration;
+                        state.timeline_is_playing = false;
                     }
                 }
                 if let Some(state) = self.trim_timeline_state.as_ref()
@@ -1356,7 +1333,7 @@ impl SoundFxApp {
                 {
                     audio.stop();
                 }
-                ctx.request_repaint();
+                ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
             }
         }
         let selected_clip_active = self
@@ -2878,6 +2855,7 @@ impl SoundFxApp {
                             });
                             ui.add_space(12.0);
                             ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 8.0;
                                 ui.label(
                                     RichText::new(&effects_label)
                                         .size(12.0)
@@ -2947,9 +2925,6 @@ impl SoundFxApp {
                                     draft.sound.echo_enabled = !draft.sound.echo_enabled;
                                     changed = true;
                                 }
-                            });
-                            ui.horizontal(|ui| {
-                                ui.add_space(54.0);
                                 let underwater = ui
                                     .add_sized(
                                         [98.0, 30.0],
@@ -3559,8 +3534,8 @@ impl SoundFxApp {
             .inner_margin(Margin::same(14))
             .show(ui, |ui| {
                 let sound = &mut self.sounds[index];
-                let controls_width = 52.0 + 52.0 + 52.0 + 64.0 + 64.0 + 36.0;
                 let row_gap = 8.0;
+                let controls_width = 52.0 * 5.0 + row_gap * 4.0;
                 let back_button_width = if self.editing_from_folder.is_some() {
                     42.0 + 8.0
                 } else {
@@ -3605,11 +3580,12 @@ impl SoundFxApp {
                         vec2(controls_width, 34.0),
                         egui::Layout::right_to_left(Align::Center),
                         |ui| {
+                            ui.spacing_mut().item_spacing.x = row_gap;
                             if Self::icon_action(ui, [52.0, 34.0], 0xe872, false, false).clicked() {
                                 delete_request = true;
                             }
                             let spn = ui.add_sized(
-                                [64.0, 34.0],
+                                [52.0, 34.0],
                                 Self::action_button(RichText::new("SPN").size(12.0), false, false),
                             );
                             Self::decorate_button_response(ui, &spn);
@@ -3619,7 +3595,7 @@ impl SoundFxApp {
                             if Self::icon_action(ui, [52.0, 34.0], 0xe14e, false, false).clicked() {
                                 commit_trim_request = true;
                             }
-                            if Self::icon_action(ui, [64.0, 34.0], 0xe14d, false, false).clicked() {
+                            if Self::icon_action(ui, [52.0, 34.0], 0xe14d, false, false).clicked() {
                                 copy_request = true;
                             }
                             if Self::icon_action(ui, [52.0, 34.0], 0xe2c8, false, false).clicked() {

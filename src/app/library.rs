@@ -1450,7 +1450,7 @@ impl SoundFxApp {
                     .inner_margin(Margin::symmetric(12, 8))
                     .show(ui, |ui| {
                         ui.set_width(260.0);
-                        ui.horizontal(|ui| {
+                        ui.with_layout(egui::Layout::left_to_right(Align::Center), |ui| {
                             if self.library_tab == LibraryTab::Sounds {
                                 self.draw_library_tag_toggle(ui);
                                 ui.add_space(8.0);

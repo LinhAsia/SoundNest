@@ -195,33 +195,6 @@ impl SoundFxApp {
             .is_some_and(|pos| response.rect.contains(pos));
         if pointer_over {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-            Self::paint_hover_button_notes(
-                ui.painter(),
-                response.rect,
-                ui.input(|input| input.time) as f32,
-            );
-        }
-    }
-
-    pub(super) fn paint_hover_button_notes(painter: &egui::Painter, rect: Rect, time: f32) {
-        let anchor = Pos2::new(rect.right() - 10.0, rect.top() - 4.0);
-        for (index, (dx, dy, scale, phase)) in [
-            (-2.0, 2.0, 0.34, 0.0),
-            (10.0, -6.0, 0.28, 0.8),
-            (18.0, 6.0, 0.24, 1.4),
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            let drift = (time * 2.8 + phase).sin() * 3.0;
-            let rise = (time * 2.0 + phase).cos() * 2.0 - index as f32 * 2.5;
-            Self::paint_music_note(
-                painter,
-                Pos2::new(anchor.x + dx + drift, anchor.y + dy + rise),
-                scale,
-                (time * 1.3 + phase).sin() * 0.16,
-                Color32::from_rgba_premultiplied(229, 85, 149, 188),
-            );
         }
     }
 }
