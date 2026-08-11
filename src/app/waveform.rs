@@ -23,7 +23,7 @@ impl SoundFxApp {
         Self::scale_waveform_for_volume(self.raw_sound_waveform_samples(sound), sound.volume)
     }
 
-    fn raw_sound_waveform_samples(&self, sound: &SoundEffect) -> Vec<f32> {
+    pub(super) fn raw_sound_waveform_samples(&self, sound: &SoundEffect) -> Vec<f32> {
         let samples = if sound.music_only
             && let Some(path) = sound.music_asset_path(self.storage.root_dir())
             && path.exists()
@@ -41,7 +41,7 @@ impl SoundFxApp {
         samples
     }
 
-    fn scale_waveform_for_volume(mut samples: Vec<f32>, volume: f32) -> Vec<f32> {
+    pub(super) fn scale_waveform_for_volume(mut samples: Vec<f32>, volume: f32) -> Vec<f32> {
         let volume = volume.clamp(0.0, 5.0);
         samples
             .iter_mut()

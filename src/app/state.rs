@@ -135,12 +135,61 @@ pub(crate) struct TrimSnapshot {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub(crate) struct TimelineClipAudioSettings {
+    pub(crate) volume: f32,
+    pub(crate) speed: f32,
+    pub(crate) reverb_enabled: bool,
+    pub(crate) telephone_enabled: bool,
+    pub(crate) distortion_enabled: bool,
+    pub(crate) echo_enabled: bool,
+    pub(crate) underwater_enabled: bool,
+    pub(crate) robot_enabled: bool,
+    pub(crate) pitch_shift_enabled: bool,
+    pub(crate) pitch_shift_semitones: f32,
+}
+
+impl Default for TimelineClipAudioSettings {
+    fn default() -> Self {
+        Self {
+            volume: 1.0,
+            speed: 1.0,
+            reverb_enabled: false,
+            telephone_enabled: false,
+            distortion_enabled: false,
+            echo_enabled: false,
+            underwater_enabled: false,
+            robot_enabled: false,
+            pitch_shift_enabled: false,
+            pitch_shift_semitones: 0.0,
+        }
+    }
+}
+
+impl TimelineClipAudioSettings {
+    pub(crate) fn from_sound(sound: &SoundEffect) -> Self {
+        Self {
+            volume: sound.volume,
+            speed: sound.speed,
+            reverb_enabled: sound.reverb_enabled,
+            telephone_enabled: sound.telephone_enabled,
+            distortion_enabled: sound.distortion_enabled,
+            echo_enabled: sound.echo_enabled,
+            underwater_enabled: sound.underwater_enabled,
+            robot_enabled: sound.robot_enabled,
+            pitch_shift_enabled: sound.pitch_shift_enabled,
+            pitch_shift_semitones: sound.pitch_shift_semitones,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct TrimTimelineClip {
     pub(crate) id: Uuid,
     pub(crate) source_sound_id: Uuid,
     pub(crate) start_secs: f32,
     pub(crate) clip_start_secs: f32,
     pub(crate) clip_end_secs: f32,
+    pub(crate) audio: TimelineClipAudioSettings,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -171,6 +220,7 @@ pub(crate) struct TrimTimelineClipboardClip {
     pub(crate) source_sound_id: Uuid,
     pub(crate) clip_start_secs: f32,
     pub(crate) clip_end_secs: f32,
+    pub(crate) audio: TimelineClipAudioSettings,
 }
 
 #[derive(Clone, Debug)]
@@ -277,6 +327,7 @@ pub struct SoundFxApp {
     pub(super) trim_timeline_state: Option<TrimTimelineState>,
     pub(super) trim_timeline_drop_target: Option<TrimTimelineDropTarget>,
     pub(super) trim_timeline_preview_path: Option<PathBuf>,
+    pub(super) trim_timeline_preview_start_secs: f32,
     pub(super) trim_timeline_preview_dirty: bool,
     pub(super) trim_timeline_clip_delete_animating: HashMap<Uuid, Instant>,
     pub(super) trim_timeline_segment_delete_animations: Vec<TrimTimelineSegmentDeleteAnimation>,
@@ -611,6 +662,7 @@ impl SoundFxApp {
             trim_timeline_state: None,
             trim_timeline_drop_target: None,
             trim_timeline_preview_path: None,
+            trim_timeline_preview_start_secs: 0.0,
             trim_timeline_preview_dirty: false,
             trim_timeline_clip_delete_animating: HashMap::new(),
             trim_timeline_segment_delete_animations: Vec::new(),

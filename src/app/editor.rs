@@ -281,7 +281,7 @@ impl SoundFxApp {
             .rows
             .iter()
             .flat_map(|row| row.clips.iter())
-            .map(|clip| clip.start_secs.max(0.0) + (clip.clip_end_secs - clip.clip_start_secs).max(0.05))
+            .map(|clip| clip.start_secs.max(0.0) + Self::timeline_clip_duration(clip))
             .fold(0.0f32, f32::max)
             .max(0.25);
         let visible_duration = (12.0 / timeline_zoom.max(0.1)).max(0.25);
@@ -347,7 +347,12 @@ impl SoundFxApp {
     }
 
     fn trim_timeline_clip_duration(&self, clip: &TrimTimelineClip) -> f32 {
+        Self::timeline_clip_duration(clip)
+    }
+
+    fn timeline_clip_duration(clip: &TrimTimelineClip) -> f32 {
         (clip.clip_end_secs - clip.clip_start_secs).max(0.05)
+            / clip.audio.speed.clamp(0.25, 2.0)
     }
 
     fn trim_timeline_clip_source_duration(&self, source_sound_id: Uuid) -> f32 {
@@ -576,7 +581,7 @@ impl SoundFxApp {
                 return false;
             }
             let start = clip.start_secs.max(0.0);
-            let end = start + (clip.clip_end_secs - clip.clip_start_secs).max(0.05);
+            let end = start + Self::timeline_clip_duration(clip);
             time_secs >= start && time_secs < end
         })
     }
@@ -658,7 +663,17 @@ impl SoundFxApp {
                     .iter()
                     .find(|sound| sound.id == clip.source_sound_id)
                     .cloned()
-                    .map(|sound| {
+                    .map(|mut sound| {
+                        sound.volume = clip.audio.volume;
+                        sound.speed = clip.audio.speed;
+                        sound.reverb_enabled = clip.audio.reverb_enabled;
+                        sound.telephone_enabled = clip.audio.telephone_enabled;
+                        sound.distortion_enabled = clip.audio.distortion_enabled;
+                        sound.echo_enabled = clip.audio.echo_enabled;
+                        sound.underwater_enabled = clip.audio.underwater_enabled;
+                        sound.robot_enabled = clip.audio.robot_enabled;
+                        sound.pitch_shift_enabled = clip.audio.pitch_shift_enabled;
+                        sound.pitch_shift_semitones = clip.audio.pitch_shift_semitones;
                         (
                             sound,
                             clip.start_secs.max(0.0),
@@ -702,12 +717,12 @@ impl SoundFxApp {
         while state.rows.len() <= target.row_index {
             state.rows.push(TrimTimelineRow::default());
         }
-        let clip_end_secs = self
+        let (clip_end_secs, clip_audio) = self
             .sounds
             .iter()
             .find(|sound| sound.id == drag_sound_id)
-            .map(SoundEffect::trimmed_length)
-            .unwrap_or(0.25);
+            .map(|sound| (sound.trimmed_length(), TimelineClipAudioSettings::from_sound(sound)))
+            .unwrap_or((0.25, TimelineClipAudioSettings::default()));
 
         let inserted_clip_id = Uuid::new_v4();
         state.rows[target.row_index].clips.push(TrimTimelineClip {
@@ -716,6 +731,7 @@ impl SoundFxApp {
             start_secs: target.start_secs.max(0.0),
             clip_start_secs: 0.0,
             clip_end_secs,
+            audio: clip_audio,
         });
         let resolved_start = Self::trim_timeline_resolve_row_start(
             &state.rows[target.row_index],
@@ -824,6 +840,7 @@ impl SoundFxApp {
             source_sound_id: clip.source_sound_id,
             clip_start_secs: clip.clip_start_secs.max(0.0),
             clip_end_secs: clip.clip_end_secs.max(clip.clip_start_secs + 0.05),
+            audio: clip.audio.clone(),
         });
         true
     }
@@ -846,8 +863,8 @@ impl SoundFxApp {
             return false;
         };
 
-        let clip_duration =
-            (copied_clip.clip_end_secs - copied_clip.clip_start_secs).max(0.05);
+        let clip_duration = (copied_clip.clip_end_secs - copied_clip.clip_start_secs).max(0.05)
+            / copied_clip.audio.speed.clamp(0.25, 2.0);
         let inserted_clip_id = Uuid::new_v4();
         if let Some(state) = self.trim_timeline_state.as_mut() {
             if !state.enabled || state.sound_id != sound_id {
@@ -867,6 +884,7 @@ impl SoundFxApp {
                 start_secs: resolved_start,
                 clip_start_secs: copied_clip.clip_start_secs,
                 clip_end_secs: copied_clip.clip_end_secs,
+                audio: copied_clip.audio,
             });
             state.rows[row_index]
                 .clips
@@ -1034,6 +1052,7 @@ impl SoundFxApp {
                 start_secs: timeline_split_secs,
                 clip_start_secs: cut_local_time,
                 clip_end_secs: clip.clip_end_secs,
+                audio: clip.audio.clone(),
             });
             row.clips
                 .sort_by(|left, right| left.start_secs.total_cmp(&right.start_secs));
@@ -1062,23 +1081,8 @@ impl SoundFxApp {
             state.playhead_secs = secs;
         }
 
-        if self.trim_timeline_preview_dirty {
-            self.stop_preview();
-            self.preview_timeline_mix_from_position(sound_id, secs);
-            return;
-        }
-
-        let Some(path) = self.trim_timeline_preview_path.clone() else {
-            self.preview_timeline_mix_from_position(sound_id, secs);
-            return;
-        };
-        let Some(audio) = self.audio.as_mut() else {
-            self.preview_timeline_mix_from_position(sound_id, secs);
-            return;
-        };
-        if let Err(error) = audio.play_file_from(&path, secs) {
-            self.set_error_status(error);
-        }
+        self.stop_preview();
+        self.preview_timeline_mix_from_position(sound_id, secs);
     }
 
     fn preview_timeline_mix_from_position(&mut self, sound_id: Uuid, start_secs: f32) {
@@ -1093,6 +1097,7 @@ impl SoundFxApp {
             self.storage.root_dir(),
             &sound,
             &clips,
+            start_secs,
         ) {
             Ok(path) => path,
             Err(error) => {
@@ -1105,11 +1110,21 @@ impl SoundFxApp {
             return;
         };
         audio.evict_cached_audio(&preview_path);
-        if let Err(error) = audio.play_file_from(&preview_path, start_secs.max(0.0)) {
+        if let Err(error) = audio.play_file_from(&preview_path, 0.0) {
             self.set_error_status(error);
             return;
         }
-        self.trim_timeline_preview_path = Some(preview_path);
+        let previous_preview = self.trim_timeline_preview_path.replace(preview_path.clone());
+        if previous_preview.as_ref() != Some(&preview_path)
+            && let Some(previous_preview) = previous_preview
+            && previous_preview
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("timeline-preview-"))
+        {
+            let _ = fs::remove_file(previous_preview);
+        }
+        self.trim_timeline_preview_start_secs = start_secs.max(0.0);
         self.trim_timeline_preview_dirty = false;
         if let Some(state) = self.trim_timeline_state.as_mut()
             && state.sound_id == sound_id
@@ -1144,9 +1159,13 @@ impl SoundFxApp {
             }
             return;
         }
-        if let Some(path) = preview_path
+        let preview_local_secs = secs - self.trim_timeline_preview_start_secs;
+        if !(0.0..90.0).contains(&preview_local_secs) {
+            self.stop_preview();
+            self.preview_timeline_mix_from_position(sound_id, secs);
+        } else if let Some(path) = preview_path
             && let Some(audio) = self.audio.as_mut()
-            && let Err(error) = audio.play_file_from(&path, secs)
+            && let Err(error) = audio.play_file_from(&path, preview_local_secs)
         {
             self.set_error_status(error);
             return;
@@ -1168,11 +1187,13 @@ impl SoundFxApp {
             self.storage.root_dir(),
             &sound,
             &clips,
+            0.0,
         ) {
             if let Some(audio) = self.audio.as_mut() {
                 audio.evict_cached_audio(&preview_path);
             }
             self.trim_timeline_preview_path = Some(preview_path);
+            self.trim_timeline_preview_start_secs = 0.0;
             self.trim_timeline_preview_dirty = false;
         }
     }
@@ -1203,7 +1224,7 @@ impl SoundFxApp {
         // Build mix in background; UI stays responsive
         self.pending_timeline_mix_restart = Some((sound_id, resume_secs));
         thread::spawn(move || {
-            match Storage::export_timeline_mix_preview_at(&root_dir, &sound, &clips) {
+            match Storage::export_timeline_mix_preview_at(&root_dir, &sound, &clips, resume_secs) {
                 Ok(preview_path) => {
                     let _ = tx.send(TimelineMixMessage::Ready { sound_id, preview_path, resume_secs });
                 }
@@ -1217,7 +1238,11 @@ impl SoundFxApp {
     pub(super) fn poll_timeline_mix_jobs(&mut self, ctx: &Context) {
         while let Ok(msg) = self.timeline_mix_rx.try_recv() {
             match msg {
-                TimelineMixMessage::Ready { sound_id: _, preview_path, resume_secs } => {
+                TimelineMixMessage::Ready { sound_id, preview_path, resume_secs } => {
+                    if self.pending_timeline_mix_restart != Some((sound_id, resume_secs)) {
+                        let _ = fs::remove_file(preview_path);
+                        continue;
+                    }
                     self.pending_timeline_mix_restart = None;
                     if let Some(audio) = self.audio.as_mut() {
                         audio.evict_cached_audio(&preview_path);
@@ -1231,12 +1256,25 @@ impl SoundFxApp {
                         .as_ref()
                         .map(|state| state.playhead_secs)
                         .unwrap_or(resume_secs);
-                    self.trim_timeline_preview_path = Some(preview_path.clone());
+                    let previous_preview = self
+                        .trim_timeline_preview_path
+                        .replace(preview_path.clone());
+                    self.trim_timeline_preview_start_secs = resume_secs;
                     self.trim_timeline_preview_dirty = false;
                     if was_playing {
                         if let Some(audio) = self.audio.as_mut() {
-                            let _ = audio.play_file_from(&preview_path, current_live_secs);
+                            let local_secs = (current_live_secs - resume_secs).max(0.0);
+                            let _ = audio.play_file_from(&preview_path, local_secs);
                         }
+                    }
+                    if previous_preview.as_ref() != Some(&preview_path)
+                        && let Some(previous_preview) = previous_preview
+                        && previous_preview
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .is_some_and(|name| name.starts_with("timeline-preview-"))
+                    {
+                        let _ = fs::remove_file(previous_preview);
                     }
                     ctx.request_repaint();
                 }
@@ -1321,7 +1359,8 @@ impl SoundFxApp {
                 if let Some(state) = self.trim_timeline_state.as_mut()
                     && let Some(audio_pos) = audio_pos
                 {
-                    state.playhead_secs = audio_pos.clamp(0.0, total_duration);
+                    state.playhead_secs = (self.trim_timeline_preview_start_secs + audio_pos)
+                        .clamp(0.0, total_duration);
                     if state.playhead_secs >= total_duration - 0.001 {
                         state.playhead_secs = total_duration;
                         state.timeline_is_playing = false;
@@ -4426,6 +4465,7 @@ impl SoundFxApp {
                 );
             });
         });
+
         ui.add_space(8.0);
 
         let viewport_width = ui.available_width().max(320.0);
@@ -5360,6 +5400,67 @@ impl SoundFxApp {
                 }
             });
         });
+
+        if let Some((row_index, clip_index, selected_clip)) = selected_clip_snapshot.as_ref() {
+            let mut audio = selected_clip.audio.clone();
+            let before = audio.clone();
+            let mut controls_commit = false;
+            Frame::new()
+                .fill(Self::panel_fill())
+                .stroke(Stroke::new(1.0, Self::subtle_border_color()))
+                .corner_radius(14.0)
+                .inner_margin(Margin::symmetric(12, 8))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(Self::icon(0xe050, 15.0, Self::muted_text_color()));
+                        let (_, volume_commit) = Self::click_slider_deferred(
+                            ui, &mut audio.volume, 0.0..=5.0, 0.0, vec2(108.0, 22.0),
+                        );
+                        controls_commit |= volume_commit;
+                        ui.label(RichText::new(format!("{:.2}x", audio.volume)).size(11.0));
+                        ui.add_space(12.0);
+                        ui.label(Self::icon(0xe9e4, 15.0, Self::muted_text_color()));
+                        let (_, speed_commit) = Self::click_slider_deferred(
+                            ui, &mut audio.speed, 0.25..=2.0, 0.0, vec2(108.0, 22.0),
+                        );
+                        controls_commit |= speed_commit;
+                        ui.label(RichText::new(format!("{:.2}x", audio.speed)).size(11.0));
+                    });
+                    ui.add_space(6.0);
+                    ui.horizontal_wrapped(|ui| {
+                        ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
+                        let mut toggle = |label: &str, enabled: &mut bool| {
+                            let response = ui.add_sized(
+                                [86.0, 26.0],
+                                Button::new(RichText::new(label).size(10.5))
+                                    .fill(if *enabled { Color32::from_rgb(125, 34, 88) } else { Self::surface_fill() })
+                                    .stroke(Stroke::new(1.0, Self::border_color()))
+                                    .corner_radius(10.0),
+                            );
+                            Self::decorate_button_response(ui, &response);
+                            if response.clicked() {
+                                *enabled = !*enabled;
+                                controls_commit = true;
+                            }
+                        };
+                        toggle("Reverb", &mut audio.reverb_enabled);
+                        toggle("Telephone", &mut audio.telephone_enabled);
+                        toggle("Distortion", &mut audio.distortion_enabled);
+                        toggle("Echo", &mut audio.echo_enabled);
+                        toggle("Underwater", &mut audio.underwater_enabled);
+                        toggle("Robot", &mut audio.robot_enabled);
+                        toggle("Pitch Shift", &mut audio.pitch_shift_enabled);
+                    });
+                });
+            if (audio != before || controls_commit)
+                && let Some(state) = self.trim_timeline_state.as_mut()
+                && let Some(clip) = state.rows.get_mut(*row_index).and_then(|row| row.clips.get_mut(*clip_index))
+            {
+                clip.audio = audio;
+                timeline_state_changed |= controls_commit;
+            }
+            ui.add_space(8.0);
+        }
         ui.add_space(8.0);
 
         let pending_drag_sound = self
@@ -5836,7 +5937,7 @@ impl SoundFxApp {
                             .clamp(0.0, 1.0)
                     });
                 let clip_is_deleting = delete_progress.is_some();
-                let clip_duration = (clip.clip_end_secs - clip.clip_start_secs).max(0.05);
+                let clip_duration = Self::timeline_clip_duration(clip);
                 let clip_time_start = clip.start_secs.max(0.0);
                 let clip_time_end = clip_time_start + clip_duration;
                 if clip_time_end <= view_start_secs || clip_time_start >= view_end_secs {
@@ -6001,18 +6102,19 @@ impl SoundFxApp {
                         Stroke::new(2.0, Color32::from_rgba_premultiplied(108, 231, 255, 210)),
                     );
                 }
-                let visible_local_start =
-                    clip.clip_start_secs + (visible_clip_start - clip_time_start).max(0.0);
-                let visible_local_end =
-                    clip.clip_end_secs - (clip_time_end - visible_clip_end).max(0.0);
+                let clip_speed = clip.audio.speed.clamp(0.25, 2.0);
+                let visible_local_start = clip.clip_start_secs
+                    + (visible_clip_start - clip_time_start).max(0.0) * clip_speed;
+                let visible_local_end = clip.clip_start_secs
+                    + (visible_clip_end - clip_time_start).max(0.0) * clip_speed;
                 let waveform_bars = Self::trim_timeline_waveform_bars(clip_rect.width());
-                let preview = Self::timeline_clip_waveform_preview_from_samples(
+                let preview = Self::scale_waveform_for_volume(Self::timeline_clip_waveform_preview_from_samples(
                     sound,
-                    &self.sound_waveform_samples(sound),
+                    &self.raw_sound_waveform_samples(sound),
                     visible_local_start,
                     visible_local_end,
                     waveform_bars,
-                );
+                ), clip.audio.volume);
                 if rendered_clip_rect.width() >= 18.0 {
                     let waveform_inset_x = 1.0;
                     let title_rect = Rect::from_min_max(

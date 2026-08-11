@@ -626,21 +626,18 @@ impl Storage {
         clips
             .iter()
             .map(|(sound, start_secs, clip_start_secs, clip_end_secs)| {
-                let path = if sound.needs_processed_export() {
-                    let export_path = Self::processed_export_path(root_dir, sound);
-                    if export_path.exists() {
-                        export_path
-                    } else {
-                        Self::export_processed_sound_at(root_dir, sound)?
-                    }
+                let path = sound.playback_asset_path(root_dir);
+                let source_offset = if sound.has_cutout() {
+                    0.0
                 } else {
-                    sound.playback_asset_path(root_dir)
+                    sound.trim_start_secs.max(0.0)
                 };
                 Ok(MixedAudioClip {
                     path,
                     start_secs: (*start_secs - start_offset).max(0.0),
-                    clip_start_secs: *clip_start_secs,
-                    clip_end_secs: *clip_end_secs,
+                    clip_start_secs: *clip_start_secs + source_offset,
+                    clip_end_secs: *clip_end_secs + source_offset,
+                    sound: sound.clone(),
                 })
             })
             .collect()
@@ -692,9 +689,32 @@ impl Storage {
         root_dir: &Path,
         base_sound: &SoundEffect,
         clips: &[(SoundEffect, f32, f32, f32)],
+        preview_start_secs: f32,
     ) -> Result<PathBuf> {
-        if clips.len() == 1 {
-            let (sound, start_secs, clip_start, clip_end) = &clips[0];
+        const PREVIEW_WINDOW_SECS: f32 = 90.0;
+        let preview_start_secs = preview_start_secs.max(0.0);
+        let preview_end_secs = preview_start_secs + PREVIEW_WINDOW_SECS;
+        let preview_clips = clips
+            .iter()
+            .filter_map(|(sound, start_secs, clip_start, clip_end)| {
+                let speed = sound.speed.clamp(0.25, 2.0);
+                let timeline_end = *start_secs + (*clip_end - *clip_start).max(0.05) / speed;
+                let visible_start = start_secs.max(preview_start_secs);
+                let visible_end = timeline_end.min(preview_end_secs);
+                (visible_end > visible_start).then(|| {
+                    let source_start = *clip_start + (visible_start - *start_secs) * speed;
+                    let source_end = source_start + (visible_end - visible_start) * speed;
+                    (
+                        sound.clone(),
+                        visible_start - preview_start_secs,
+                        source_start,
+                        source_end,
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+        if preview_clips.len() == 1 {
+            let (sound, start_secs, clip_start, clip_end) = &preview_clips[0];
             if !sound.needs_processed_export()
                 && *start_secs <= 0.001
                 && *clip_start <= 0.001
@@ -703,10 +723,14 @@ impl Storage {
                 return Ok(sound.playback_asset_path(root_dir));
             }
         }
-        let mixed_clips = Self::build_timeline_mixed_clips_at(root_dir, clips, false)?;
+        let mixed_clips = Self::build_timeline_mixed_clips_at(root_dir, &preview_clips, false)?;
         let preview_path = root_dir
             .join("exports")
-            .join(format!("timeline-preview-{}.wav", base_sound.id));
+            .join(format!(
+                "timeline-preview-{}-{}.wav",
+                base_sound.id,
+                (preview_start_secs * 1000.0).round() as u64
+            ));
         write_mixed_wav(&mixed_clips, &preview_path)?;
         Ok(preview_path)
     }

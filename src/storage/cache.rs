@@ -26,6 +26,7 @@ pub(crate) struct MixedAudioClip {
     pub(crate) start_secs: f32,
     pub(crate) clip_start_secs: f32,
     pub(crate) clip_end_secs: f32,
+    pub(crate) sound: SoundEffect,
 }
 
 pub(super) fn analyze_audio_file(path: &Path, buckets: usize) -> Result<AudioAnalysis> {
@@ -166,11 +167,13 @@ fn decode_audio_file_segment(
     let duration_secs = (end_secs - start_secs).max(0.05);
 
     catch_unwind(AssertUnwindSafe(|| -> Result<DecodedAudio> {
-        let decoder = open_decoder(&path_buf)?;
+        let mut decoder = open_decoder(&path_buf)?;
         let channels = decoder.channels();
         let sample_rate = decoder.sample_rate();
+        decoder
+            .try_seek(std::time::Duration::from_secs_f32(start_secs))
+            .map_err(|error| anyhow::anyhow!("unable to seek timeline clip: {error}"))?;
         let segmented = decoder
-            .skip_duration(std::time::Duration::from_secs_f32(start_secs))
             .take_duration(std::time::Duration::from_secs_f32(duration_secs));
         let samples = segmented.convert_samples::<f32>().collect::<Vec<_>>();
 
@@ -219,6 +222,16 @@ pub(crate) fn write_mixed_wav(clips: &[MixedAudioClip], target_path: &Path) -> R
         if decoded.sample_rate.max(1) != TARGET_SAMPLE_RATE {
             stereo = resample_stereo_linear(&stereo, decoded.sample_rate.max(1), TARGET_SAMPLE_RATE);
         }
+        apply_sound_effects(&mut stereo, TARGET_CHANNELS, TARGET_SAMPLE_RATE, &clip.sound);
+        if (clip.sound.speed - 1.0).abs() > 0.005 {
+            stereo = resample_stereo_linear(
+                &stereo,
+                (TARGET_SAMPLE_RATE as f32 * clip.sound.speed.clamp(0.25, 2.0)).round() as u32,
+                TARGET_SAMPLE_RATE,
+            );
+        }
+        let volume = clip.sound.volume.clamp(0.0, 5.0);
+        stereo.iter_mut().for_each(|sample| *sample *= volume);
         soften_sample_edges(&mut stereo, TARGET_CHANNELS, TARGET_SAMPLE_RATE, EXPORT_POP_FADE_MS);
         let frames = stereo.len() / TARGET_CHANNELS as usize;
         let start_frame = (clip.start_secs.max(0.0) * TARGET_SAMPLE_RATE as f32).round() as usize;
@@ -600,4 +613,19 @@ fn apply_reverb_effect(samples: &mut [f32], channels: usize, sample_rate: u32) {
 fn open_decoder(path: &Path) -> Result<Decoder<BufReader<File>>> {
     let file = File::open(path).with_context(|| format!("unable to open {}", path.display()))?;
     Decoder::new(BufReader::new(file)).context("unsupported audio file")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn timeline_segment_decoder_seeks_to_requested_range() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/default-startup.wav");
+        let decoded = decode_audio_file_segment(&path, 0.05, 0.10).unwrap();
+        let duration = decoded.samples.len() as f32
+            / decoded.channels.max(1) as f32
+            / decoded.sample_rate.max(1) as f32;
+        assert!((0.04..=0.06).contains(&duration));
+    }
 }
