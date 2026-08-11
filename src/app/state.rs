@@ -146,6 +146,8 @@ pub(crate) struct TimelineClipAudioSettings {
     pub(crate) robot_enabled: bool,
     pub(crate) pitch_shift_enabled: bool,
     pub(crate) pitch_shift_semitones: f32,
+    pub(crate) vocal_only: bool,
+    pub(crate) music_only: bool,
 }
 
 impl Default for TimelineClipAudioSettings {
@@ -161,6 +163,8 @@ impl Default for TimelineClipAudioSettings {
             robot_enabled: false,
             pitch_shift_enabled: false,
             pitch_shift_semitones: 0.0,
+            vocal_only: false,
+            music_only: false,
         }
     }
 }
@@ -178,7 +182,40 @@ impl TimelineClipAudioSettings {
             robot_enabled: sound.robot_enabled,
             pitch_shift_enabled: sound.pitch_shift_enabled,
             pitch_shift_semitones: sound.pitch_shift_semitones,
+            vocal_only: sound.vocal_only,
+            music_only: sound.music_only,
         }
+    }
+
+    pub(crate) fn apply_changed_from(&mut self, before: &Self, after: &Self) {
+        if after.volume != before.volume { self.volume = after.volume; }
+        if after.speed != before.speed { self.speed = after.speed; }
+        if after.reverb_enabled != before.reverb_enabled { self.reverb_enabled = after.reverb_enabled; }
+        if after.telephone_enabled != before.telephone_enabled { self.telephone_enabled = after.telephone_enabled; }
+        if after.distortion_enabled != before.distortion_enabled { self.distortion_enabled = after.distortion_enabled; }
+        if after.echo_enabled != before.echo_enabled { self.echo_enabled = after.echo_enabled; }
+        if after.underwater_enabled != before.underwater_enabled { self.underwater_enabled = after.underwater_enabled; }
+        if after.robot_enabled != before.robot_enabled { self.robot_enabled = after.robot_enabled; }
+        if after.pitch_shift_enabled != before.pitch_shift_enabled { self.pitch_shift_enabled = after.pitch_shift_enabled; }
+        if after.vocal_only != before.vocal_only { self.vocal_only = after.vocal_only; }
+        if after.music_only != before.music_only { self.music_only = after.music_only; }
+    }
+}
+
+#[cfg(test)]
+mod timeline_audio_tests {
+    use super::*;
+
+    #[test]
+    fn batch_edit_preserves_unmodified_clip_settings() {
+        let before = TimelineClipAudioSettings::default();
+        let mut after = before.clone();
+        after.reverb_enabled = true;
+        let mut target = TimelineClipAudioSettings { volume: 0.35, speed: 1.5, ..Default::default() };
+        target.apply_changed_from(&before, &after);
+        assert!(target.reverb_enabled);
+        assert_eq!(target.volume, 0.35);
+        assert_eq!(target.speed, 1.5);
     }
 }
 
@@ -205,6 +242,7 @@ pub(crate) struct TrimTimelineState {
     pub(crate) playhead_secs: f32,
     pub(crate) snap_enabled: bool,
     pub(crate) selected_clip_id: Option<Uuid>,
+    pub(crate) selected_clip_ids: HashSet<Uuid>,
     pub(crate) rows: Vec<TrimTimelineRow>,
     pub(crate) timeline_is_playing: bool,
 }

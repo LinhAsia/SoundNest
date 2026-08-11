@@ -106,6 +106,10 @@ pub(crate) enum NormalizeMessage {
         sound_id: Uuid,
         result: Result<f32, String>,
     },
+    TimelineFinished {
+        clip_ids: Vec<Uuid>,
+        result: Result<f32, String>,
+    },
 }
 
 pub(crate) enum MyinstantsWaveformMessage {

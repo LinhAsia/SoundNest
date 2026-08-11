@@ -158,6 +158,24 @@ impl SoundFxApp {
                         }
                     }
                 }
+                NormalizeMessage::TimelineFinished { clip_ids, result } => match result {
+                    Ok(gain) => {
+                        if let Some(state) = self.trim_timeline_state.as_mut() {
+                            for clip in state.rows.iter_mut().flat_map(|row| row.clips.iter_mut()) {
+                                if clip_ids.contains(&clip.id) {
+                                    clip.audio.volume = gain;
+                                    changed = true;
+                                }
+                            }
+                        }
+                        if changed
+                            && let Some(sound_id) = self.timeline_mode_active_sound_id()
+                        {
+                            self.refresh_trim_timeline_preview_after_edit(sound_id);
+                        }
+                    }
+                    Err(error) => self.set_error_status(error),
+                },
             }
         }
 
