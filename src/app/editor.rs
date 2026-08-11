@@ -5420,16 +5420,20 @@ impl SoundFxApp {
             });
         });
 
-        if let Some((_, _, selected_clip)) = selected_clip_snapshot.as_ref() {
-            let mut audio = selected_clip.audio.clone();
-            let before = audio.clone();
-            let mut controls_commit = false;
-            Frame::new()
+        let clip_controls_enabled = selected_clip_snapshot.is_some();
+        let mut audio = selected_clip_snapshot
+            .as_ref()
+            .map(|(_, _, clip)| clip.audio.clone())
+            .unwrap_or_default();
+        let before = audio.clone();
+        let mut controls_commit = false;
+        Frame::new()
                 .fill(Self::panel_fill())
                 .stroke(Stroke::new(1.0, Self::subtle_border_color()))
                 .corner_radius(14.0)
                 .inner_margin(Margin::symmetric(12, 8))
                 .show(ui, |ui| {
+                    ui.add_enabled_ui(clip_controls_enabled, |ui| {
                     ui.horizontal(|ui| {
                         ui.label(Self::icon(0xe050, 15.0, Self::muted_text_color()));
                         let (_, volume_commit) = Self::click_slider_deferred(
@@ -5472,16 +5476,26 @@ impl SoundFxApp {
                     });
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
-                        if ui.add_sized([86.0, 26.0], Button::new("Normalize")).clicked() {
+                        let action = |label: &str| {
+                            Button::new(
+                                RichText::new(label)
+                                    .size(10.5)
+                                    .color(Self::strong_text_color()),
+                            )
+                            .fill(Self::surface_fill())
+                            .stroke(Stroke::new(1.0, Self::border_color()))
+                            .corner_radius(10.0)
+                        };
+                        if ui.add_sized([86.0, 26.0], action("Normalize")).clicked() {
                             normalize_selected = true;
                         }
-                        if ui.add_sized([86.0, 26.0], Button::new("Vocal")).clicked() {
+                        if ui.add_sized([86.0, 26.0], action("Vocal")).clicked() {
                             audio.vocal_only = true;
                             audio.music_only = false;
                             controls_commit = true;
                             selected_stem_request = Some(SeparationStemKind::Vocal);
                         }
-                        if ui.add_sized([96.0, 26.0], Button::new("Instrumental")).clicked() {
+                        if ui.add_sized([96.0, 26.0], action("Instrumental")).clicked() {
                             audio.music_only = true;
                             audio.vocal_only = false;
                             controls_commit = true;
@@ -5489,7 +5503,8 @@ impl SoundFxApp {
                         }
                     });
                 });
-            if audio != before || controls_commit {
+                });
+        if clip_controls_enabled && (audio != before || controls_commit) {
                 let selected_ids = if state_snapshot.selected_clip_ids.is_empty() {
                     state_snapshot.selected_clip_id.into_iter().collect::<HashSet<_>>()
                 } else {
@@ -5504,8 +5519,7 @@ impl SoundFxApp {
                 }
                 timeline_state_changed |= controls_commit;
             }
-            ui.add_space(8.0);
-        }
+        ui.add_space(8.0);
 
         let selected_ids = if state_snapshot.selected_clip_ids.is_empty() {
             state_snapshot.selected_clip_id.into_iter().collect::<HashSet<_>>()
