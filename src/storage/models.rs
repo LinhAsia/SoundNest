@@ -299,17 +299,7 @@ impl SoundEffect {
     }
 
     pub fn needs_preprocessed_preview(&self) -> bool {
-        const EPSILON: f32 = 0.005;
-        (self.volume - 1.0).abs() > EPSILON
-            || (self.speed - 1.0).abs() > EPSILON
-            || self.has_cutout()
-            || self.reverb_enabled
-            || self.telephone_enabled
-            || self.distortion_enabled
-            || self.echo_enabled
-            || self.underwater_enabled
-            || self.robot_enabled
-            || self.pitch_shift_enabled
+        self.has_cutout()
     }
 }
 
@@ -421,7 +411,8 @@ mod tests {
         assert!(sound.needs_processed_export());
         assert!(!sound.needs_preprocessed_preview());
 
-        sound.reverb_enabled = true;
+        sound.cut_start_secs = Some(44.0);
+        sound.cut_end_secs = Some(46.0);
         assert!(sound.needs_preprocessed_preview());
     }
 }

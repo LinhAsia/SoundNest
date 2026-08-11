@@ -59,6 +59,76 @@ struct PanicSafeSource<S> {
     failed: bool,
 }
 
+struct ChunkedEffectSource<S> {
+    inner: S,
+    buffered: std::vec::IntoIter<f32>,
+    sound: SoundEffect,
+    channels: u16,
+    sample_rate: u32,
+}
+
+impl<S> ChunkedEffectSource<S>
+where
+    S: Source<Item = f32>,
+{
+    fn new(inner: S, sound: &SoundEffect) -> Self {
+        let channels = inner.channels().max(1);
+        let sample_rate = inner.sample_rate().max(1);
+        Self {
+            inner,
+            buffered: Vec::new().into_iter(),
+            sound: sound.clone(),
+            channels,
+            sample_rate,
+        }
+    }
+}
+
+impl<S> Iterator for ChunkedEffectSource<S>
+where
+    S: Source<Item = f32>,
+{
+    type Item = f32;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(sample) = self.buffered.next() {
+            return Some(sample);
+        }
+
+        // ponytail: ten-second chunks reuse the export DSP without buffering an entire long file;
+        // move DSP state into a streaming processor if seamless effect tails across chunks are needed.
+        let chunk_len = self.sample_rate as usize * self.channels as usize * 10;
+        let mut samples = self.inner.by_ref().take(chunk_len).collect::<Vec<_>>();
+        if samples.is_empty() {
+            return None;
+        }
+        apply_sound_effects(&mut samples, self.channels, self.sample_rate, &self.sound);
+        self.buffered = samples.into_iter();
+        self.buffered.next()
+    }
+}
+
+impl<S> Source for ChunkedEffectSource<S>
+where
+    S: Source<Item = f32>,
+{
+    fn current_frame_len(&self) -> Option<usize> {
+        None
+    }
+
+    fn channels(&self) -> u16 {
+        self.channels
+    }
+
+    fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+
+    fn total_duration(&self) -> Option<Duration> {
+        self.inner.total_duration()
+    }
+}
+
 impl<S> PanicSafeSource<S> {
     fn new(inner: S) -> Self {
         Self {
@@ -279,10 +349,15 @@ impl AudioEngine {
             (start_position_secs - sound.trim_start_secs).clamp(0.0, sound.trimmed_length());
         let file_offset_secs = sound.trim_start_secs + start_offset_secs;
         let remaining_secs = (sound.trim_end_secs - file_offset_secs).max(0.001);
-        let preview = seek_audio_decoder(open_audio_decoder(asset_path)?, file_offset_secs)?
-            .take_duration(Duration::from_secs_f32(remaining_secs));
+        let source = seek_audio_decoder(open_audio_decoder(asset_path)?, file_offset_secs)?
+            .take_duration(Duration::from_secs_f32(remaining_secs))
+            .convert_samples::<f32>();
+        let speed = sound.speed.clamp(0.25, 2.0);
+        let preview = ChunkedEffectSource::new(source, sound)
+            .speed(speed)
+            .amplify(sound.volume.max(0.0));
         let sink = Sink::try_new(&self.handle).context("unable to create audio sink")?;
-        sink.append(PanicSafeSource::new(preview));
+        sink.append(preview);
         sink.play();
 
         self.current_id = Some(sound.id);
@@ -290,7 +365,7 @@ impl AudioEngine {
         self.current_total_duration_secs = sound.trimmed_length();
         self.current_sound = Some(sound.clone());
         self.current_start_offset_secs = start_offset_secs;
-        self.current_speed = 1.0;
+        self.current_speed = speed;
         self.sink = Some(sink);
         Ok(())
     }
@@ -625,5 +700,23 @@ mod tests {
         let mut decoder = seek_audio_decoder(open_audio_decoder(&path).unwrap(), 0.05)
             .expect("test audio should seek");
         assert!(decoder.next().is_some());
+    }
+
+    #[test]
+    fn effects_are_applied_by_streaming_source() {
+        let mut sound: SoundEffect = serde_json::from_value(serde_json::json!({
+            "id": Uuid::nil(),
+            "name": "test",
+            "asset_file": "test.wav",
+            "duration_secs": 1.0,
+            "volume": 1.0,
+            "trim_start_secs": 0.0,
+            "trim_end_secs": 1.0
+        }))
+        .unwrap();
+        sound.distortion_enabled = true;
+        let source = SamplesBuffer::new(1, 44_100, vec![0.5_f32]);
+        let sample = ChunkedEffectSource::new(source, &sound).next().unwrap();
+        assert!(sample > 0.5);
     }
 }
