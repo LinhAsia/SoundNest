@@ -3825,6 +3825,7 @@ impl SoundFxApp {
                                 });
                                 ui.add_space(12.0);
                                 ui.horizontal(|ui| {
+                                    ui.spacing_mut().item_spacing.x = 8.0;
                                     ui.label(
                                         RichText::new(&effects_label)
                                             .size(12.0)
@@ -3901,9 +3902,6 @@ impl SoundFxApp {
                                         processed_export_dirty = true;
                                         playback_reapply_request = true;
                                     }
-                                });
-                                ui.horizontal(|ui| {
-                                    ui.add_space(54.0);
                                     let underwater = ui
                                         .add_sized(
                                             [98.0, 30.0],
