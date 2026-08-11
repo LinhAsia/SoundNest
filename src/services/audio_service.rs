@@ -453,6 +453,7 @@ impl AudioEngine {
         sample_rate: u32,
         samples: Vec<f32>,
     ) {
+        self.cached_audio.clear();
         self.cached_audio.insert(
             asset_path,
             CachedAudio {
@@ -470,6 +471,7 @@ impl AudioEngine {
     fn ensure_cached_audio(&mut self, asset_path: &Path) -> Result<()> {
         if !self.cached_audio.contains_key(asset_path) {
             let (channels, sample_rate, samples) = decode_audio_file(asset_path)?;
+            self.cached_audio.clear();
             self.cached_audio.insert(
                 asset_path.to_path_buf(),
                 CachedAudio {

@@ -185,6 +185,7 @@ impl SoundFxApp {
                                 })
                         },
                     );
+                    self.audio_preload_queued.remove(&asset_path);
                     self.audio_preload_inflight.remove(&asset_path);
                     match result {
                         Ok((channels, sample_rate, samples)) => {

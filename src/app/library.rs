@@ -1746,14 +1746,6 @@ impl SoundFxApp {
         let side_padding = ((layout_width - grid_width) * 0.5).max(0.0);
         let row_count = sounds.len().div_ceil(columns);
 
-        let preload_paths = sounds
-            .iter()
-            .map(|sound| self.preview_asset_path_for_sound(sound))
-            .collect::<Vec<_>>();
-        for path in preload_paths {
-            self.schedule_audio_preload(path);
-        }
-
         for (row_index, row) in sounds.chunks(columns).enumerate() {
             let (row_rect, _) =
                 ui.allocate_exact_size(vec2(layout_width, card_size), Sense::hover());
@@ -2514,14 +2506,6 @@ impl SoundFxApp {
             let mut preview_request = None;
             let mut drag_request = None;
             let list_width = ui.available_width().max(220.0);
-
-            let preload_paths = visible_sound_indices
-                .iter()
-                .map(|&idx| self.preview_asset_path_for_sound(&self.sounds[idx]))
-                .collect::<Vec<_>>();
-            for path in preload_paths {
-                self.schedule_audio_preload(path);
-            }
 
             ScrollArea::vertical()
                 .auto_shrink([false, false])
