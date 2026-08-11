@@ -161,7 +161,7 @@ impl AudioEngine {
         asset_path: &Path,
         start_position_secs: f32,
     ) -> Result<()> {
-        if !sound.needs_processed_export() {
+        if !sound.needs_preprocessed_preview() {
             return self.play_sound_streaming(sound, asset_path, start_position_secs);
         }
 

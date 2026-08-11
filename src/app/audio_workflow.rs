@@ -24,7 +24,7 @@ impl SoundFxApp {
     }
 
     pub(crate) fn preview_asset_path_for_sound(&self, sound: &SoundEffect) -> PathBuf {
-        if sound.needs_processed_export()
+        if sound.needs_preprocessed_preview()
             && Storage::processed_export_exists(self.storage.root_dir(), sound)
         {
             Storage::processed_export_path(self.storage.root_dir(), sound)
@@ -57,7 +57,7 @@ impl SoundFxApp {
         }
         self.myinstants_preview_audio_url = None;
 
-        let needs_preload = sound.needs_processed_export()
+        let needs_preload = sound.needs_preprocessed_preview()
             && !Storage::processed_export_exists(self.storage.root_dir(), &sound);
         if needs_preload && !audio.has_cached_audio(&asset_path) {
             if let Some(error) = self.audio_preload_failures.get(&asset_path) {
@@ -72,7 +72,7 @@ impl SoundFxApp {
         }
 
         self.pending_preview_after_preload = None;
-        let playback = if sound.needs_processed_export()
+        let playback = if sound.needs_preprocessed_preview()
             && Storage::processed_export_exists(self.storage.root_dir(), &sound)
         {
             let start_position_secs = start_position_secs.unwrap_or(sound.display_trim_start());
@@ -90,9 +90,7 @@ impl SoundFxApp {
             Ok(()) => self.clear_status(),
             Err(error) => {
                 if let Some(preload_error) = self.audio_preload_failures.get(&asset_path) {
-                    self.set_error_status(format!(
-                        "Unable to load audio preview: {preload_error}"
-                    ));
+                    self.set_error_status(format!("Unable to load audio preview: {preload_error}"));
                     return;
                 }
                 self.schedule_audio_preload(asset_path.clone());

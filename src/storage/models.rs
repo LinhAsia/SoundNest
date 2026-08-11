@@ -293,10 +293,15 @@ impl SoundEffect {
 
     pub fn needs_processed_export(&self) -> bool {
         const EPSILON: f32 = 0.005;
-        (self.volume - 1.0).abs() > EPSILON
-            || (self.speed - 1.0).abs() > EPSILON
+        self.needs_preprocessed_preview()
             || self.trim_start_secs.abs() > EPSILON
             || (self.trim_end_secs - self.safe_duration()).abs() > 0.02
+    }
+
+    pub fn needs_preprocessed_preview(&self) -> bool {
+        const EPSILON: f32 = 0.005;
+        (self.volume - 1.0).abs() > EPSILON
+            || (self.speed - 1.0).abs() > EPSILON
             || self.has_cutout()
             || self.reverb_enabled
             || self.telephone_enabled
@@ -371,4 +376,52 @@ pub(super) struct PreferencesFile {
     pub(super) tts_prompt_presets: Vec<GeminiTtsPromptPreset>,
     #[serde(default)]
     pub(super) tts_draft: GeminiTtsDraftPreferences,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sound() -> SoundEffect {
+        SoundEffect {
+            id: Uuid::nil(),
+            name: "test".into(),
+            asset_file: "test.wav".into(),
+            favorite: false,
+            tags: Vec::new(),
+            duration_secs: 100.0,
+            volume: 1.0,
+            speed: 1.0,
+            trim_start_secs: 40.0,
+            trim_end_secs: 50.0,
+            cut_start_secs: None,
+            cut_end_secs: None,
+            display_trim_start_secs: None,
+            display_trim_end_secs: None,
+            vocal_only: false,
+            vocal_asset_file: None,
+            music_only: false,
+            music_asset_file: None,
+            reverb_enabled: false,
+            telephone_enabled: false,
+            distortion_enabled: false,
+            echo_enabled: false,
+            underwater_enabled: false,
+            robot_enabled: false,
+            pitch_shift_enabled: false,
+            pitch_shift_semitones: 0.0,
+            waveform: Vec::new(),
+            folder_id: None,
+        }
+    }
+
+    #[test]
+    fn trim_only_preview_streams_without_preprocessing() {
+        let mut sound = sound();
+        assert!(sound.needs_processed_export());
+        assert!(!sound.needs_preprocessed_preview());
+
+        sound.reverb_enabled = true;
+        assert!(sound.needs_preprocessed_preview());
+    }
 }
