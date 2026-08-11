@@ -20,39 +20,51 @@ impl SoundFxApp {
     }
 
     pub(super) fn sound_waveform_samples(&self, sound: &SoundEffect) -> Vec<f32> {
-        if sound.music_only
+        Self::scale_waveform_for_volume(self.raw_sound_waveform_samples(sound), sound.volume)
+    }
+
+    fn raw_sound_waveform_samples(&self, sound: &SoundEffect) -> Vec<f32> {
+        let samples = if sound.music_only
             && let Some(path) = sound.music_asset_path(self.storage.root_dir())
             && path.exists()
         {
-            return self.cached_stem_waveform(&self.music_waveform_cache, sound.id, &path);
-        }
-
-        if sound.vocal_only
+            self.cached_stem_waveform(&self.music_waveform_cache, sound.id, &path)
+        } else if sound.vocal_only
             && let Some(path) = sound.vocal_asset_path(self.storage.root_dir())
             && path.exists()
         {
-            return self.cached_stem_waveform(&self.vocal_waveform_cache, sound.id, &path);
-        }
+            self.cached_stem_waveform(&self.vocal_waveform_cache, sound.id, &path)
+        } else {
+            sound.waveform.clone()
+        };
 
-        sound.waveform.clone()
+        samples
+    }
+
+    fn scale_waveform_for_volume(mut samples: Vec<f32>, volume: f32) -> Vec<f32> {
+        let volume = volume.clamp(0.0, 5.0);
+        samples
+            .iter_mut()
+            .for_each(|sample| *sample = (*sample * volume).clamp(0.0, 1.0));
+        samples
     }
 
     pub(super) fn recording_waveform_samples(&self, draft: &RecordingDraft) -> Vec<f32> {
-        if draft.keep_music
+        let samples = if draft.keep_music
             && let Some(path) = draft.music_separated_path.as_ref()
             && path.exists()
         {
-            return self.cached_stem_waveform(&self.music_waveform_cache, draft.sound.id, path);
-        }
-
-        if draft.keep_vocal
+            self.cached_stem_waveform(&self.music_waveform_cache, draft.sound.id, path)
+        } else if draft.keep_vocal
             && let Some(path) = draft.vocal_separated_path.as_ref()
             && path.exists()
         {
-            return self.cached_stem_waveform(&self.vocal_waveform_cache, draft.sound.id, path);
-        }
+            self.cached_stem_waveform(&self.vocal_waveform_cache, draft.sound.id, path)
+        } else {
+            draft.sound.waveform.clone()
+        };
 
-        draft.sound.waveform.clone()
+        Self::scale_waveform_for_volume(samples, draft.sound.volume)
     }
 
     pub(super) fn cached_library_waveform_preview(
@@ -61,13 +73,14 @@ impl SoundFxApp {
         buckets: usize,
     ) -> Vec<f32> {
         let cache_key = format!(
-            "{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
+            "{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
             sound.id,
             sound.asset_file,
             sound.vocal_asset_file.as_deref().unwrap_or(""),
             sound.music_asset_file.as_deref().unwrap_or(""),
             sound.music_only,
             sound.vocal_only,
+            (sound.volume * 1000.0).round() as i32,
             (sound.trim_start_secs * 1000.0).round() as i32,
             (sound.trim_end_secs * 1000.0).round() as i32,
             sound
@@ -89,9 +102,11 @@ impl SoundFxApp {
             return existing;
         }
 
-        let waveform_samples = self.sound_waveform_samples(sound);
-        let preview =
-            Self::library_sound_waveform_preview_from_samples(sound, &waveform_samples, buckets);
+        let waveform_samples = self.raw_sound_waveform_samples(sound);
+        let preview = Self::scale_waveform_for_volume(
+            Self::library_sound_waveform_preview_from_samples(sound, &waveform_samples, buckets),
+            sound.volume,
+        );
         self.library_waveform_preview_cache
             .borrow_mut()
             .insert(cache_key, preview.clone());
@@ -212,15 +227,16 @@ impl SoundFxApp {
         let mut preview = Vec::with_capacity(bucket_count);
         let range_start = start_ratio.clamp(0.0, 1.0);
         let range_end = end_ratio.clamp(range_start, 1.0);
-        let start_index =
-            ((range_start * samples.len() as f32).floor() as usize).min(samples.len().saturating_sub(1));
+        let start_index = ((range_start * samples.len() as f32).floor() as usize)
+            .min(samples.len().saturating_sub(1));
         let end_index = ((range_end * samples.len() as f32).ceil() as usize)
             .clamp(start_index + 1, samples.len());
         let range_len = (end_index - start_index).max(1);
 
         for bucket_index in 0..bucket_count {
             let bucket_start = start_index
-                + (((bucket_index as f32 / bucket_count as f32) * range_len as f32).floor() as usize)
+                + (((bucket_index as f32 / bucket_count as f32) * range_len as f32).floor()
+                    as usize)
                     .min(range_len.saturating_sub(1));
             let mut bucket_end = start_index
                 + (((((bucket_index + 1) as f32) / bucket_count as f32) * range_len as f32).ceil()
@@ -668,5 +684,22 @@ impl SoundFxApp {
         let level = level.clamp(0.0, 1.0);
         let shaped = (level * 1.28).powf(1.16).clamp(0.0, 1.0);
         if shaped < 0.05 { shaped * 0.55 } else { shaped }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn waveform_amplitude_tracks_sound_volume() {
+        assert_eq!(
+            SoundFxApp::scale_waveform_for_volume(vec![0.2, 0.8], 0.5),
+            vec![0.1, 0.4]
+        );
+        assert_eq!(
+            SoundFxApp::scale_waveform_for_volume(vec![0.2, 0.8], 2.0),
+            vec![0.4, 1.0]
+        );
     }
 }

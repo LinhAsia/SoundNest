@@ -251,8 +251,7 @@ impl AudioEngine {
             (start_position_secs - sound.trim_start_secs).clamp(0.0, total_duration_secs)
         };
         let file_offset_secs = (original_offset_secs / speed).clamp(0.0, total_duration_secs);
-        let preview = open_audio_decoder(asset_path)?
-            .skip_duration(Duration::from_secs_f32(file_offset_secs));
+        let preview = seek_audio_decoder(open_audio_decoder(asset_path)?, file_offset_secs)?;
 
         let sink = Sink::try_new(&self.handle).context("unable to create audio sink")?;
         sink.append(PanicSafeSource::new(preview));
@@ -280,8 +279,7 @@ impl AudioEngine {
             (start_position_secs - sound.trim_start_secs).clamp(0.0, sound.trimmed_length());
         let file_offset_secs = sound.trim_start_secs + start_offset_secs;
         let remaining_secs = (sound.trim_end_secs - file_offset_secs).max(0.001);
-        let preview = open_audio_decoder(asset_path)?
-            .skip_duration(Duration::from_secs_f32(file_offset_secs))
+        let preview = seek_audio_decoder(open_audio_decoder(asset_path)?, file_offset_secs)?
             .take_duration(Duration::from_secs_f32(remaining_secs));
         let sink = Sink::try_new(&self.handle).context("unable to create audio sink")?;
         sink.append(PanicSafeSource::new(preview));
@@ -311,7 +309,7 @@ impl AudioEngine {
             .unwrap_or(0.05)
             .max(0.05);
         let start_offset_secs = start_position_secs.clamp(0.0, total_duration_secs.max(0.0));
-        let preview = decoder.skip_duration(Duration::from_secs_f32(start_offset_secs));
+        let preview = seek_audio_decoder(decoder, start_offset_secs)?;
         let sink = Sink::try_new(&self.handle).context("unable to create audio sink")?;
         sink.append(PanicSafeSource::new(preview));
         sink.play();
@@ -517,6 +515,16 @@ fn open_audio_decoder(asset_path: &Path) -> Result<Decoder<BufReader<File>>> {
     .map_err(|_| anyhow::anyhow!("audio decoder crashed while opening {}", path.display()))?
 }
 
+fn seek_audio_decoder(
+    mut decoder: Decoder<BufReader<File>>,
+    position_secs: f32,
+) -> Result<Decoder<BufReader<File>>> {
+    decoder
+        .try_seek(Duration::from_secs_f32(position_secs.max(0.0)))
+        .map_err(|error| anyhow::anyhow!("unable to seek audio preview: {error}"))?;
+    Ok(decoder)
+}
+
 fn soften_sample_edges(samples: &mut [f32], channels: u16, sample_rate: u32, fade_ms: f32) {
     if samples.is_empty() || channels == 0 || sample_rate == 0 {
         return;
@@ -609,5 +617,13 @@ mod tests {
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/default-startup.wav");
         let gain = calculate_normalization_gain(&path).expect("test audio should normalize");
         assert!(gain.is_finite() && gain > 0.0);
+    }
+
+    #[test]
+    fn decoder_seeks_directly_to_preview_position() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/default-startup.wav");
+        let mut decoder = seek_audio_decoder(open_audio_decoder(&path).unwrap(), 0.05)
+            .expect("test audio should seek");
+        assert!(decoder.next().is_some());
     }
 }

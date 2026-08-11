@@ -21,7 +21,7 @@ impl SoundFxApp {
         let refresh_inputs = false;
         let mut close_request = false;
         let (_panel_bounds, panel_size, panel_pos) =
-            self.centered_modal_placement(ctx, vec2(332.0, 312.0), vec2(292.0, 268.0), 0.0);
+            self.centered_modal_placement(ctx, vec2(388.0, 372.0), vec2(348.0, 328.0), 0.0);
         egui::Window::new("")
             .id(egui::Id::new("pitch-monitor-panel"))
             .order(egui::Order::Foreground)
@@ -45,7 +45,7 @@ impl SoundFxApp {
                     .inner_margin(Margin::same(20)),
             )
             .show(ctx, |ui| {
-                ui.set_width(292.0);
+                ui.set_width(348.0);
                 ui.horizontal(|ui| {
                     ui.vertical(|ui| {
                         ui.label(
@@ -87,14 +87,13 @@ impl SoundFxApp {
                         .corner_radius(18.0)
                         .inner_margin(Margin::symmetric(12, 10))
                         .show(ui, |ui| {
-                            ui.label(
-                                RichText::new("Hotkey")
-                                    .size(11.5)
-                                    .color(Self::muted_text_color()),
-                            );
-                            ui.add_space(8.0);
                             ui.horizontal_wrapped(|ui| {
                                 ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
+                                ui.label(
+                                    RichText::new("Hotkey")
+                                        .size(11.5)
+                                        .color(Self::muted_text_color()),
+                                );
                                 let keyboard_response = Self::icon_action(
                                     ui,
                                     [42.0, 34.0],
@@ -300,13 +299,13 @@ impl SoundFxApp {
 
                             ui.add_space(10.0);
                             Frame::new()
-                                .fill(Color32::from_rgb(255, 248, 252))
-                                .stroke(Stroke::new(1.0, Color32::from_rgb(236, 224, 232)))
-                                .corner_radius(16.0)
-                                .inner_margin(Margin::symmetric(12, 10))
+                                .fill(Self::input_fill())
+                                .stroke(Stroke::new(1.0, Self::subtle_border_color()))
+                                .corner_radius(14.0)
+                                .inner_margin(Margin::symmetric(12, 8))
                                 .show(ui, |ui| {
-                                    ui.horizontal_wrapped(|ui| {
-                                        ui.spacing_mut().item_spacing = vec2(12.0, 8.0);
+                                    ui.horizontal(|ui| {
+                                        ui.spacing_mut().item_spacing = vec2(18.0, 8.0);
                                         let animation_label = self.t("settings.animation");
                                         let sharp_label = self.t("pitch.sharp");
                                         let animation_changed = ui
@@ -314,7 +313,7 @@ impl SoundFxApp {
                                                 &mut self.pitch_overlay_animation,
                                                 RichText::new(animation_label)
                                                     .size(13.0)
-                                                    .color(Color32::from_rgb(58, 48, 58)),
+                                                    .color(Self::strong_text_color()),
                                             )
                                             .changed();
                                         let sharp_changed = ui
@@ -322,7 +321,7 @@ impl SoundFxApp {
                                                 &mut self.pitch_show_sharps,
                                                 RichText::new(sharp_label)
                                                     .size(13.0)
-                                                    .color(Color32::from_rgb(58, 48, 58)),
+                                                    .color(Self::strong_text_color()),
                                             )
                                             .changed();
                                         if animation_changed {
