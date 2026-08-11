@@ -1450,26 +1450,30 @@ impl SoundFxApp {
                     .inner_margin(Margin::symmetric(12, 8))
                     .show(ui, |ui| {
                         ui.set_width(260.0);
-                        ui.horizontal_centered(|ui| {
-                            if self.library_tab == LibraryTab::Sounds {
-                                self.draw_library_tag_toggle(ui);
-                                ui.add_space(8.0);
-                            }
-                            ui.label(Self::icon(0xe8b6, 16.0, Self::muted_text_color()));
-                            let search_hint = self.t("library.search");
-                            let query = if self.library_tab == LibraryTab::Videos {
-                                &mut self.library_video_query
-                            } else {
-                                &mut self.library_audio_query
-                            };
-                            ui.add_sized(
-                                [ui.available_width(), 24.0],
-                                TextEdit::singleline(query)
-                                    .frame(false)
-                                    .hint_text(search_hint)
-                                    .desired_width(f32::INFINITY),
-                            );
-                        });
+                        ui.allocate_ui_with_layout(
+                            vec2(260.0, 24.0),
+                            egui::Layout::left_to_right(Align::Center),
+                            |ui| {
+                                if self.library_tab == LibraryTab::Sounds {
+                                    self.draw_library_tag_toggle(ui);
+                                    ui.add_space(8.0);
+                                }
+                                ui.label(Self::icon(0xe8b6, 16.0, Self::muted_text_color()));
+                                let search_hint = self.t("library.search");
+                                let query = if self.library_tab == LibraryTab::Videos {
+                                    &mut self.library_video_query
+                                } else {
+                                    &mut self.library_audio_query
+                                };
+                                ui.add_sized(
+                                    [ui.available_width(), 24.0],
+                                    TextEdit::singleline(query)
+                                        .frame(false)
+                                        .hint_text(search_hint)
+                                        .desired_width(f32::INFINITY),
+                                );
+                            },
+                        );
                     });
             }
 
@@ -2445,19 +2449,24 @@ impl SoundFxApp {
                 .corner_radius(18.0)
                 .inner_margin(Margin::symmetric(12, 8))
                 .show(ui, |ui| {
-                    ui.horizontal_centered(|ui| {
-                        self.draw_library_tag_toggle(ui);
-                        ui.add_space(6.0);
-                        ui.label(Self::icon(0xe8b6, 16.0, Self::muted_text_color()));
-                        let search_hint = self.t("library.search");
-                        ui.add_sized(
-                            [ui.available_width(), 24.0],
-                            TextEdit::singleline(&mut self.library_audio_query)
-                                .frame(false)
-                                .hint_text(search_hint)
-                                .desired_width(f32::INFINITY),
-                        )
-                    })
+                    let row_width = ui.available_width();
+                    ui.allocate_ui_with_layout(
+                        vec2(row_width, 24.0),
+                        egui::Layout::left_to_right(Align::Center),
+                        |ui| {
+                            self.draw_library_tag_toggle(ui);
+                            ui.add_space(6.0);
+                            ui.label(Self::icon(0xe8b6, 16.0, Self::muted_text_color()));
+                            let search_hint = self.t("library.search");
+                            ui.add_sized(
+                                [ui.available_width(), 24.0],
+                                TextEdit::singleline(&mut self.library_audio_query)
+                                    .frame(false)
+                                    .hint_text(search_hint)
+                                    .desired_width(f32::INFINITY),
+                            )
+                        },
+                    )
                     .inner
                 });
             let search_block_rect = search_panel.response.rect.expand2(vec2(12.0, 10.0));
