@@ -2453,7 +2453,9 @@ impl SoundFxApp {
                 .corner_radius(18.0)
                 .inner_margin(Margin::symmetric(12, 8))
                 .show(ui, |ui| {
-                    ui.horizontal(|ui| {
+                    ui.with_layout(egui::Layout::left_to_right(Align::Center), |ui| {
+                        self.draw_library_tag_toggle(ui);
+                        ui.add_space(6.0);
                         ui.label(Self::icon(0xe8b6, 16.0, Self::muted_text_color()));
                         let search_hint = self.t("library.search");
                         ui.add_sized(
@@ -2467,6 +2469,15 @@ impl SoundFxApp {
                     .inner
                 });
             let search_block_rect = search_panel.response.rect.expand2(vec2(12.0, 10.0));
+            if self.library_audio_tags_expanded {
+                ui.add_space(8.0);
+                Frame::new()
+                    .fill(Self::surface_fill())
+                    .stroke(Stroke::new(1.0, Self::border_color()))
+                    .corner_radius(16.0)
+                    .inner_margin(Margin::symmetric(10, 8))
+                    .show(ui, |ui| self.draw_library_tag_filter_row(ui));
+            }
             ui.add_space(12.0);
             let visible_sound_indices = self.filtered_library_sound_indices();
             if visible_sound_indices.is_empty() {

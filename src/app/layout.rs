@@ -166,17 +166,31 @@ impl SoundFxApp {
         }
     }
     pub(super) fn draw_titlebar(&mut self, ui: &mut Ui, ctx: &Context) {
-        self.titlebar_drag_rect = None;
+        let titlebar_rect = Rect::from_min_size(ui.cursor().min, vec2(ui.available_width(), 44.0));
+        let titlebar_drag = ui.interact(
+            titlebar_rect,
+            ui.id().with("titlebar-drag"),
+            Sense::click_and_drag(),
+        );
+        self.titlebar_drag_rect = Some(titlebar_rect);
+        if titlebar_drag.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+        }
+        if titlebar_drag.dragged() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+        }
+        if titlebar_drag.drag_started() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+        }
         let downloader_snapshot = self.downloader.snapshot();
         let download_titlebar_active = downloader_snapshot.running && !self.show_download_panel;
         ui.horizontal(|ui| {
             let drag_width = (ui.available_width() - 668.0).max(180.0);
-            let drag_response = ui
-                .allocate_ui_with_layout(
+            ui.allocate_ui_with_layout(
                     vec2(drag_width, 44.0),
                     egui::Layout::left_to_right(Align::Center),
                     |ui| {
-                        let frame = Frame::new()
+                        Frame::new()
                             .fill(if self.dark_theme {
                                 Color32::from_rgba_premultiplied(35, 29, 41, 236)
                             } else {
@@ -192,25 +206,8 @@ impl SoundFxApp {
                                     Self::paint_titlebar_wave(ui);
                                 });
                             });
-                        ui.interact(
-                            frame.response.rect,
-                            ui.id().with("titlebar-drag"),
-                            Sense::click_and_drag(),
-                        )
                     },
-                )
-                .inner;
-
-            self.titlebar_drag_rect = Some(drag_response.rect);
-            if drag_response.hovered() {
-                ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
-            }
-            if drag_response.dragged() {
-                ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
-            }
-            if drag_response.drag_started() {
-                ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
-            }
+                );
 
             ui.add_space(8.0);
             let theme_response = ui.add_sized(

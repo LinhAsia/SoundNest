@@ -2,11 +2,7 @@ use super::*;
 
 impl SoundFxApp {
     pub(super) fn active_audio_tag_filter(&self) -> Option<&str> {
-        if self.app_view == AppView::Library {
-            self.library_audio_tag_filter.as_deref()
-        } else {
-            None
-        }
+        self.library_audio_tag_filter.as_deref()
     }
 
     pub(super) fn mark_sound_copied(&mut self, ctx: &Context, sound_id: Uuid) {

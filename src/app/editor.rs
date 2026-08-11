@@ -56,13 +56,18 @@ impl SoundFxApp {
         self.save_now();
     }
 
-    pub(super) fn copy_selected_processed_sound(&mut self) {
+    pub(super) fn copy_selected_processed_sound(&mut self, ctx: &Context) {
         let Some(index) = self.selected_sound_index() else {
             return;
         };
+        let sound_id = self.sounds[index].id;
 
         match self.copy_sound_file_to_clipboard(&self.sounds[index]) {
-            Ok(()) => self.status = Some(self.t("library.copied_to_clipboard")),
+            Ok(()) => {
+                self.clear_status();
+                self.mark_sound_copied(ctx, sound_id);
+                ctx.request_repaint();
+            }
             Err(error) => self.set_error_status(error),
         }
     }
@@ -3520,6 +3525,11 @@ impl SoundFxApp {
         let tags_hint = self.t("editor.tags_hint");
         let tags_available_label = self.t("editor.tags_available");
         let available_tags = self.distinct_sound_tags();
+        let copy_feedback_active = self.sound_copy_feedback_active(ctx, sound_id);
+        let copied_label = self.t("common.copied");
+        if copy_feedback_active {
+            ctx.request_repaint_after(Duration::from_millis(50));
+        }
 
         Frame::new()
             .fill(Self::surface_fill())
@@ -3595,7 +3605,25 @@ impl SoundFxApp {
                             if Self::icon_action(ui, [52.0, 34.0], 0xe14e, false, false).clicked() {
                                 commit_trim_request = true;
                             }
-                            if Self::icon_action(ui, [52.0, 34.0], 0xe14d, false, false).clicked() {
+                            let copy_button = Self::icon_action(
+                                ui,
+                                [52.0, 34.0],
+                                if copy_feedback_active { 0xe5ca } else { 0xe14d },
+                                copy_feedback_active,
+                                copy_feedback_active,
+                            );
+                            if copy_feedback_active {
+                                egui::show_tooltip_at(
+                                    ui.ctx(),
+                                    ui.layer_id(),
+                                    copy_button.id.with("copy-success"),
+                                    copy_button.rect.left_bottom() + vec2(0.0, 4.0),
+                                    |ui| {
+                                    ui.label(&copied_label);
+                                    },
+                                );
+                            }
+                            if copy_button.clicked() {
                                 copy_request = true;
                             }
                             if Self::icon_action(ui, [52.0, 34.0], 0xe2c8, false, false).clicked() {
@@ -4227,7 +4255,7 @@ impl SoundFxApp {
         }
 
         if copy_request {
-            self.copy_selected_processed_sound();
+            self.copy_selected_processed_sound(ctx);
         }
 
         if normalize_request {
