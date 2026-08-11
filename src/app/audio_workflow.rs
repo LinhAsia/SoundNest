@@ -52,6 +52,9 @@ impl SoundFxApp {
             self.set_error_status("Audio unavailable");
             return;
         };
+        if audio.current_sound_id() != Some(sound.id) {
+            audio.stop();
+        }
         self.myinstants_preview_audio_url = None;
 
         let needs_preload = sound.needs_processed_export()
