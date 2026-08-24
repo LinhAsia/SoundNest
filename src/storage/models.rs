@@ -51,6 +51,8 @@ pub struct SoundEffect {
     #[serde(default)]
     pub robot_enabled: bool,
     #[serde(default)]
+    pub eight_d_enabled: bool,
+    #[serde(default)]
     pub pitch_shift_enabled: bool,
     #[serde(default = "default_pitch_semitones")]
     pub pitch_shift_semitones: f32,
@@ -398,6 +400,7 @@ mod tests {
             echo_enabled: false,
             underwater_enabled: false,
             robot_enabled: false,
+            eight_d_enabled: false,
             pitch_shift_enabled: false,
             pitch_shift_semitones: 0.0,
             waveform: Vec::new(),

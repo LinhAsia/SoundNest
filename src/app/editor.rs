@@ -673,6 +673,7 @@ impl SoundFxApp {
                         sound.echo_enabled = clip.audio.echo_enabled;
                         sound.underwater_enabled = clip.audio.underwater_enabled;
                         sound.robot_enabled = clip.audio.robot_enabled;
+                        sound.eight_d_enabled = clip.audio.eight_d_enabled;
                         sound.pitch_shift_enabled = clip.audio.pitch_shift_enabled;
                         sound.pitch_shift_semitones = clip.audio.pitch_shift_semitones;
                         sound.vocal_only = clip.audio.vocal_only;
@@ -2810,6 +2811,7 @@ impl SoundFxApp {
         let effect_echo_label = self.t("editor.effect_echo");
         let effect_underwater_label = self.t("editor.effect_underwater");
         let effect_robot_label = self.t("editor.effect_robot");
+        let effect_eight_d_label = self.t("editor.effect_eight_d");
         let effect_pitch_shift_label = self.t("editor.effect_pitch_shift");
         let effect_reverb_hint = self.t("editor.effect_reverb_hint");
         let effect_telephone_hint = self.t("editor.effect_telephone_hint");
@@ -2817,6 +2819,7 @@ impl SoundFxApp {
         let effect_echo_hint = self.t("editor.effect_echo_hint");
         let effect_underwater_hint = self.t("editor.effect_underwater_hint");
         let effect_robot_hint = self.t("editor.effect_robot_hint");
+        let effect_eight_d_hint = self.t("editor.effect_eight_d_hint");
         let effect_pitch_shift_hint = self.t("editor.effect_pitch_shift_hint");
         let vocal_unavailable_label = self.t("editor.vocal_unavailable");
         let first_run_slower_label = self.t("editor.first_run_slower");
@@ -3109,6 +3112,22 @@ impl SoundFxApp {
                                 Self::decorate_button_response(ui, &robot);
                                 if robot.clicked() {
                                     draft.sound.robot_enabled = !draft.sound.robot_enabled;
+                                    changed = true;
+                                }
+
+                                let eight_d = ui
+                                    .add_sized(
+                                        [78.0, 30.0],
+                                        Self::action_button(
+                                            RichText::new(&effect_eight_d_label).size(11.5),
+                                            draft.sound.eight_d_enabled,
+                                            false,
+                                        ),
+                                    )
+                                    .on_hover_text(&effect_eight_d_hint);
+                                Self::decorate_button_response(ui, &eight_d);
+                                if eight_d.clicked() {
+                                    draft.sound.eight_d_enabled = !draft.sound.eight_d_enabled;
                                     changed = true;
                                 }
 
@@ -3642,6 +3661,7 @@ impl SoundFxApp {
         let effect_echo_label = self.t("editor.effect_echo");
         let effect_underwater_label = self.t("editor.effect_underwater");
         let effect_robot_label = self.t("editor.effect_robot");
+        let effect_eight_d_label = self.t("editor.effect_eight_d");
         let effect_pitch_shift_label = self.t("editor.effect_pitch_shift");
         let effect_reverb_hint = self.t("editor.effect_reverb_hint");
         let effect_telephone_hint = self.t("editor.effect_telephone_hint");
@@ -3649,6 +3669,7 @@ impl SoundFxApp {
         let effect_echo_hint = self.t("editor.effect_echo_hint");
         let effect_underwater_hint = self.t("editor.effect_underwater_hint");
         let effect_robot_hint = self.t("editor.effect_robot_hint");
+        let effect_eight_d_hint = self.t("editor.effect_eight_d_hint");
         let effect_pitch_shift_hint = self.t("editor.effect_pitch_shift_hint");
         let vocal_elapsed_text = if vocal_job_running {
             self.vocal_separation_elapsed_secs().map(|elapsed_secs| {
@@ -4082,6 +4103,24 @@ impl SoundFxApp {
                                     Self::decorate_button_response(ui, &robot);
                                     if robot.clicked() {
                                         sound.robot_enabled = !sound.robot_enabled;
+                                        changed = true;
+                                        processed_export_dirty = true;
+                                        playback_reapply_request = true;
+                                    }
+
+                                    let eight_d = ui
+                                        .add_sized(
+                                            [78.0, 30.0],
+                                            Self::action_button(
+                                                RichText::new(&effect_eight_d_label).size(11.5),
+                                                sound.eight_d_enabled,
+                                                false,
+                                            ),
+                                        )
+                                        .on_hover_text(&effect_eight_d_hint);
+                                    Self::decorate_button_response(ui, &eight_d);
+                                    if eight_d.clicked() {
+                                        sound.eight_d_enabled = !sound.eight_d_enabled;
                                         changed = true;
                                         processed_export_dirty = true;
                                         playback_reapply_request = true;
@@ -5565,6 +5604,7 @@ impl SoundFxApp {
                         toggle("Echo", &mut audio.echo_enabled);
                         toggle("Underwater", &mut audio.underwater_enabled);
                         toggle("Robot", &mut audio.robot_enabled);
+                        toggle("8D", &mut audio.eight_d_enabled);
                         toggle("Pitch Shift", &mut audio.pitch_shift_enabled);
                     });
                     ui.add_space(6.0);

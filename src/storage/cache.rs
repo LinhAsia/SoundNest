@@ -418,6 +418,9 @@ pub fn apply_sound_effects(
     if sound.robot_enabled {
         apply_robot_effect(samples, channels, sample_rate.max(1));
     }
+    if sound.eight_d_enabled {
+        apply_eight_d_effect(samples, channels, sample_rate.max(1));
+    }
     if sound.pitch_shift_enabled {
         apply_pitch_shift_effect(
             samples,
@@ -610,6 +613,73 @@ fn apply_reverb_effect(samples: &mut [f32], channels: usize, sample_rate: u32) {
     }
 }
 
+fn apply_eight_d_effect(samples: &mut [f32], channels: usize, sample_rate: u32) {
+    if channels < 2 || samples.is_empty() {
+        return;
+    }
+    let rotation_period_secs = 8.0;
+    let max_itd_samples = ((sample_rate as f32 * 0.00065).round() as usize).max(1);
+    let mut delay_l = vec![0.0f32; max_itd_samples + 1];
+    let mut delay_r = vec![0.0f32; max_itd_samples + 1];
+    let mut w_l = 0;
+    let mut w_r = 0;
+    let mut lp_l = 0.0f32;
+    let mut lp_r = 0.0f32;
+
+    let dt = 1.0 / sample_rate.max(1) as f32;
+    let rear_lowpass_cutoff = 2400.0;
+    let rc = 1.0 / (std::f32::consts::TAU * rear_lowpass_cutoff);
+    let alpha = dt / (rc + dt);
+
+    let total_frames = samples.len() / channels;
+    for frame_idx in 0..total_frames {
+        let t = frame_idx as f32 / sample_rate.max(1) as f32;
+        let angle = (t / rotation_period_secs) * std::f32::consts::TAU;
+        let pan = angle.sin();
+        let depth = angle.cos();
+
+        let pan_angle = (pan + 1.0) * 0.25 * std::f32::consts::PI;
+        let gain_l = pan_angle.cos();
+        let gain_r = pan_angle.sin();
+
+        let sample_l = samples[frame_idx * channels];
+        let sample_r = samples[frame_idx * channels + 1];
+
+        delay_l[w_l] = sample_l;
+        delay_r[w_r] = sample_r;
+
+        let (out_l_raw, out_r_raw) = if pan >= 0.0 {
+            let delay_amt = (pan * max_itd_samples as f32).round() as usize;
+            let r_idx = (w_l + delay_l.len() - delay_amt) % delay_l.len();
+            (delay_l[r_idx], sample_r)
+        } else {
+            let delay_amt = ((-pan) * max_itd_samples as f32).round() as usize;
+            let r_idx = (w_r + delay_r.len() - delay_amt) % delay_r.len();
+            (sample_l, delay_r[r_idx])
+        };
+
+        w_l = (w_l + 1) % delay_l.len();
+        w_r = (w_r + 1) % delay_r.len();
+
+        let (filtered_l, filtered_r) = if depth < 0.0 {
+            let rear_factor = (-depth).clamp(0.0, 1.0) * 0.4;
+            lp_l += alpha * (out_l_raw - lp_l);
+            lp_r += alpha * (out_r_raw - lp_r);
+            (
+                out_l_raw * (1.0 - rear_factor) + lp_l * rear_factor,
+                out_r_raw * (1.0 - rear_factor) + lp_r * rear_factor,
+            )
+        } else {
+            lp_l = out_l_raw;
+            lp_r = out_r_raw;
+            (out_l_raw, out_r_raw)
+        };
+
+        samples[frame_idx * channels] = (filtered_l * gain_l * 1.2).clamp(-1.0, 1.0);
+        samples[frame_idx * channels + 1] = (filtered_r * gain_r * 1.2).clamp(-1.0, 1.0);
+    }
+}
+
 fn open_decoder(path: &Path) -> Result<Decoder<BufReader<File>>> {
     let file = File::open(path).with_context(|| format!("unable to open {}", path.display()))?;
     Decoder::new(BufReader::new(file)).context("unsupported audio file")
@@ -627,5 +697,28 @@ mod tests {
             / decoded.channels.max(1) as f32
             / decoded.sample_rate.max(1) as f32;
         assert!((0.04..=0.06).contains(&duration));
+    }
+
+    #[test]
+    fn eight_d_audio_effect_rotates_stereo_channels() {
+        let sample_rate = 44100;
+        let mut samples = vec![1.0f32; sample_rate as usize * 2 * 3]; // 3 seconds of stereo 44.1kHz
+        apply_eight_d_effect(&mut samples, 2, sample_rate);
+        // At start (t = 0), pan = 0.0 (center front), gain_l == gain_r
+        let start_l = samples[0];
+        let start_r = samples[1];
+        assert!((start_l - start_r).abs() < 0.1);
+
+        // At t = 2.0s (1/4 cycle of 8s period), angle = PI/2, pan = 1.0 (full right).
+        // Right ear should have significantly higher gain than left ear.
+        let frame_2s = sample_rate as usize * 2;
+        let right_pan_l = samples[frame_2s * 2].abs();
+        let right_pan_r = samples[frame_2s * 2 + 1].abs();
+        assert!(
+            right_pan_r > right_pan_l * 1.5,
+            "Right channel ({}) should be significantly louder than Left channel ({}) at full right pan",
+            right_pan_r,
+            right_pan_l
+        );
     }
 }

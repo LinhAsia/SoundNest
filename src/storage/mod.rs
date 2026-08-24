@@ -151,6 +151,7 @@ impl Storage {
             echo_enabled: false,
             underwater_enabled: false,
             robot_enabled: false,
+            eight_d_enabled: false,
             pitch_shift_enabled: false,
             pitch_shift_semitones: 0.0,
             waveform: analysis.waveform,
@@ -460,6 +461,7 @@ impl Storage {
         let echo = if sound.echo_enabled { "-ech" } else { "" };
         let underwater = if sound.underwater_enabled { "-und" } else { "" };
         let robot = if sound.robot_enabled { "-rob" } else { "" };
+        let eight_d = if sound.eight_d_enabled { "-8d" } else { "" };
         let pitch_shift = if sound.pitch_shift_enabled {
             format!(
                 "-ps{:03}",
@@ -469,7 +471,7 @@ impl Storage {
             "".to_string()
         };
         format!(
-            "-proc-v{:04}-s{:04}-a{:06}-b{:06}-c{:06}-d{:06}{}{}{}{}{}{}{}{}",
+            "-proc-v{:04}-s{:04}-a{:06}-b{:06}-c{:06}-d{:06}{}{}{}{}{}{}{}{}{}",
             volume,
             speed,
             trim_start,
@@ -483,6 +485,7 @@ impl Storage {
             echo,
             underwater,
             robot,
+            eight_d,
             pitch_shift
         )
     }
@@ -520,6 +523,7 @@ impl Storage {
             echo_enabled: false,
             underwater_enabled: false,
             robot_enabled: false,
+            eight_d_enabled: false,
             pitch_shift_enabled: false,
             pitch_shift_semitones: 0.0,
             waveform: analysis.waveform,
@@ -783,6 +787,7 @@ impl Storage {
         updated.echo_enabled = false;
         updated.underwater_enabled = false;
         updated.robot_enabled = false;
+        updated.eight_d_enabled = false;
         updated.pitch_shift_enabled = false;
         updated.pitch_shift_semitones = 0.0;
         updated.clamp_trim();

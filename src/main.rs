@@ -351,11 +351,7 @@ fn configure_fonts(ctx: &egui::Context) {
     let mut fonts = FontDefinitions::default();
     let proportional_fonts = [
         (UI_FONT, r"C:\Windows\Fonts\segoeui.ttf"),
-        ("ui_font_jp", r"C:\Windows\Fonts\YuGothM.ttc"),
-        ("ui_font_jp_alt", r"C:\Windows\Fonts\meiryo.ttc"),
-        ("ui_font_kr", r"C:\Windows\Fonts\malgun.ttf"),
         ("ui_font_symbols", r"C:\Windows\Fonts\seguisym.ttf"),
-        ("ui_font_emoji", r"C:\Windows\Fonts\seguiemj.ttf"),
     ];
     for (font_name, font_path) in proportional_fonts {
         if let Ok(bytes) = fs::read(font_path) {

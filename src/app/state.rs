@@ -144,6 +144,7 @@ pub(crate) struct TimelineClipAudioSettings {
     pub(crate) echo_enabled: bool,
     pub(crate) underwater_enabled: bool,
     pub(crate) robot_enabled: bool,
+    pub(crate) eight_d_enabled: bool,
     pub(crate) pitch_shift_enabled: bool,
     pub(crate) pitch_shift_semitones: f32,
     pub(crate) vocal_only: bool,
@@ -161,6 +162,7 @@ impl Default for TimelineClipAudioSettings {
             echo_enabled: false,
             underwater_enabled: false,
             robot_enabled: false,
+            eight_d_enabled: false,
             pitch_shift_enabled: false,
             pitch_shift_semitones: 0.0,
             vocal_only: false,
@@ -180,6 +182,7 @@ impl TimelineClipAudioSettings {
             echo_enabled: sound.echo_enabled,
             underwater_enabled: sound.underwater_enabled,
             robot_enabled: sound.robot_enabled,
+            eight_d_enabled: sound.eight_d_enabled,
             pitch_shift_enabled: sound.pitch_shift_enabled,
             pitch_shift_semitones: sound.pitch_shift_semitones,
             vocal_only: sound.vocal_only,
@@ -196,6 +199,7 @@ impl TimelineClipAudioSettings {
         if after.echo_enabled != before.echo_enabled { self.echo_enabled = after.echo_enabled; }
         if after.underwater_enabled != before.underwater_enabled { self.underwater_enabled = after.underwater_enabled; }
         if after.robot_enabled != before.robot_enabled { self.robot_enabled = after.robot_enabled; }
+        if after.eight_d_enabled != before.eight_d_enabled { self.eight_d_enabled = after.eight_d_enabled; }
         if after.pitch_shift_enabled != before.pitch_shift_enabled { self.pitch_shift_enabled = after.pitch_shift_enabled; }
         if after.vocal_only != before.vocal_only { self.vocal_only = after.vocal_only; }
         if after.music_only != before.music_only { self.music_only = after.music_only; }
