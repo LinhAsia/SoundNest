@@ -25,6 +25,7 @@ impl eframe::App for SoundFxApp {
         self.poll_stream_input_router(ctx);
         self.poll_vocal_separation_jobs(ctx);
         self.poll_tts_jobs(ctx);
+        self.poll_video_viewer_jobs(ctx);
         self.prune_copy_feedback(ctx);
         if !ctx.input(|input| input.pointer.primary_down()) {
             let accepted_trim_drop = self.finalize_pending_trim_timeline_drop();

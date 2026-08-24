@@ -65,7 +65,11 @@ impl SoundFxApp {
             return;
         }
 
-        if self.video_viewer.is_some() {
+        if self
+            .video_viewer
+            .as_ref()
+            .is_some_and(|viewer| viewer.receiver.is_none())
+        {
             if !ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Space)) {
                 return;
             }

@@ -23,6 +23,7 @@ pub(crate) struct VideoViewerState {
     pub(crate) audio_path: PathBuf,
     pub(crate) progress: f32,
     pub(crate) current_frame: Option<(usize, TextureHandle, Vec2)>,
+    pub(crate) receiver: Option<Receiver<Result<Vec<PathBuf>, String>>>,
 }
 
 pub(crate) struct RecordVideoExportState {

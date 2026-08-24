@@ -742,28 +742,35 @@ impl SoundFxApp {
         };
 
         let (video, audio_path, stored_progress, frame_count) = viewer_snapshot;
-        let is_playing = self
-            .audio
-            .as_ref()
-            .is_some_and(|audio| audio.is_playing_file(&audio_path));
-        let mut progress = self
-            .audio
-            .as_ref()
-            .and_then(|audio| audio.playback_progress_for_file(&audio_path))
-            .unwrap_or(stored_progress);
+        let is_loading = frame_count == 0;
+        let is_playing = !is_loading
+            && self
+                .audio
+                .as_ref()
+                .is_some_and(|audio| audio.is_playing_file(&audio_path));
+        let mut progress = if !is_loading {
+            self.audio
+                .as_ref()
+                .and_then(|audio| audio.playback_progress_for_file(&audio_path))
+                .unwrap_or(stored_progress)
+        } else {
+            0.0
+        };
         if !is_playing {
             progress = progress.clamp(0.0, 1.0);
         } else {
             ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
         }
 
-        let frame_index = ((progress * frame_count.saturating_sub(1) as f32).round() as usize)
-            .min(frame_count.saturating_sub(1));
-        if let Err(error) = self.load_video_frame_texture(ctx, frame_index) {
-            self.set_error_status(error);
-        }
-        if let Some(viewer) = self.video_viewer.as_mut() {
-            viewer.progress = progress;
+        if !is_loading {
+            let frame_index = ((progress * frame_count.saturating_sub(1) as f32).round() as usize)
+                .min(frame_count.saturating_sub(1));
+            if let Err(error) = self.load_video_frame_texture(ctx, frame_index) {
+                self.set_error_status(error);
+            }
+            if let Some(viewer) = self.video_viewer.as_mut() {
+                viewer.progress = progress;
+            }
         }
 
         let frame_texture = self.video_viewer.as_ref().and_then(|viewer| {
@@ -836,8 +843,10 @@ impl SoundFxApp {
                                 ui.image((texture.id(), *image_size * scale));
                             } else {
                                 ui.add_space(160.0);
+                                ui.spinner();
+                                ui.add_space(8.0);
                                 ui.label(
-                                    RichText::new("Loading video")
+                                    RichText::new(self.t("video.loading"))
                                         .size(15.0)
                                         .color(Color32::from_rgb(255, 222, 236)),
                                 );
@@ -853,8 +862,8 @@ impl SoundFxApp {
                     .inner_margin(Margin::same(18))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            let play = ui.add_sized(
-                                [92.0, 34.0],
+                            let play = ui.add_enabled(
+                                !is_loading,
                                 Self::action_button(
                                     RichText::new(if is_playing { "Stop" } else { "Play" })
                                         .size(13.0),

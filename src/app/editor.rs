@@ -1816,65 +1816,128 @@ impl SoundFxApp {
         let audio_path = preview_root.join("audio.wav");
         let ready_marker = preview_root.join("ready.txt");
 
-        if !ready_marker.exists() {
-            if preview_root.exists() {
-                let _ = fs::remove_dir_all(&preview_root);
-            }
-            fs::create_dir_all(&frames_dir)
-                .with_context(|| format!("unable to create {}", frames_dir.display()))?;
-
-            let frame_pattern = frames_dir.join("frame_%05d.ppm");
-            Self::run_ffmpeg_command(
-                &ffmpeg_path,
-                [
-                    "-y",
-                    "-i",
-                    &source_path.to_string_lossy(),
-                    "-vf",
-                    &format!("fps={}", video.normalized_fps()),
-                    "-pix_fmt",
-                    "rgb24",
-                    &frame_pattern.to_string_lossy(),
-                ],
-            )?;
-            Self::run_ffmpeg_command(
-                &ffmpeg_path,
-                [
-                    "-y",
-                    "-i",
-                    &source_path.to_string_lossy(),
-                    "-vn",
-                    "-acodec",
-                    "pcm_s16le",
-                    &audio_path.to_string_lossy(),
-                ],
-            )?;
-            fs::write(&ready_marker, b"ok")
-                .with_context(|| format!("unable to write {}", ready_marker.display()))?;
-        }
-
-        let mut frame_paths = fs::read_dir(&frames_dir)
-            .with_context(|| format!("unable to read {}", frames_dir.display()))?
-            .filter_map(|entry| entry.ok().map(|entry| entry.path()))
-            .filter(|path| path.extension().and_then(|value| value.to_str()) == Some("ppm"))
-            .collect::<Vec<_>>();
-        frame_paths.sort();
-        if frame_paths.is_empty() {
-            anyhow::bail!("video preview is empty");
-        }
-
         self.stop_preview();
+
+        if ready_marker.exists() {
+            let mut frame_paths = fs::read_dir(&frames_dir)
+                .with_context(|| format!("unable to read {}", frames_dir.display()))?
+                .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+                .filter(|path| path.extension().and_then(|value| value.to_str()) == Some("ppm"))
+                .collect::<Vec<_>>();
+            frame_paths.sort();
+            if !frame_paths.is_empty() {
+                self.video_viewer = Some(VideoViewerState {
+                    video: video.clone(),
+                    frame_paths,
+                    audio_path,
+                    progress: 0.0,
+                    current_frame: None,
+                    receiver: None,
+                });
+                self.load_video_frame_texture(ctx, 0)?;
+                let _ = self.play_video_viewer_from_current_playhead();
+                ctx.request_repaint();
+                self.clear_status();
+                return Ok(());
+            }
+        }
+
+        // ponytail: Generate downscaled preview frames and audio WAV in background thread to prevent UI freezing
+        let (tx, rx) = std::sync::mpsc::channel();
         self.video_viewer = Some(VideoViewerState {
             video: video.clone(),
-            frame_paths,
-            audio_path,
+            frame_paths: Vec::new(),
+            audio_path: audio_path.clone(),
             progress: 0.0,
             current_frame: None,
+            receiver: Some(rx),
         });
-        self.load_video_frame_texture(ctx, 0)?;
         ctx.request_repaint();
         self.clear_status();
+
+        let preview_fps = 20;
+        let frame_pattern = frames_dir.join("frame_%05d.ppm");
+        thread::spawn(move || {
+            let result = (|| -> Result<Vec<PathBuf>> {
+                if preview_root.exists() {
+                    let _ = fs::remove_dir_all(&preview_root);
+                }
+                fs::create_dir_all(&frames_dir)
+                    .with_context(|| format!("unable to create {}", frames_dir.display()))?;
+
+                let filter = format!(
+                    "fps={preview_fps},scale='min(720,iw)':'min(430,ih)':force_original_aspect_ratio=decrease"
+                );
+                Self::run_ffmpeg_command(
+                    &ffmpeg_path,
+                    [
+                        "-y",
+                        "-i",
+                        &source_path.to_string_lossy(),
+                        "-vf",
+                        &filter,
+                        "-pix_fmt",
+                        "rgb24",
+                        &frame_pattern.to_string_lossy(),
+                        "-vn",
+                        "-acodec",
+                        "pcm_s16le",
+                        &audio_path.to_string_lossy(),
+                    ],
+                )?;
+                fs::write(&ready_marker, b"ok")
+                    .with_context(|| format!("unable to write {}", ready_marker.display()))?;
+
+                let mut frame_paths = fs::read_dir(&frames_dir)
+                    .with_context(|| format!("unable to read {}", frames_dir.display()))?
+                    .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+                    .filter(|path| path.extension().and_then(|value| value.to_str()) == Some("ppm"))
+                    .collect::<Vec<_>>();
+                frame_paths.sort();
+                if frame_paths.is_empty() {
+                    anyhow::bail!("video preview is empty");
+                }
+                Ok(frame_paths)
+            })();
+            let _ = tx.send(result.map_err(|e| e.to_string()));
+        });
+
         Ok(())
+    }
+
+    pub(super) fn poll_video_viewer_jobs(&mut self, ctx: &Context) {
+        let Some(viewer) = self.video_viewer.as_mut() else {
+            return;
+        };
+        let Some(receiver) = viewer.receiver.as_ref() else {
+            return;
+        };
+        match receiver.try_recv() {
+            Ok(Ok(frame_paths)) => {
+                viewer.frame_paths = frame_paths;
+                viewer.receiver = None;
+                if let Err(error) = self.load_video_frame_texture(ctx, 0) {
+                    self.set_error_status(error);
+                }
+                if let Err(error) = self.play_video_viewer_from_current_playhead() {
+                    self.set_error_status(error);
+                }
+                ctx.request_repaint();
+            }
+            Ok(Err(error_msg)) => {
+                self.video_viewer = None;
+                self.set_error_status(anyhow::anyhow!(error_msg));
+                ctx.request_repaint();
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                ctx.request_repaint_after(Duration::from_millis(JOB_POLL_REPAINT_MS));
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.video_viewer = None;
+                self.set_error_status(anyhow::anyhow!("video preview generation terminated unexpectedly"));
+                ctx.request_repaint();
+            }
+        }
     }
 
     pub(super) fn run_ffmpeg_command<I, S>(ffmpeg_path: &Path, args: I) -> Result<()>
@@ -1905,6 +1968,9 @@ impl SoundFxApp {
         let Some(viewer) = self.video_viewer.as_mut() else {
             return Ok(());
         };
+        if viewer.frame_paths.is_empty() {
+            return Ok(());
+        }
         if viewer
             .current_frame
             .as_ref()
@@ -1918,12 +1984,18 @@ impl SoundFxApp {
             .get(frame_index)
             .context("video frame not found")?;
         let (image, size) = load_ppm_color_image(path)?;
-        let texture = ctx.load_texture(
-            format!("video-frame-{}-{frame_index}", viewer.video.id),
-            image,
-            egui::TextureOptions::LINEAR,
-        );
-        viewer.current_frame = Some((frame_index, texture, size));
+        if let Some((current_idx, texture, current_size)) = viewer.current_frame.as_mut() {
+            *current_idx = frame_index;
+            *current_size = size;
+            texture.set(image, egui::TextureOptions::LINEAR);
+        } else {
+            let texture = ctx.load_texture(
+                format!("video-frame-{}", viewer.video.id),
+                image,
+                egui::TextureOptions::LINEAR,
+            );
+            viewer.current_frame = Some((frame_index, texture, size));
+        }
         Ok(())
     }
 
@@ -7149,6 +7221,18 @@ mod timeline_name_tests {
         assert_eq!(
             next_default_sound_name(["Sound 1", "other", "sound 2"]),
             "Sound 3"
+        );
+    }
+
+    #[test]
+    fn video_preview_filter_is_valid() {
+        let preview_fps = 20;
+        let filter = format!(
+            "fps={preview_fps},scale='min(720,iw)':'min(430,ih)':force_original_aspect_ratio=decrease"
+        );
+        assert_eq!(
+            filter,
+            "fps=20,scale='min(720,iw)':'min(430,ih)':force_original_aspect_ratio=decrease"
         );
     }
 }

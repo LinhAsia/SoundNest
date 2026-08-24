@@ -2410,8 +2410,6 @@ impl SoundFxApp {
         if let Some(video) = open_video {
             if let Err(error) = self.prepare_video_viewer(ui.ctx(), &video) {
                 self.set_error_status(error);
-            } else if let Err(error) = self.play_video_viewer_from_current_playhead() {
-                self.set_error_status(error);
             }
         }
         if let Some(video) = copy_video {
