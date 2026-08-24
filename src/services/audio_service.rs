@@ -231,10 +231,28 @@ impl AudioEngine {
         asset_path: &Path,
         start_position_secs: f32,
     ) -> Result<()> {
-        if !sound.needs_preprocessed_preview() {
-            return self.play_sound_streaming(sound, asset_path, start_position_secs);
+        if self.has_cached_audio(asset_path) || sound.needs_preprocessed_preview() {
+            return self.play_sound_cached(sound, asset_path, start_position_secs);
         }
 
+        match self.play_sound_streaming(sound, asset_path, start_position_secs) {
+            Ok(()) => Ok(()),
+            Err(stream_err) => {
+                if self.ensure_cached_audio(asset_path).is_ok() {
+                    self.play_sound_cached(sound, asset_path, start_position_secs)
+                } else {
+                    Err(stream_err)
+                }
+            }
+        }
+    }
+
+    fn play_sound_cached(
+        &mut self,
+        sound: &SoundEffect,
+        asset_path: &Path,
+        start_position_secs: f32,
+    ) -> Result<()> {
         self.stop();
 
         self.ensure_cached_audio(asset_path)?;
@@ -292,7 +310,7 @@ impl AudioEngine {
             .amplify(sound.volume.max(0.0));
 
         let sink = Sink::try_new(&self.handle).context("unable to create audio sink")?;
-        sink.append(preview);
+        sink.append(PanicSafeSource::new(preview));
         sink.play();
 
         self.current_id = Some(sound.id);
@@ -345,11 +363,19 @@ impl AudioEngine {
     ) -> Result<()> {
         self.stop();
 
-        let start_offset_secs =
-            (start_position_secs - sound.trim_start_secs).clamp(0.0, sound.trimmed_length());
-        let file_offset_secs = sound.trim_start_secs + start_offset_secs;
-        let remaining_secs = (sound.trim_end_secs - file_offset_secs).max(0.001);
-        let source = seek_audio_decoder(open_audio_decoder(asset_path)?, file_offset_secs)?
+        let trim_start = sound.trim_start_secs.max(0.0);
+        let trim_end = if sound.trim_end_secs > trim_start + 0.001 {
+            sound.trim_end_secs
+        } else {
+            sound.safe_duration()
+        };
+        let trimmed_length = (trim_end - trim_start).max(0.05);
+        let start_offset_secs = (start_position_secs - trim_start).clamp(0.0, trimmed_length);
+        let file_offset_secs = trim_start + start_offset_secs;
+        let remaining_secs = (trim_end - file_offset_secs).max(0.05);
+
+        let decoder = open_audio_decoder(asset_path)?;
+        let source = seek_audio_decoder(decoder, file_offset_secs)?
             .take_duration(Duration::from_secs_f32(remaining_secs))
             .convert_samples::<f32>();
         let speed = sound.speed.clamp(0.25, 2.0);
@@ -357,12 +383,12 @@ impl AudioEngine {
             .speed(speed)
             .amplify(sound.volume.max(0.0));
         let sink = Sink::try_new(&self.handle).context("unable to create audio sink")?;
-        sink.append(preview);
+        sink.append(PanicSafeSource::new(preview));
         sink.play();
 
         self.current_id = Some(sound.id);
         self.current_file_path = None;
-        self.current_total_duration_secs = sound.trimmed_length();
+        self.current_total_duration_secs = trimmed_length;
         self.current_sound = Some(sound.clone());
         self.current_start_offset_secs = start_offset_secs;
         self.current_speed = speed;
@@ -594,9 +620,11 @@ fn seek_audio_decoder(
     mut decoder: Decoder<BufReader<File>>,
     position_secs: f32,
 ) -> Result<Decoder<BufReader<File>>> {
-    decoder
-        .try_seek(Duration::from_secs_f32(position_secs.max(0.0)))
-        .map_err(|error| anyhow::anyhow!("unable to seek audio preview: {error}"))?;
+    if position_secs > 0.001 {
+        decoder
+            .try_seek(Duration::from_secs_f32(position_secs))
+            .map_err(|error| anyhow::anyhow!("unable to seek audio preview: {error}"))?;
+    }
     Ok(decoder)
 }
 

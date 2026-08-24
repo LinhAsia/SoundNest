@@ -48,6 +48,10 @@ impl SoundFxApp {
         };
 
         let asset_path = self.preview_asset_path_for_sound(&sound);
+        if !asset_path.exists() {
+            self.set_error_status(format!("Audio file not found: {}", sound.asset_file));
+            return;
+        }
         let Some(audio) = self.audio.as_mut() else {
             self.set_error_status("Audio unavailable");
             return;

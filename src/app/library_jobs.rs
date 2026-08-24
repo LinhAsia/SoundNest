@@ -217,6 +217,13 @@ impl SoundFxApp {
                                 );
                                 changed = true;
                             }
+                            if let Some((pending_sound_id, start_position_secs)) =
+                                pending_preview_match
+                            {
+                                self.pending_preview_after_preload = None;
+                                pending_preview_to_play =
+                                    Some((pending_sound_id, start_position_secs));
+                            }
                         }
                         Err(error) => {
                             if let Some((pending_sound_id, start_position_secs)) =
@@ -254,10 +261,6 @@ impl SoundFxApp {
                                 ));
                             }
                         }
-                    }
-                    if let Some((pending_sound_id, start_position_secs)) = pending_preview_match {
-                        self.pending_preview_after_preload = None;
-                        pending_preview_to_play = Some((pending_sound_id, start_position_secs));
                     }
                 }
             }
