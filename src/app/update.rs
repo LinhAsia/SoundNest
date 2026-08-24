@@ -27,6 +27,11 @@ impl eframe::App for SoundFxApp {
         self.poll_tts_jobs(ctx);
         self.poll_video_viewer_jobs(ctx);
         self.prune_copy_feedback(ctx);
+        let now = ctx.input(|input| input.time);
+        if now - self.last_working_set_trim_at >= 4.0 {
+            self.last_working_set_trim_at = now;
+            platform::trim_working_set();
+        }
         if !ctx.input(|input| input.pointer.primary_down()) {
             let accepted_trim_drop = self.finalize_pending_trim_timeline_drop();
             if !accepted_trim_drop {

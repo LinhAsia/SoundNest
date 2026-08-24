@@ -426,9 +426,9 @@ impl SoundFxApp {
         } else {
             ((rect.width() - column_width).max(0.0)) / (column_count - 1) as f32
         };
-        let baseline = (rect.bottom() - 4.0).round();
-        let min_height = 6.0;
-        let max_height = (rect.height() - 8.0).max(min_height);
+        let baseline = (rect.bottom() - 2.0).round();
+        let min_height = 2.5;
+        let max_height = ((rect.height() - 4.0).max(min_height) - min_height).max(2.0);
         let wave_color = if highlight {
             Color32::from_rgb(255, 230, 244)
         } else {
@@ -450,7 +450,7 @@ impl SoundFxApp {
             }
             .round()
             .max(left + 1.0);
-            let height = (min_height + amplitude * max_height).min(max_height + min_height);
+            let height = min_height + amplitude * max_height;
             let wave_rect = Rect::from_min_max(
                 Pos2::new(left, (baseline - height).round()),
                 Pos2::new(right, baseline),

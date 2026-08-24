@@ -6386,12 +6386,12 @@ impl SoundFxApp {
                     let waveform_rect = Rect::from_min_max(
                         Pos2::new(
                             rendered_clip_rect.left() + waveform_inset_x,
-                            rendered_clip_rect.top() + 15.0,
+                            rendered_clip_rect.top() + 18.0,
                         ),
                         Pos2::new(
                             (rendered_clip_rect.right() - waveform_inset_x)
                                 .max(rendered_clip_rect.left() + waveform_inset_x),
-                            rendered_clip_rect.bottom() - 4.0,
+                            rendered_clip_rect.bottom() - 3.0,
                         ),
                     );
                     Self::paint_timeline_waveform_columns(

@@ -824,3 +824,10 @@ pub fn cursor_window_position(window_title: &str) -> Option<eframe::egui::Pos2> 
         Some(eframe::egui::pos2(cursor.x as f32, cursor.y as f32))
     }
 }
+
+pub fn trim_working_set() {
+    unsafe {
+        use windows::Win32::System::Threading::{GetCurrentProcess, SetProcessWorkingSetSize};
+        let _ = SetProcessWorkingSetSize(GetCurrentProcess(), usize::MAX, usize::MAX);
+    }
+}

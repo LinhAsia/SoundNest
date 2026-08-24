@@ -59,3 +59,6 @@ pub fn cursor_screen_position() -> Option<eframe::egui::Pos2> {
 pub fn cursor_window_position(_window_title: &str) -> Option<eframe::egui::Pos2> {
     None
 }
+
+#[cfg(not(windows))]
+pub fn trim_working_set() {}
