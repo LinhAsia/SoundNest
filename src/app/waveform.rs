@@ -266,7 +266,7 @@ impl SoundFxApp {
             return Vec::new();
         }
 
-        let bucket_count = buckets.clamp(12, 64).min(samples.len().max(1));
+        let bucket_count = buckets.max(12);
         let mut preview = Vec::with_capacity(bucket_count);
 
         for bucket_index in 0..bucket_count {
@@ -641,17 +641,18 @@ impl SoundFxApp {
         }
 
         let bar_width = inner.width() / waveform.len().max(1) as f32;
+        let column_width = (bar_width * 0.44).clamp(1.5, 3.2);
         for (index, level) in waveform.iter().enumerate() {
             let amplitude = Self::wave_strip_level(*level).clamp(0.08, 1.0);
             let center_x = inner.left() + (index as f32 + 0.5) * bar_width;
             let half = amplitude * inner.height() * 0.42;
             let bar = Rect::from_min_max(
                 Pos2::new(
-                    center_x - (bar_width * 0.22).max(0.9),
+                    center_x - column_width * 0.5,
                     inner.center().y - half,
                 ),
                 Pos2::new(
-                    center_x + (bar_width * 0.22).max(0.9),
+                    center_x + column_width * 0.5,
                     inner.center().y + half,
                 ),
             );
@@ -660,7 +661,7 @@ impl SoundFxApp {
             } else {
                 idle_color
             };
-            painter.rect_filled(bar, 2.5, color);
+            painter.rect_filled(bar, 2.0, color);
         }
 
         if let Some(progress) = progress {
