@@ -2096,6 +2096,12 @@ impl SoundFxApp {
         {
             return true;
         }
+        if self.show_download_panel
+            && let Some(path) = self.download_preview_file.as_ref()
+            && audio.is_playing_file(path)
+        {
+            return true;
+        }
         if let Some(selected) = self.selected
             && audio.is_playing(selected)
         {
@@ -2107,6 +2113,21 @@ impl SoundFxApp {
     pub(super) fn handle_trim_start_preview(&mut self, ctx: &Context) {
         if self.is_transition_active() {
             return;
+        }
+
+        if self.show_download_panel {
+            if !ctx.wants_keyboard_input()
+                && let Some(path) = self.download_preview_file.clone()
+            {
+                if !ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::S)) {
+                    return;
+                }
+                self.download_preview_cursor = Some(0.0);
+                if let Some(audio) = self.audio.as_mut() {
+                    let _ = audio.play_file_from(&path, 0.0);
+                }
+                return;
+            }
         }
 
         if self.show_record_review_panel {

@@ -1453,32 +1453,165 @@ impl SoundFxApp {
                     }
 
                     if let Some(path) = &snapshot.last_file {
-                        ui.add_space(14.0);
+                        if self.download_preview_file.as_ref() != Some(path) {
+                            self.download_preview_file = Some(path.clone());
+                            if let Ok((waveform, duration)) =
+                                self.storage.analyze_audio_preview(path, 64)
+                            {
+                                self.download_preview_waveform = waveform;
+                                self.download_preview_duration = duration;
+                            } else {
+                                self.download_preview_waveform.clear();
+                                self.download_preview_duration = 0.0;
+                            }
+                            self.download_preview_cursor = Some(0.0);
+                        }
+
+                        ui.add_space(10.0);
                         ui.label(
                             RichText::new(
                                 path.file_name()
                                     .and_then(|value| value.to_str())
                                     .unwrap_or("audio"),
                             )
-                            .size(14.0)
+                            .size(13.5)
                             .color(Self::strong_text_color())
                             .strong(),
                         );
 
-                        ui.add_space(10.0);
+                        let is_playing = self
+                            .audio
+                            .as_ref()
+                            .is_some_and(|audio| audio.is_playing_file(path));
+                        let playback_pos = self
+                            .audio
+                            .as_ref()
+                            .and_then(|audio| audio.playback_position_secs_for_file(path));
+                        if is_playing {
+                            ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
+                        }
+                        let duration = self.download_preview_duration.max(0.05);
+                        let current_cursor = if is_playing {
+                            playback_pos.unwrap_or(0.0)
+                        } else {
+                            self.download_preview_cursor.unwrap_or(0.0)
+                        };
+
+                        ui.add_space(6.0);
                         ui.horizontal(|ui| {
-                            let add_response = ui.add_enabled(
-                                snapshot.can_add_to_library,
-                                Self::action_button(
-                                    Self::icon(0xe02e, 18.0, Color32::WHITE),
-                                    false,
-                                    true,
-                                ),
-                            );
-                            Self::decorate_button_response(ui, &add_response);
-                            if add_response.clicked() {
-                                add_to_library = true;
+                            if Self::icon_action(
+                                ui,
+                                [36.0, 28.0],
+                                if is_playing { 0xe047 } else { 0xe037 },
+                                is_playing,
+                                false,
+                            )
+                            .clicked()
+                            {
+                                if is_playing {
+                                    self.stop_preview();
+                                } else {
+                                    let start = self.download_preview_cursor.unwrap_or(0.0);
+                                    let start = if start >= duration - 0.02 { 0.0 } else { start };
+                                    self.download_preview_cursor = Some(start);
+                                    if let Some(audio) = self.audio.as_mut() {
+                                        let _ = audio.play_file_from(path, start);
+                                    }
+                                }
                             }
+
+                            let time_text =
+                                format!("{}/{}", format_time(current_cursor), format_time(duration));
+                            let time_width = 86.0;
+                            let wave_width = (ui.available_width() - time_width - 8.0).max(60.0);
+                            let (wave_rect, wave_response) =
+                                ui.allocate_exact_size(vec2(wave_width, 28.0), Sense::click_and_drag());
+
+                            if wave_response.clicked() || wave_response.dragged() {
+                                if let Some(pointer) = wave_response.interact_pointer_pos() {
+                                    let ratio =
+                                        ((pointer.x - wave_rect.left()) / wave_rect.width()).clamp(0.0, 1.0);
+                                    let seek_secs = ratio * duration;
+                                    self.download_preview_cursor = Some(seek_secs);
+                                    if let Some(audio) = self.audio.as_mut() {
+                                        let _ = audio.play_file_from(path, seek_secs);
+                                    }
+                                }
+                            }
+
+                            let painter = ui.painter_at(wave_rect);
+                            painter.rect_filled(wave_rect, 8.0, Self::panel_fill());
+                            let inner = wave_rect.shrink2(vec2(6.0, 3.0));
+
+                            if self.download_preview_waveform.is_empty() {
+                                painter.line_segment(
+                                    [
+                                        Pos2::new(inner.left(), inner.center().y),
+                                        Pos2::new(inner.right(), inner.center().y),
+                                    ],
+                                    Stroke::new(1.0, Self::muted_text_color().linear_multiply(0.4)),
+                                );
+                            } else {
+                                let bar_width =
+                                    inner.width() / self.download_preview_waveform.len().max(1) as f32;
+                                let active_color = Color32::from_rgb(214, 51, 132);
+                                let idle_color = if self.dark_theme {
+                                    Color32::from_rgb(120, 80, 110)
+                                } else {
+                                    Color32::from_rgb(238, 200, 220)
+                                };
+                                for (index, level) in self.download_preview_waveform.iter().enumerate() {
+                                    let amplitude = Self::wave_strip_level(*level).clamp(0.08, 1.0);
+                                    let center_x = inner.left() + (index as f32 + 0.5) * bar_width;
+                                    let half = amplitude * inner.height() * 0.42;
+                                    let bar = Rect::from_min_max(
+                                        Pos2::new(
+                                            center_x - (bar_width * 0.22).max(0.8),
+                                            inner.center().y - half,
+                                        ),
+                                        Pos2::new(
+                                            center_x + (bar_width * 0.22).max(0.8),
+                                            inner.center().y + half,
+                                        ),
+                                    );
+                                    let color = if amplitude > 0.32 { active_color } else { idle_color };
+                                    painter.rect_filled(bar, 1.5, color);
+                                }
+                            }
+
+                            let play_progress = (current_cursor / duration).clamp(0.0, 1.0);
+                            let play_x = egui::lerp(inner.left()..=inner.right(), play_progress);
+                            painter.line_segment(
+                                [
+                                    Pos2::new(play_x, inner.top()),
+                                    Pos2::new(play_x, inner.bottom()),
+                                ],
+                                Stroke::new(2.0, Color32::from_rgb(255, 77, 141)),
+                            );
+
+                            ui.add_space(4.0);
+                            ui.label(
+                                RichText::new(time_text)
+                                    .size(11.0)
+                                    .color(Self::muted_text_color()),
+                            );
+                        });
+
+                        ui.add_space(8.0);
+                        ui.horizontal(|ui| {
+                            ui.add_enabled_ui(snapshot.can_add_to_library, |ui| {
+                                if Self::icon_action(
+                                    ui,
+                                    [52.0, 34.0],
+                                    0xe02e,
+                                    false,
+                                    snapshot.can_add_to_library,
+                                )
+                                .clicked()
+                                {
+                                    add_to_library = true;
+                                }
+                            });
                             if Self::icon_action(ui, [52.0, 34.0], 0xe89e, false, false).clicked() {
                                 open_file = true;
                             }
@@ -1494,9 +1627,11 @@ impl SoundFxApp {
             });
 
         if close_request {
+            self.stop_preview();
             open_panel = false;
         }
         if minimize_request {
+            self.stop_preview();
             open_panel = false;
         }
         self.show_download_panel = open_panel;
@@ -1532,6 +1667,11 @@ impl SoundFxApp {
         }
 
         if clear_result {
+            self.stop_preview();
+            self.download_preview_file = None;
+            self.download_preview_waveform.clear();
+            self.download_preview_duration = 0.0;
+            self.download_preview_cursor = None;
             self.downloader.clear_result();
         }
     }
@@ -1939,3 +2079,18 @@ impl SoundFxApp {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn download_preview_state_defaults_are_empty() {
+        let app = SoundFxApp::new();
+        assert!(app.download_preview_file.is_none());
+        assert!(app.download_preview_waveform.is_empty());
+        assert_eq!(app.download_preview_duration, 0.0);
+        assert!(app.download_preview_cursor.is_none());
+    }
+}
+

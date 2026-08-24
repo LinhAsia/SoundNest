@@ -105,6 +105,30 @@ impl SoundFxApp {
             return;
         }
 
+        if self.show_download_panel {
+            if !ctx.wants_keyboard_input()
+                && let Some(path) = self.download_preview_file.clone()
+            {
+                if !ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Space)) {
+                    return;
+                }
+                if self.audio.as_ref().is_some_and(|audio| audio.is_playing_file(&path)) {
+                    self.stop_preview();
+                    return;
+                }
+                let mut cursor = self.download_preview_cursor.unwrap_or(0.0);
+                let duration = self.download_preview_duration.max(0.05);
+                if cursor >= duration - 0.02 {
+                    cursor = 0.0;
+                    self.download_preview_cursor = Some(0.0);
+                }
+                if let Some(audio) = self.audio.as_mut() {
+                    let _ = audio.play_file_from(&path, cursor);
+                }
+                return;
+            }
+        }
+
         if ctx.wants_keyboard_input() {
             return;
         }

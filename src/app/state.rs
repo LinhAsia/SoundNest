@@ -462,6 +462,10 @@ pub struct SoundFxApp {
     pub(super) library_drop_target_folder_rects: Vec<(Uuid, Rect)>,
     pub(super) ignored_drop_path: Option<PathBuf>,
     pub(super) download_panel_tab: DownloadPanelTab,
+    pub(super) download_preview_file: Option<PathBuf>,
+    pub(super) download_preview_waveform: Vec<f32>,
+    pub(super) download_preview_duration: f32,
+    pub(super) download_preview_cursor: Option<f32>,
     pub(super) tts_text: String,
     pub(super) tts_voice_name: String,
     pub(super) tts_direction_prompt: String,
@@ -813,6 +817,10 @@ impl SoundFxApp {
             library_drop_target_folder_rects: Vec::new(),
             ignored_drop_path: None,
             download_panel_tab: DownloadPanelTab::Download,
+            download_preview_file: None,
+            download_preview_waveform: Vec::new(),
+            download_preview_duration: 0.0,
+            download_preview_cursor: None,
             tts_text: tts_draft.text,
             tts_voice_name: if tts_draft.voice_name.trim().is_empty() {
                 "Kore".to_owned()
