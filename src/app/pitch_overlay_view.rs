@@ -21,7 +21,7 @@ impl SoundFxApp {
         let refresh_inputs = false;
         let mut close_request = false;
         let (_panel_bounds, panel_size, panel_pos) =
-            self.centered_modal_placement(ctx, vec2(388.0, 372.0), vec2(348.0, 328.0), 0.0);
+            self.centered_modal_placement(ctx, vec2(430.0, 440.0), vec2(390.0, 400.0), 0.0);
         egui::Window::new("")
             .id(egui::Id::new("pitch-monitor-panel"))
             .order(egui::Order::Foreground)
@@ -45,7 +45,7 @@ impl SoundFxApp {
                     .inner_margin(Margin::same(20)),
             )
             .show(ctx, |ui| {
-                ui.set_width(348.0);
+                ui.set_width(390.0);
                 ui.horizontal(|ui| {
                     ui.vertical(|ui| {
                         ui.label(
@@ -85,18 +85,21 @@ impl SoundFxApp {
                         .fill(Self::surface_fill())
                         .stroke(Stroke::new(1.0, Self::border_color()))
                         .corner_radius(18.0)
-                        .inner_margin(Margin::symmetric(12, 10))
+                        .inner_margin(Margin::symmetric(14, 12))
                         .show(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            ui.label(
+                                RichText::new("Hotkey")
+                                    .size(11.5)
+                                    .color(Self::muted_text_color())
+                                    .strong(),
+                            );
+                            ui.add_space(8.0);
                             ui.horizontal_wrapped(|ui| {
                                 ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
-                                ui.label(
-                                    RichText::new("Hotkey")
-                                        .size(11.5)
-                                        .color(Self::muted_text_color()),
-                                );
                                 let keyboard_response = Self::icon_action(
                                     ui,
-                                    [42.0, 34.0],
+                                    [48.0, 34.0],
                                     0xe312,
                                     self.capture_pitch_hotkey,
                                     self.capture_pitch_hotkey,
@@ -178,12 +181,14 @@ impl SoundFxApp {
                         .fill(Self::surface_fill())
                         .stroke(Stroke::new(1.0, Self::border_color()))
                         .corner_radius(18.0)
-                        .inner_margin(Margin::symmetric(12, 10))
+                        .inner_margin(Margin::symmetric(14, 12))
                         .show(ui, |ui| {
+                            ui.set_width(ui.available_width());
                             ui.label(
                                 RichText::new("Input")
                                     .size(11.5)
-                                    .color(Self::muted_text_color()),
+                                    .color(Self::muted_text_color())
+                                    .strong(),
                             );
                             ui.add_space(8.0);
                             ui.horizontal(|ui| {
@@ -230,7 +235,7 @@ impl SoundFxApp {
                                                             .as_deref()
                                                             .map(|name| {
                                                                 Self::truncate_middle_ascii(
-                                                                    name, 28,
+                                                                    name, 36,
                                                                 )
                                                             })
                                                             .unwrap_or_else(|| "No mic".to_owned()),
@@ -242,7 +247,7 @@ impl SoundFxApp {
                                                         ui.selectable_value(
                                                             &mut self.selected_pitch_input_device,
                                                             Some(name.clone()),
-                                                            Self::truncate_middle_ascii(name, 38),
+                                                            Self::truncate_middle_ascii(name, 48),
                                                         );
                                                     }
                                                 });
@@ -267,23 +272,26 @@ impl SoundFxApp {
                         .fill(Self::surface_fill())
                         .stroke(Stroke::new(1.0, Self::border_color()))
                         .corner_radius(18.0)
-                        .inner_margin(Margin::symmetric(12, 10))
+                        .inner_margin(Margin::symmetric(14, 12))
                         .show(ui, |ui| {
+                            ui.set_width(ui.available_width());
                             ui.label(
                                 RichText::new("Display")
                                     .size(11.5)
-                                    .color(Self::muted_text_color()),
+                                    .color(Self::muted_text_color())
+                                    .strong(),
                             );
                             ui.add_space(8.0);
                             Self::with_slider_visuals(ui, |ui| {
                                 ui.horizontal(|ui| {
                                     ui.label(Self::icon(0xe8b5, 16.0, Self::muted_text_color()));
+                                    let slider_width = (ui.available_width() - 72.0).max(160.0);
                                     let (speed_response, _) = Self::click_slider(
                                         ui,
                                         &mut self.pitch_update_hz,
                                         1.0..=12.0,
                                         0.5,
-                                        vec2(164.0, 24.0),
+                                        vec2(slider_width, 24.0),
                                     );
                                     ui.label(
                                         RichText::new(format!("{:.1}/s", self.pitch_update_hz))
@@ -304,8 +312,9 @@ impl SoundFxApp {
                                 .corner_radius(14.0)
                                 .inner_margin(Margin::symmetric(12, 8))
                                 .show(ui, |ui| {
+                                    ui.set_width(ui.available_width());
                                     ui.horizontal(|ui| {
-                                        ui.spacing_mut().item_spacing = vec2(18.0, 8.0);
+                                        ui.spacing_mut().item_spacing = vec2(28.0, 8.0);
                                         let animation_label = self.t("settings.animation");
                                         let sharp_label = self.t("pitch.sharp");
                                         let animation_changed = ui
