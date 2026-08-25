@@ -1086,8 +1086,9 @@ impl SoundFxApp {
         };
         let row_width = ui.available_width();
         let play_column_width = play_button_size + 10.0;
-        let side_panel_width = (row_width * 0.30).clamp(260.0, 360.0);
-        let waveform_width = (row_width - play_column_width - side_panel_width - 42.0).max(140.0);
+        let side_panel_width = (row_width * 0.40).clamp(300.0, 420.0);
+        let waveform_width = (row_width - play_column_width - side_panel_width - 42.0).max(100.0);
+
         let row_height = self.inline_folder_sound_row_height();
         let row_outer_height = self.inline_folder_sound_row_outer_height();
         let (row_outer_rect, _) =
@@ -1524,6 +1525,53 @@ impl SoundFxApp {
                     }
                     ui.add_space(8.0);
                     if self.library_tab == LibraryTab::Sounds {
+                        // "Open Folder" — reveal library root in Explorer
+                        let open_folder_btn = ui.add_sized(
+                            [86.0, 30.0],
+                            Self::action_button(
+                                RichText::new("Open Folder").size(11.5),
+                                false,
+                                false,
+                            ),
+                        );
+                        Self::decorate_button_response(ui, &open_folder_btn);
+                        if open_folder_btn.clicked() {
+                            let _ = open::that(self.storage.root_dir());
+                        }
+                        ui.add_space(6.0);
+                        // "Change Folder" — pick new root, reload library live
+                        let change_folder_btn = ui.add_sized(
+                            [100.0, 30.0],
+                            Self::action_button(
+                                RichText::new("Change Folder").size(11.5),
+                                false,
+                                false,
+                            ),
+                        );
+                        Self::decorate_button_response(ui, &change_folder_btn);
+                        if change_folder_btn.clicked() {
+                            if let Some(new_root) = rfd::FileDialog::new()
+                                .set_title("Choose Sound Library Folder")
+                                .pick_folder()
+                            {
+                                if let Ok(new_storage) = Storage::save_root_dir_override(Some(&new_root))
+                                    .and_then(|_| Storage::new())
+                                {
+                                    self.storage = new_storage;
+                                    self.sounds = self.storage.load_library().unwrap_or_default();
+                                    self.folders =
+                                        self.storage.load_folders().unwrap_or_default();
+                                    self.library_current_folder = None;
+                                    self.library_audio_query.clear();
+                                    self.selected = self.sounds.first().map(|s| s.id);
+                                    self.begin_async_library_hydration();
+                                }
+                            }
+                        }
+                        ui.add_space(8.0);
+                    }
+                    if self.library_tab == LibraryTab::Sounds {
+
                         let grid_btn = ui.add_sized(
                             [58.0, 30.0],
                             Self::action_button(

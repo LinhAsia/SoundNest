@@ -6,7 +6,47 @@ use std::path::{Path, PathBuf};
 #[cfg(windows)]
 use super::paths::WINDOWS_STORAGE_ROOT;
 
+fn custom_root_override_path() -> Option<PathBuf> {
+    ProjectDirs::from("dev", "codex", "soundfx_manager")
+        .map(|dirs| dirs.data_local_dir().join("custom_root.txt"))
+}
+
+pub(super) fn load_custom_root() -> Option<PathBuf> {
+    let path = custom_root_override_path()?;
+    let raw = fs::read_to_string(&path).ok()?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let p = PathBuf::from(trimmed);
+    if p.exists() { Some(p) } else { None }
+}
+
+pub(super) fn save_custom_root(root: Option<&Path>) -> Result<()> {
+    let Some(override_path) = custom_root_override_path() else {
+        return Ok(());
+    };
+    if let Some(parent) = override_path.parent() {
+        fs::create_dir_all(parent).ok();
+    }
+    match root {
+        Some(path) => fs::write(&override_path, path.to_string_lossy().as_bytes())
+            .context("unable to save custom root"),
+        None => {
+            if override_path.exists() {
+                fs::remove_file(&override_path).context("unable to clear custom root")?;
+            }
+            Ok(())
+        }
+    }
+}
+
 pub(super) fn preferred_storage_root() -> Result<PathBuf> {
+    // Check for user-chosen root override first (written by "Change Folder" button)
+    if let Some(custom) = load_custom_root() {
+        return Ok(custom);
+    }
+
     #[cfg(windows)]
     {
         Ok(PathBuf::from(WINDOWS_STORAGE_ROOT))

@@ -39,6 +39,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
 use uuid::Uuid;
+
 const AUDIO_FILTERS: &[&str] = &["wav", "mp3", "ogg", "flac", "m4a", "aac"];
 const APP_FRAME_RADIUS: f32 = 30.0;
 const APP_OUTER_MARGIN: f32 = 0.0;

@@ -249,15 +249,16 @@ impl SoundFxApp {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
                 }
 
-                if Self::icon_titlebar(
-                    ui,
-                    [42.0, 30.0],
-                    0xe2c7,
-                    self.app_view == AppView::Library,
-                    false,
-                )
-                .clicked()
-                {
+                let library_btn = ui.add_sized(
+                    [92.0, 30.0],
+                    Self::titlebar_button(
+                        RichText::new("Sound Library").size(11.5),
+                        self.app_view == AppView::Library,
+                        false,
+                    ),
+                );
+                Self::decorate_button_response(ui, &library_btn);
+                if library_btn.clicked() {
                     if self.app_view == AppView::Library {
                         self.app_view = AppView::Editor;
                     } else {

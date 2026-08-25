@@ -10,7 +10,8 @@ pub use self::models::{
 };
 pub use self::paths::format_time;
 
-use self::migration::{migrate_storage_root_if_needed, preferred_storage_root};
+use self::migration::{migrate_storage_root_if_needed, preferred_storage_root, save_custom_root};
+
 use self::models::PreferencesFile;
 use self::paths::{
     WAVEFORM_BUCKETS, committed_trimmed_sound_name, normalize_video_fps, sanitize_file_system_name,
@@ -80,6 +81,11 @@ impl Storage {
 
     pub fn root_dir(&self) -> &Path {
         &self.root_dir
+    }
+
+    /// Persist a custom storage root so the next `Storage::new()` (or live reload) uses it.
+    pub fn save_root_dir_override(new_root: Option<&Path>) -> Result<()> {
+        save_custom_root(new_root)
     }
 
     fn ensure_bundled_sound(&self, path: &Path, bytes: &[u8]) -> Result<()> {
