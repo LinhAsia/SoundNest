@@ -28,10 +28,21 @@ impl eframe::App for SoundFxApp {
         self.poll_video_viewer_jobs(ctx);
         self.prune_copy_feedback(ctx);
         let now = ctx.input(|input| input.time);
-        if now - self.last_working_set_trim_at >= 4.0 {
+        if now - self.last_working_set_trim_at >= 2.0 {
             self.last_working_set_trim_at = now;
             platform::trim_working_set();
+            // Evict decoded audio blob when idle — biggest RAM consumer (60–100 MB for long songs).
+            // play() will stream or re-decode on demand.
+            if let Some(audio) = self.audio.as_mut() {
+                audio.evict_idle_audio_cache();
+            }
+            // Cap waveform preview cache so it doesn't grow unbounded.
+            let mut cache = self.library_waveform_preview_cache.borrow_mut();
+            if cache.len() > 150 {
+                cache.clear();
+            }
         }
+
         if !ctx.input(|input| input.pointer.primary_down()) {
             let accepted_trim_drop = self.finalize_pending_trim_timeline_drop();
             if !accepted_trim_drop {
@@ -56,7 +67,10 @@ impl eframe::App for SoundFxApp {
         }
 
         self.enforce_square_window_if_needed(ctx);
-        self.preload_selected_sound_audio();
+        if self.app_view == AppView::Editor {
+            self.preload_selected_sound_audio();
+        }
+
         self.handle_trim_timeline_hotkeys(ctx);
         self.handle_space_preview(ctx);
         self.handle_trim_start_preview(ctx);

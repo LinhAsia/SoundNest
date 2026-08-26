@@ -460,48 +460,54 @@ impl SoundFxApp {
     }
 
     pub(super) fn draw_record_wave_strip(ui: &mut Ui, waveform: &[f32]) {
-        let desired = vec2(ui.available_width().max(240.0), 56.0);
+        let desired = vec2(ui.available_width().max(240.0), 60.0);
         let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
         let painter = ui.painter_at(rect);
         let dark_theme = Self::dark_theme_enabled();
         painter.rect_filled(
             rect,
-            24.0,
+            20.0,
             if dark_theme {
-                Color32::from_rgba_premultiplied(255, 255, 255, 18)
+                Color32::from_rgba_premultiplied(14, 10, 18, 200)
             } else {
-                Color32::from_rgba_premultiplied(255, 255, 255, 120)
+                Color32::from_rgba_premultiplied(242, 236, 244, 220)
             },
         );
         painter.rect_stroke(
             rect,
-            24.0,
+            20.0,
             Stroke::new(
                 1.0,
                 if dark_theme {
-                    Color32::from_rgba_premultiplied(106, 86, 118, 180)
+                    Color32::from_rgba_premultiplied(214, 51, 132, 70)
                 } else {
-                    Color32::from_rgba_premultiplied(235, 219, 229, 180)
+                    Color32::from_rgba_premultiplied(214, 51, 132, 90)
                 },
             ),
-            StrokeKind::Outside,
+            StrokeKind::Inside,
         );
 
-        let data = if waveform.is_empty() {
-            vec![0.05; 40]
+        let time = ui.input(|i| i.time) as f32;
+        let data: Vec<f32> = if waveform.is_empty() {
+            (0..36)
+                .map(|i| {
+                    let phase = i as f32 * 0.25 + time * 2.0;
+                    0.08 + phase.sin().abs() * 0.12
+                })
+                .collect()
         } else {
             waveform.to_vec()
         };
-        let inner = rect.shrink2(vec2(14.0, 10.0));
+        let inner = rect.shrink2(vec2(16.0, 10.0));
         let bar_width = inner.width() / data.len().max(1) as f32;
         for (index, value) in data.iter().enumerate() {
             let x = inner.left() + (index as f32 + 0.5) * bar_width;
             let half = value.clamp(0.04, 1.0) * inner.height() * 0.46;
             let bar = Rect::from_min_max(
-                Pos2::new(x - bar_width * 0.18, inner.center().y - half),
-                Pos2::new(x + bar_width * 0.18, inner.center().y + half),
+                Pos2::new(x - (bar_width * 0.24).max(1.0), inner.center().y - half),
+                Pos2::new(x + (bar_width * 0.24).max(1.0), inner.center().y + half),
             );
-            painter.rect_filled(bar, 4.0, Color32::from_rgb(227, 82, 149));
+            painter.rect_filled(bar, 3.0, Color32::from_rgb(227, 82, 149));
         }
     }
 

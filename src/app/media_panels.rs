@@ -14,9 +14,8 @@ impl SoundFxApp {
         let mut open_panel = self.show_record_panel;
         let mut close_request = false;
         let mut toggle_record = false;
-        let refresh_inputs = false;
         let (_panel_bounds, panel_size, panel_pos) =
-            self.centered_modal_placement(ctx, vec2(520.0, 420.0), vec2(320.0, 260.0), 0.0);
+            self.centered_modal_placement(ctx, vec2(540.0, 460.0), vec2(340.0, 280.0), 0.0);
 
         egui::Window::new("")
             .id(egui::Id::new("sound-record-panel"))
@@ -34,16 +33,23 @@ impl SoundFxApp {
                     .stroke(Stroke::new(1.0, Self::border_color()))
                     .shadow(Shadow {
                         offset: [0, 14],
-                        blur: 30,
+                        blur: 32,
                         spread: 0,
-                        color: Color32::from_rgba_premultiplied(78, 40, 63, 24),
+                        color: Color32::from_rgba_premultiplied(78, 40, 63, 30),
                     })
                     .corner_radius(30.0)
-                    .inner_margin(Margin::same(20)),
+                    .inner_margin(Margin::same(22)),
             )
             .show(ctx, |ui| {
+                // ── Header ──────────────────────────────────────────────
                 ui.horizontal(|ui| {
-                    ui.label(Self::icon(0xe061, 20.0, Color32::from_rgb(214, 51, 132)).strong());
+                    ui.add_space(2.0);
+                    ui.label(
+                        RichText::new("Record Audio")
+                            .size(15.0)
+                            .color(Self::strong_text_color())
+                            .strong(),
+                    );
                     ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                         if Self::icon_titlebar(ui, [34.0, 28.0], 0xe5cd, false, true).clicked() {
                             close_request = true;
@@ -51,28 +57,78 @@ impl SoundFxApp {
                     });
                 });
 
-                ui.add_space(12.0);
-                Self::with_input_widget_visuals(ui, |ui| {
-                    ui.spacing_mut().interact_size.y = 32.0;
-                    ui.add_sized(
-                        [ui.available_width(), 32.0],
-                        TextEdit::singleline(&mut self.record_name)
-                            .desired_width(f32::INFINITY)
-                            .hint_text("recording"),
-                    );
+                ui.add_space(14.0);
+
+                // ── Name field ──────────────────────────────────────────
+                ui.add_enabled_ui(!snapshot.running, |ui| {
+                    Self::with_input_widget_visuals(ui, |ui| {
+                        ui.spacing_mut().interact_size.y = 36.0;
+                        ui.add_sized(
+                            [ui.available_width(), 36.0],
+                            TextEdit::singleline(&mut self.record_name)
+                                .desired_width(f32::INFINITY)
+                                .hint_text("Recording name…"),
+                        );
+                    });
                 });
 
-                ui.add_space(12.0);
+                ui.add_space(14.0);
+
+                // ── Source + hotkey row ──────────────────────────────────
                 ui.add_enabled_ui(!snapshot.running, |ui| {
                     ui.horizontal(|ui| {
-                        let keyboard_response = Self::icon_action(
+                        // Source toggle: System / Mic
+                        Frame::new()
+                            .fill(Self::panel_fill())
+                            .stroke(Stroke::new(1.0, Self::subtle_border_color()))
+                            .corner_radius(18.0)
+                            .inner_margin(Margin::symmetric(4, 4))
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    let sys_active =
+                                        self.record_input_source == PitchInputSource::System;
+                                    let mic_active =
+                                        self.record_input_source == PitchInputSource::Microphone;
+
+                                    let sys_btn = ui.add_sized(
+                                        [86.0, 32.0],
+                                        Self::action_button(
+                                            RichText::new("System").size(12.0),
+                                            sys_active,
+                                            false,
+                                        ),
+                                    );
+                                    Self::decorate_button_response(ui, &sys_btn);
+                                    if sys_btn.clicked() {
+                                        self.record_input_source = PitchInputSource::System;
+                                    }
+
+                                    let mic_btn = ui.add_sized(
+                                        [86.0, 32.0],
+                                        Self::action_button(
+                                            RichText::new("Microphone").size(12.0),
+                                            mic_active,
+                                            false,
+                                        ),
+                                    );
+                                    Self::decorate_button_response(ui, &mic_btn);
+                                    if mic_btn.clicked() {
+                                        self.record_input_source = PitchInputSource::Microphone;
+                                    }
+                                });
+                            });
+
+                        ui.add_space(8.0);
+
+                        // Hotkey capture button + chips
+                        let kb_btn = Self::icon_action(
                             ui,
-                            [42.0, 34.0],
+                            [40.0, 40.0],
                             0xe312,
                             self.capture_record_hotkey,
                             self.capture_record_hotkey,
                         );
-                        if keyboard_response.clicked() {
+                        if kb_btn.clicked() {
                             if self.capture_record_hotkey {
                                 self.capture_record_hotkey = false;
                                 self.preview_record_hotkey = None;
@@ -84,8 +140,8 @@ impl SoundFxApp {
                         }
 
                         if self.capture_record_hotkey {
+                            ui.add_space(4.0);
                             if let Some(preview_key) = self.preview_record_hotkey {
-                                ui.add_space(6.0);
                                 Frame::new()
                                     .fill(Color32::from_rgba_premultiplied(80, 70, 30, 255))
                                     .stroke(Stroke::new(1.0, Color32::from_rgb(255, 220, 80)))
@@ -94,7 +150,7 @@ impl SoundFxApp {
                                     .show(ui, |ui| {
                                         ui.label(
                                             RichText::new(format!(
-                                                "Pressing: {}",
+                                                "{}",
                                                 preview_key.to_string()
                                             ))
                                             .size(11.5)
@@ -103,10 +159,9 @@ impl SoundFxApp {
                                         );
                                     });
                             } else {
-                                ui.add_space(6.0);
                                 ui.label(
-                                    RichText::new("Press key...")
-                                        .size(12.5)
+                                    RichText::new("Press key…")
+                                        .size(12.0)
                                         .color(Self::muted_text_color()),
                                 );
                             }
@@ -115,9 +170,8 @@ impl SoundFxApp {
                         let mut key_to_remove = None;
                         for &key in &self.record_hotkeys {
                             ui.add_space(4.0);
-                            let key_text = key.to_string();
-                            let chip_btn = Button::new(
-                                RichText::new(key_text)
+                            let chip = Button::new(
+                                RichText::new(key.to_string())
                                     .size(11.5)
                                     .color(Self::strong_text_color())
                                     .strong(),
@@ -125,17 +179,15 @@ impl SoundFxApp {
                             .fill(Self::surface_fill())
                             .stroke(Stroke::new(1.0, Self::subtle_border_color()))
                             .corner_radius(12.0);
-
-                            let response = ui.add(chip_btn);
-                            Self::decorate_button_response(ui, &response);
-                            if response.clicked() {
+                            let r = ui.add(chip);
+                            Self::decorate_button_response(ui, &r);
+                            if r.clicked() {
                                 key_to_remove = Some(key);
                             }
-                            if response.hovered() {
-                                response.on_hover_text("Click to remove this hotkey");
+                            if r.hovered() {
+                                r.on_hover_text("Click to remove");
                             }
                         }
-
                         if let Some(key) = key_to_remove {
                             self.record_hotkeys.retain(|&k| k != key);
                             let names: Vec<String> =
@@ -150,49 +202,21 @@ impl SoundFxApp {
                     });
                 });
 
-                ui.add_space(12.0);
-                ui.add_enabled_ui(!snapshot.running, |ui| {
-                    ui.horizontal(|ui| {
-                        if Self::icon_action(
-                            ui,
-                            [48.0, 36.0],
-                            0xe30a,
-                            self.record_input_source == PitchInputSource::System,
-                            self.record_input_source == PitchInputSource::System,
-                        )
-                        .clicked()
-                        {
-                            self.record_input_source = PitchInputSource::System;
-                        }
-
-                        if Self::icon_action(
-                            ui,
-                            [48.0, 36.0],
-                            0xe029,
-                            self.record_input_source == PitchInputSource::Microphone,
-                            self.record_input_source == PitchInputSource::Microphone,
-                        )
-                        .clicked()
-                        {
-                            self.record_input_source = PitchInputSource::Microphone;
-                        }
-                    });
-                });
-
-                ui.add_space(10.0);
-                ui.add_enabled_ui(!snapshot.running, |ui| {
-                    ui.set_width(ui.available_width());
-                    if self.record_input_source == PitchInputSource::Microphone {
+                // ── Mic selector ─────────────────────────────────────────
+                if self.record_input_source == PitchInputSource::Microphone {
+                    ui.add_space(10.0);
+                    ui.add_enabled_ui(!snapshot.running, |ui| {
+                        ui.set_width(ui.available_width());
                         Self::with_dark_combo_visuals(ui, |ui| {
-                            ui.spacing_mut().interact_size.y = 32.0;
+                            ui.spacing_mut().interact_size.y = 36.0;
                             ComboBox::from_id_salt("record-input-device")
                                 .width(ui.available_width())
                                 .selected_text(
                                     RichText::new(
                                         self.selected_record_input_device
                                             .as_deref()
-                                            .map(|name| Self::truncate_middle_ascii(name, 28))
-                                            .unwrap_or_else(|| "No mic".to_owned()),
+                                            .map(|name| Self::truncate_middle_ascii(name, 32))
+                                            .unwrap_or_else(|| "No microphone".to_owned()),
                                     )
                                     .color(Self::strong_text_color()),
                                 )
@@ -201,51 +225,54 @@ impl SoundFxApp {
                                         ui.selectable_value(
                                             &mut self.selected_record_input_device,
                                             Some(name.clone()),
-                                            Self::truncate_middle_ascii(name, 38),
+                                            Self::truncate_middle_ascii(name, 42),
                                         );
                                     }
                                 });
                         });
-                    } else {
-                        Self::with_input_widget_visuals(ui, |ui| {
-                            ui.spacing_mut().interact_size.y = 32.0;
-                            ui.add_sized(
-                                [ui.available_width(), 32.0],
-                                egui::Label::new(
-                                    RichText::new("System output")
-                                        .size(13.0)
-                                        .color(Self::muted_text_color()),
-                                ),
-                            );
-                        });
-                    }
-                });
+                    });
+                }
 
                 ui.add_space(14.0);
+
+                // ── Waveform + timer card ────────────────────────────────
                 Frame::new()
                     .fill(Self::panel_fill())
-                    .stroke(Stroke::new(1.0, Self::subtle_border_color()))
-                    .corner_radius(28.0)
+                    .stroke(Stroke::new(
+                        1.5,
+                        if snapshot.running {
+                            Color32::from_rgba_premultiplied(214, 51, 132, 120)
+                        } else {
+                            Self::subtle_border_color()
+                        },
+                    ))
+                    .corner_radius(24.0)
                     .inner_margin(Margin::same(18))
                     .show(ui, |ui| {
-                        ui.set_height(172.0);
                         ui.vertical_centered(|ui| {
-                            ui.add_space(16.0);
                             Self::draw_record_wave_strip(ui, &snapshot.waveform);
                             ui.add_space(10.0);
+                            let timer_color = if snapshot.running {
+                                Color32::from_rgb(214, 51, 132)
+                            } else {
+                                Self::muted_text_color()
+                            };
                             ui.label(
                                 RichText::new(format_time(snapshot.elapsed_secs))
-                                    .size(16.0)
-                                    .color(Self::strong_text_color()),
+                                    .size(18.0)
+                                    .color(timer_color)
+                                    .strong(),
                             );
                         });
                     });
 
-                ui.add_space(14.0);
+                ui.add_space(16.0);
+
+                // ── Record / Stop button ─────────────────────────────────
                 ui.horizontal_centered(|ui| {
                     let icon = if snapshot.running { 0xe047 } else { 0xe061 };
                     let button = ui.add_sized(
-                        [160.0, 42.0],
+                        [200.0, 44.0],
                         Self::action_button(
                             Self::icon(icon, 18.0, Color32::WHITE),
                             snapshot.running,
@@ -257,6 +284,7 @@ impl SoundFxApp {
                         toggle_record = true;
                     }
                 });
+
             });
 
         if close_request {
@@ -266,10 +294,6 @@ impl SoundFxApp {
             }
         }
         self.show_record_panel = open_panel;
-
-        if refresh_inputs {
-            self.refresh_record_capture_devices();
-        }
 
         if toggle_record {
             self.toggle_recording(ctx);
@@ -998,7 +1022,7 @@ impl SoundFxApp {
         self.record_overlay_open = true;
         let mut should_stop = false;
 
-        let overlay_size = vec2(430.0, 118.0);
+        let overlay_size = vec2(460.0, 130.0);
         let overlay_pos =
             if self.center_record_overlay_next_frame || self.record_overlay_pos.is_none() {
                 let centered = self.centered_overlay_pos(ctx, overlay_size);
@@ -1039,7 +1063,7 @@ impl SoundFxApp {
         snapshot: &crate::recorder::RecorderSnapshot,
         should_stop: &mut bool,
     ) {
-        let rect = ui.max_rect().shrink2(vec2(8.0, 8.0));
+        let rect = ui.max_rect().shrink2(vec2(12.0, 12.0));
         let response = ui.interact(
             rect,
             ui.id().with("record-blob-overlay-drag"),
@@ -1055,7 +1079,7 @@ impl SoundFxApp {
                 overlay_ctx,
                 overlay_rect,
                 &response,
-                vec2(430.0, 118.0),
+                vec2(460.0, 130.0),
                 &mut self.record_overlay_pos,
             );
         }
@@ -1065,11 +1089,12 @@ impl SoundFxApp {
         let pulse = (time * 4.4).sin() * 0.5 + 0.5;
         let aura = snapshot.level.clamp(0.06, 1.0);
 
-        for (scale, alpha) in [(1.08, 20), (1.04, 34)] {
+        // Multiple aura layers for rich liquid animation without clipping
+        for (scale, alpha) in [(1.06, 22), (1.03, 38)] {
             let points = Self::squircle_points(
                 center,
-                rect.width() * 0.5 * scale,
-                rect.height() * 0.38 * scale,
+                rect.width() * 0.46 * scale,
+                rect.height() * 0.42 * scale,
                 4.8,
                 0.03 + aura * 0.02,
                 time * 0.8,
@@ -1081,44 +1106,86 @@ impl SoundFxApp {
             ));
         }
 
+        // Main organic squircle body
         let blob = Self::squircle_points(
             center,
-            rect.width() * 0.48,
-            rect.height() * 0.34,
+            rect.width() * 0.46,
+            rect.height() * 0.42,
             4.8,
             0.04 + aura * 0.025,
             time,
         );
         painter.add(egui::Shape::convex_polygon(
             blob,
-            Color32::from_rgba_premultiplied(17, 14, 20, 238),
-            Stroke::new(1.4, Color32::from_rgba_premultiplied(236, 116, 179, 220)),
+            Color32::from_rgba_premultiplied(18, 14, 24, 246),
+            Stroke::new(1.6, Color32::from_rgba_premultiplied(236, 116, 179, 230)),
         ));
 
-        let dot_center = Pos2::new(rect.left() + 40.0, center.y - 6.0);
+        // ── Left: Pulse dot + Label + Timer ──
+        let dot_center = Pos2::new(center.x - 170.0, center.y);
         painter.circle_filled(
             dot_center,
-            8.0 + pulse * 2.0,
-            Color32::from_rgba_premultiplied(214, 51, 132, 230),
+            8.0 + pulse * 2.5,
+            Color32::from_rgba_premultiplied(230, 40, 95, 240),
         );
-        painter.text(
-            Pos2::new(rect.left() + 58.0, center.y - 18.0),
-            egui::Align2::LEFT_TOP,
-            "Recording",
-            egui::FontId::new(16.0, FontFamily::Proportional),
-            Color32::from_rgb(255, 234, 244),
-        );
-        painter.text(
-            Pos2::new(rect.left() + 58.0, center.y + 2.0),
-            egui::Align2::LEFT_TOP,
-            format_time(snapshot.elapsed_secs),
-            egui::FontId::new(12.0, FontFamily::Proportional),
-            Color32::from_rgb(219, 185, 206),
+        painter.circle_stroke(
+            dot_center,
+            12.0 + pulse * 3.0,
+            Stroke::new(1.0, Color32::from_rgba_premultiplied(230, 40, 95, (80.0 * (1.0 - pulse)) as u8)),
         );
 
+        painter.text(
+            Pos2::new(center.x - 150.0, center.y - 14.0),
+            egui::Align2::LEFT_TOP,
+            "RECORDING",
+            egui::FontId::new(10.5, FontFamily::Proportional),
+            Color32::from_rgb(236, 116, 179),
+        );
+        painter.text(
+            Pos2::new(center.x - 150.0, center.y + 0.0),
+            egui::Align2::LEFT_TOP,
+            format_time(snapshot.elapsed_secs),
+            egui::FontId::new(15.0, FontFamily::Proportional),
+            Color32::from_rgb(255, 240, 248),
+        );
+
+        // ── Center: Dynamic live wave strip ──
+        let wave_rect = Rect::from_center_size(
+            Pos2::new(center.x + 32.0, center.y),
+            vec2(172.0, 36.0),
+        );
+        painter.rect_filled(
+            wave_rect,
+            12.0,
+            Color32::from_rgba_premultiplied(255, 255, 255, 8),
+        );
+        painter.rect_stroke(
+            wave_rect,
+            12.0,
+            Stroke::new(1.0, Color32::from_rgba_premultiplied(236, 116, 179, 40)),
+            StrokeKind::Inside,
+        );
+        let bars = if snapshot.waveform.is_empty() {
+            vec![0.04; 32]
+        } else {
+            snapshot.waveform.clone()
+        };
+        let inner = wave_rect.shrink2(vec2(10.0, 6.0));
+        let bar_width = inner.width() / bars.len().max(1) as f32;
+        for (index, level) in bars.iter().enumerate() {
+            let x = inner.left() + (index as f32 + 0.5) * bar_width;
+            let half = level.clamp(0.05, 1.0) * inner.height() * 0.44;
+            let bar = Rect::from_min_max(
+                Pos2::new(x - (bar_width * 0.22).max(1.0), inner.center().y - half),
+                Pos2::new(x + (bar_width * 0.22).max(1.0), inner.center().y + half),
+            );
+            painter.rect_filled(bar, 3.0, Color32::from_rgb(236, 92, 168));
+        }
+
+        // ── Right: Stop button inside blob ──
         let stop_rect = Rect::from_center_size(
-            Pos2::new(rect.right() - 22.0, rect.top() + 22.0),
-            vec2(28.0, 28.0),
+            Pos2::new(center.x + 160.0, center.y),
+            vec2(36.0, 36.0),
         );
         let stop_response = ui.interact(
             stop_rect,
@@ -1128,44 +1195,27 @@ impl SoundFxApp {
         if stop_response.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
-        painter.rect_filled(
+        let stop_bg = if stop_response.hovered() {
+            Color32::from_rgb(235, 45, 95)
+        } else {
+            Color32::from_rgba_premultiplied(214, 51, 132, 220)
+        };
+        painter.rect_filled(stop_rect, 18.0, stop_bg);
+        painter.rect_stroke(
             stop_rect,
-            14.0,
-            Color32::from_rgba_premultiplied(255, 255, 255, 16),
+            18.0,
+            Stroke::new(1.2, Color32::from_rgba_premultiplied(255, 255, 255, 160)),
+            StrokeKind::Inside,
         );
         painter.text(
             stop_rect.center(),
             egui::Align2::CENTER_CENTER,
             char::from_u32(0xe047).unwrap_or(' '),
             egui::FontId::new(18.0, FontFamily::Name(MATERIAL_ICONS_FONT.into())),
-            Color32::from_rgb(255, 234, 244),
+            Color32::WHITE,
         );
         if stop_response.clicked() {
             *should_stop = true;
-        }
-
-        let wave_rect =
-            Rect::from_center_size(Pos2::new(rect.right() - 132.0, center.y), vec2(210.0, 44.0));
-        painter.rect_filled(
-            wave_rect,
-            18.0,
-            Color32::from_rgba_premultiplied(255, 255, 255, 10),
-        );
-        let bars = if snapshot.waveform.is_empty() {
-            vec![0.04; 40]
-        } else {
-            snapshot.waveform.clone()
-        };
-        let inner = wave_rect.shrink2(vec2(12.0, 8.0));
-        let bar_width = inner.width() / bars.len().max(1) as f32;
-        for (index, level) in bars.iter().enumerate() {
-            let x = inner.left() + (index as f32 + 0.5) * bar_width;
-            let half = level.clamp(0.04, 1.0) * inner.height() * 0.42;
-            let bar = Rect::from_min_max(
-                Pos2::new(x - bar_width * 0.18, inner.center().y - half),
-                Pos2::new(x + bar_width * 0.18, inner.center().y + half),
-            );
-            painter.rect_filled(bar, 4.0, Color32::from_rgb(231, 92, 162));
         }
     }
 }

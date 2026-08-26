@@ -542,6 +542,14 @@ impl AudioEngine {
         self.cached_audio.remove(asset_path);
     }
 
+    /// Drop the decoded audio buffer when nothing is playing.
+    /// Call periodically while idle; the next play() call will stream or re-decode as needed.
+    pub fn evict_idle_audio_cache(&mut self) {
+        if !self.has_active_playback() {
+            self.cached_audio.clear();
+        }
+    }
+
     pub fn insert_cached_audio(
         &mut self,
         asset_path: PathBuf,
