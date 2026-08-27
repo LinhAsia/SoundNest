@@ -2078,7 +2078,48 @@ impl SoundFxApp {
             }
         }
     }
+
+    pub(super) fn is_valid_download_url(text: &str) -> bool {
+        let s = text.trim();
+        if s.len() < 8 || s.len() > 2048 {
+            return false;
+        }
+        let lower = s.to_ascii_lowercase();
+        if !lower.starts_with("https://") && !lower.starts_with("http://") {
+            return false;
+        }
+        if s.chars().any(|c| c.is_whitespace() || c.is_control()) {
+            return false;
+        }
+        let rest = if let Some(after) = lower.strip_prefix("https://") {
+            after
+        } else if let Some(after) = lower.strip_prefix("http://") {
+            after
+        } else {
+            return false;
+        };
+        let host = rest.split(['/', '?', '#', ':']).next().unwrap_or("");
+        if host.is_empty() || !host.contains('.') || host.starts_with('.') || host.ends_with('.') {
+            return false;
+        }
+        true
+    }
+
+    pub(super) fn check_clipboard_for_download_url(&mut self) {
+        if let Ok(text) = self.clipboard_text() {
+            let trimmed = text.trim();
+            if Self::is_valid_download_url(trimmed) {
+                let url = trimmed.to_owned();
+                if self.clipboard_download_url.as_ref() != Some(&url) {
+                    self.clipboard_download_url = Some(url);
+                }
+                return;
+            }
+        }
+        self.clipboard_download_url = None;
+    }
 }
+
 
 #[cfg(test)]
 mod tests {
@@ -2092,5 +2133,21 @@ mod tests {
         assert_eq!(app.download_preview_duration, 0.0);
         assert!(app.download_preview_cursor.is_none());
     }
+
+    #[test]
+    fn validate_download_urls_correctly() {
+        assert!(SoundFxApp::is_valid_download_url("https://www.youtube.com/watch?v=dQw4w9WgXcQ"));
+        assert!(SoundFxApp::is_valid_download_url("https://youtu.be/dQw4w9WgXcQ"));
+        assert!(SoundFxApp::is_valid_download_url("https://soundcloud.com/artist/track"));
+        assert!(SoundFxApp::is_valid_download_url("https://www.tiktok.com/@user/video/123456789"));
+        assert!(SoundFxApp::is_valid_download_url("http://example.com/audio.mp3"));
+
+        assert!(!SoundFxApp::is_valid_download_url(""));
+        assert!(!SoundFxApp::is_valid_download_url("hello world"));
+        assert!(!SoundFxApp::is_valid_download_url("ftp://example.com/file.mp3"));
+        assert!(!SoundFxApp::is_valid_download_url("https://localhost"));
+        assert!(!SoundFxApp::is_valid_download_url("https://"));
+    }
 }
+
 

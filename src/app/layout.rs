@@ -347,7 +347,43 @@ impl SoundFxApp {
                     self.show_myinstants_panel = true;
                 }
 
-                let download_response = Self::icon_titlebar(ui, [48.0, 30.0], 0xe2c4, false, false);
+                if let Some(clip_url) = self.clipboard_download_url.clone()
+                    && !downloader_snapshot.running
+                    && self.last_downloaded_clipboard_url.as_deref() != Some(&clip_url)
+                {
+                    let label = self.t("download.download_clipboard");
+                    let hint = format!(
+                        "{}: {}",
+                        self.t("download.clipboard_hint"),
+                        Self::truncate_middle_ascii(&clip_url, 45)
+                    );
+                    let quick_btn = ui.add_sized(
+                        [108.0, 30.0],
+                        Self::action_button(
+                            RichText::new(format!("⬇ {label}")).size(11.5),
+                            true,
+                            false,
+                        ),
+                    ).on_hover_text(hint);
+                    Self::decorate_button_response(ui, &quick_btn);
+                    if quick_btn.clicked() {
+                        let target_url = clip_url.clone();
+                        self.download_url = target_url.clone();
+                        self.last_downloaded_clipboard_url = Some(target_url.clone());
+                        match self.downloader.start_audio_download(target_url) {
+                            Ok(()) => {
+                                self.status = Some("Downloading sound...".to_owned());
+                                self.show_download_panel = true;
+                            }
+                            Err(error) => {
+                                self.set_error_status(error);
+                                self.show_download_panel = true;
+                            }
+                        }
+                    }
+                }
+
+                let download_response = Self::icon_titlebar(ui, [42.0, 30.0], 0xe2c4, self.show_download_panel, false);
                 if download_titlebar_active {
                     let pulse = ((ctx.input(|input| input.time) as f32 * 4.2).sin() * 0.5 + 0.5)
                         .clamp(0.0, 1.0);
@@ -382,7 +418,12 @@ impl SoundFxApp {
                     }
                 }
                 if download_response.clicked() {
-                    self.show_download_panel = true;
+                    self.show_download_panel = !self.show_download_panel;
+                    if self.show_download_panel && self.download_url.trim().is_empty() {
+                        if let Some(url) = &self.clipboard_download_url {
+                            self.download_url = url.clone();
+                        }
+                    }
                 }
             });
         });

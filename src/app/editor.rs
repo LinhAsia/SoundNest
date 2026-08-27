@@ -1768,6 +1768,24 @@ impl SoundFxApp {
         }
     }
 
+    pub(super) fn clipboard_text(&self) -> Result<String> {
+        #[cfg(windows)]
+        {
+            let _clipboard =
+                Clipboard::new_attempts(3).context("unable to open system clipboard")?;
+            let mut text = String::new();
+            Unicode
+                .read_clipboard(&mut text)
+                .context("unable to read text from clipboard")?;
+            return Ok(text);
+        }
+
+        #[cfg(not(windows))]
+        {
+            anyhow::bail!("Clipboard text access is only available on Windows");
+        }
+    }
+
     pub(super) fn clipboard_has_supported_audio(&self) -> bool {
         self.clipboard_file_paths()
             .map(|paths| {

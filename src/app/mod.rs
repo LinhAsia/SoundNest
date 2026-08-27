@@ -17,7 +17,7 @@ use crate::storage::{
 use crate::stream_input::{StreamInputConfig, StreamInputRouter};
 use anyhow::{Context as _, Result};
 #[cfg(windows)]
-use clipboard_win::{Clipboard, Setter, formats::FileList};
+use clipboard_win::{Clipboard, Setter, formats::{FileList, Unicode}};
 use eframe::egui::{
     self, Align, Align2, Button, CentralPanel, Checkbox, Color32, ComboBox, Context, CornerRadius,
     DragValue, FontFamily, FontId, Frame, Margin, Pos2, ProgressBar, Rect, RichText, ScrollArea,

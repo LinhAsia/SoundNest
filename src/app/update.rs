@@ -43,6 +43,11 @@ impl eframe::App for SoundFxApp {
             }
         }
 
+        if now - self.last_clipboard_check_at >= 0.4 {
+            self.last_clipboard_check_at = now;
+            self.check_clipboard_for_download_url();
+        }
+
         if !ctx.input(|input| input.pointer.primary_down()) {
             let accepted_trim_drop = self.finalize_pending_trim_timeline_drop();
             if !accepted_trim_drop {
