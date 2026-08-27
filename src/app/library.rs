@@ -1067,7 +1067,8 @@ impl SoundFxApp {
             .as_ref()
             .and_then(|audio| audio.playback_progress(sound.id));
         let is_previewing = playback_progress.is_some();
-        if is_previewing || is_loading {
+        let is_focused = ui.ctx().input(|i| i.viewport().focused.unwrap_or(true));
+        if (is_previewing || is_loading) && is_focused {
             ui.ctx()
                 .request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
         }

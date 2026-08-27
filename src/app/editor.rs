@@ -2742,7 +2742,8 @@ impl SoundFxApp {
             .audio
             .as_ref()
             .and_then(|audio| audio.playback_position_secs(sound_id));
-        if is_playing {
+        let is_focused = ctx.input(|i| i.viewport().focused.unwrap_or(true));
+        if is_playing && is_focused {
             ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
         }
 

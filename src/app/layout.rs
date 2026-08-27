@@ -370,14 +370,14 @@ impl SoundFxApp {
                         let target_url = clip_url.clone();
                         self.download_url = target_url.clone();
                         self.last_downloaded_clipboard_url = Some(target_url.clone());
+                        self.quick_download_active = true;
                         match self.downloader.start_audio_download(target_url) {
                             Ok(()) => {
                                 self.status = Some("Downloading sound...".to_owned());
-                                self.show_download_panel = true;
                             }
                             Err(error) => {
+                                self.quick_download_active = false;
                                 self.set_error_status(error);
-                                self.show_download_panel = true;
                             }
                         }
                     }

@@ -102,27 +102,39 @@ impl eframe::App for SoundFxApp {
         }
 
         let is_minimized = ctx.input(|i| i.viewport().minimized.unwrap_or(false));
+        let is_focused = ctx.input(|i| i.viewport().focused.unwrap_or(true));
         if is_minimized {
             ctx.request_repaint_after(Duration::from_millis(500));
             return;
         }
-        if !self.normalize_inflight.is_empty() {
-            ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
-        }
-        if !self.trim_commit_inflight.is_empty() {
-            ctx.request_repaint_after(Duration::from_millis(JOB_POLL_REPAINT_MS));
-        }
-        if self.playback_needs_live_repaint() {
-            ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
+        if !is_focused {
+            ctx.request_repaint_after(Duration::from_millis(300));
+        } else {
+            if !self.normalize_inflight.is_empty() {
+                ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
+            }
+            if !self.trim_commit_inflight.is_empty() {
+                ctx.request_repaint_after(Duration::from_millis(JOB_POLL_REPAINT_MS));
+            }
+            if self.playback_needs_live_repaint() {
+                ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
+            }
         }
 
-        if self.download_was_running
-            && !download_snapshot.running
-            && download_snapshot.last_file.is_some()
-        {
-            self.show_download_panel = true;
-            self.stop_preview();
-            self.clear_status();
+        if self.download_was_running && !download_snapshot.running {
+            if let Some(path) = download_snapshot.last_file {
+                if self.quick_download_active {
+                    self.quick_download_active = false;
+                    self.import_downloaded_sound(&path, false);
+                    self.status = Some(self.t("download.download_finished"));
+                } else {
+                    self.show_download_panel = true;
+                    self.stop_preview();
+                    self.clear_status();
+                }
+            } else {
+                self.quick_download_active = false;
+            }
         }
         self.download_was_running = download_snapshot.running;
 
