@@ -3,7 +3,6 @@ use super::*;
 impl SoundFxApp {
     pub(crate) fn with_initial_selection(mut self) -> Self {
         self.selected = self.sounds.first().map(|sound| sound.id);
-        self.preload_selected_sound_audio();
         let _ = self.record_hotkey_manager.set_hotkeys(&self.record_hotkeys);
         let _ = self
             .record_hotkey_manager

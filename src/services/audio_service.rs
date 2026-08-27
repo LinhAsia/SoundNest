@@ -54,8 +54,14 @@ struct CachedAudio {
     samples: Arc<[f32]>,
 }
 
-struct PanicSafeSource<S> {
+struct PanicSafeSource<S>
+where
+    S: Source,
+    S::Item: Sample,
+{
     inner: S,
+    buffer: Vec<S::Item>,
+    buffer_idx: usize,
     failed: bool,
 }
 
@@ -129,11 +135,40 @@ where
     }
 }
 
-impl<S> PanicSafeSource<S> {
+impl<S: Source> PanicSafeSource<S>
+where
+    S::Item: Sample,
+{
     fn new(inner: S) -> Self {
         Self {
             inner,
+            buffer: Vec::with_capacity(1024),
+            buffer_idx: 0,
             failed: false,
+        }
+    }
+
+    fn fill_buffer(&mut self) {
+        self.buffer.clear();
+        self.buffer_idx = 0;
+        if self.failed {
+            return;
+        }
+
+        let inner = &mut self.inner;
+        let buf = &mut self.buffer;
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            for _ in 0..1024 {
+                if let Some(sample) = inner.next() {
+                    buf.push(sample);
+                } else {
+                    break;
+                }
+            }
+        }));
+
+        if result.is_err() {
+            self.failed = true;
         }
     }
 }
@@ -145,17 +180,21 @@ where
 {
     type Item = S::Item;
 
+    #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
-        if self.failed {
-            return None;
-        }
-        match catch_unwind(AssertUnwindSafe(|| self.inner.next())) {
-            Ok(sample) => sample,
-            Err(_) => {
-                self.failed = true;
-                None
+        if self.buffer_idx >= self.buffer.len() {
+            if self.failed {
+                return None;
+            }
+            self.fill_buffer();
+            if self.buffer_idx >= self.buffer.len() {
+                return None;
             }
         }
+
+        let sample = self.buffer[self.buffer_idx];
+        self.buffer_idx += 1;
+        Some(sample)
     }
 }
 
@@ -165,29 +204,22 @@ where
     S::Item: Sample,
 {
     fn current_frame_len(&self) -> Option<usize> {
-        catch_unwind(AssertUnwindSafe(|| self.inner.current_frame_len()))
-            .ok()
-            .flatten()
+        self.inner.current_frame_len()
     }
 
     fn channels(&self) -> u16 {
-        catch_unwind(AssertUnwindSafe(|| self.inner.channels()))
-            .unwrap_or(1)
-            .max(1)
+        self.inner.channels().max(1)
     }
 
     fn sample_rate(&self) -> u32 {
-        catch_unwind(AssertUnwindSafe(|| self.inner.sample_rate()))
-            .unwrap_or(44_100)
-            .max(1)
+        self.inner.sample_rate().max(1)
     }
 
     fn total_duration(&self) -> Option<Duration> {
-        catch_unwind(AssertUnwindSafe(|| self.inner.total_duration()))
-            .ok()
-            .flatten()
+        self.inner.total_duration()
     }
 }
+
 
 pub struct AudioEngine {
     _stream: OutputStream,

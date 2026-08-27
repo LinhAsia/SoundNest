@@ -197,6 +197,8 @@
       "editor.trim_shortcut_redo": "Ctrl + Shift + Z: redo trim",
       "editor.trim_shortcut_pan": "A / D: pan timeline left or right",
       "editor.trim_shortcut_zoom": "Ctrl + mouse wheel: zoom around the hover playhead",
+      "editor.repeat": "Repeat",
+      "editor.repeat_hint": "Loop this sound continuously",
       "editor.keep_old_file": "Keep old file?"
     },
     "vi": {
@@ -396,7 +398,10 @@
       "editor.trim_shortcut_redo": "Ctrl + Shift + Z: làm lại trim",
       "editor.trim_shortcut_pan": "A / D: kéo timeline sang trái hoặc phải",
       "editor.trim_shortcut_zoom": "Ctrl + lăn chuột: zoom quanh playhead đang hover",
+      "editor.repeat": "Lặp lại",
+      "editor.repeat_hint": "Phát lặp lại âm thanh này liên tục",
       "editor.keep_old_file": "Giữ file cũ?"
     }
   }
 }
+

@@ -76,20 +76,35 @@ impl eframe::App for SoundFxApp {
         }
 
         self.enforce_square_window_if_needed(ctx);
-        if self.app_view == AppView::Editor {
-            self.preload_selected_sound_audio();
-        }
-
         self.handle_trim_timeline_hotkeys(ctx);
         self.handle_space_preview(ctx);
         self.handle_trim_start_preview(ctx);
         self.handle_record_hotkey(ctx);
 
+        let mut repeat_sound_id = None;
         if let Some(audio) = self.audio.as_mut() {
+            let was_playing_id = audio.current_sound_id();
+            let was_playing = audio.has_active_playback();
             audio.tick();
             if self.myinstants_preview_audio_url.is_some() && !audio.has_active_playback() {
                 self.myinstants_preview_audio_url = None;
             }
+            if was_playing && !audio.has_active_playback() && self.trim_sound_repeat {
+                if let Some(sound_id) = was_playing_id {
+                    if self.selected == Some(sound_id) {
+                        repeat_sound_id = Some(sound_id);
+                    }
+                }
+            }
+        }
+        if let Some(sound_id) = repeat_sound_id {
+            self.preview_sound(sound_id);
+        }
+
+        let is_minimized = ctx.input(|i| i.viewport().minimized.unwrap_or(false));
+        if is_minimized {
+            ctx.request_repaint_after(Duration::from_millis(500));
+            return;
         }
         if !self.normalize_inflight.is_empty() {
             ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));

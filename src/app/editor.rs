@@ -2710,15 +2710,6 @@ impl SoundFxApp {
         }
     }
 
-    pub(super) fn preload_selected_sound_audio(&mut self) {
-        let Some(index) = self.selected_sound_index() else {
-            return;
-        };
-        let sound = &self.sounds[index];
-        let asset_path = self.preview_asset_path_for_sound(sound);
-        self.schedule_audio_preload(asset_path);
-    }
-
     pub(super) fn render_record_review_panel(&mut self, ctx: &Context) {
         if !self.show_record_review_panel {
             return;
@@ -2945,6 +2936,7 @@ impl SoundFxApp {
                             !is_playing,
                             true,
                             false,
+                            None,
                         );
                         changed |= timeline_changed;
                         seek_request |= timeline_seek_request;
@@ -3592,7 +3584,6 @@ impl SoundFxApp {
             || self
                 .pending_preview_after_preload
                 .is_some_and(|(pending_sound_id, _)| pending_sound_id == sound_id);
-        self.schedule_audio_preload(preview_asset_path);
         self.sync_editor_tags_input();
         let waveform_samples = self.sound_waveform_samples(&self.sounds[index]);
         let is_playing = self
@@ -3886,6 +3877,7 @@ impl SoundFxApp {
                                 !is_playing,
                                 editor_timeline_interactive,
                                 editor_audio_loading,
+                                Some(&mut self.trim_sound_repeat),
                             );
                             changed |= timeline_changed;
                             seek_request |= timeline_seek_request;
@@ -4551,6 +4543,7 @@ impl SoundFxApp {
         clamp_cursor_to_trim: bool,
         interactive: bool,
         show_loading_indicator: bool,
+        repeat_enabled: Option<&mut bool>,
     ) -> (bool, bool, bool, Option<TrimSnapshot>) {
         sound.clamp_trim();
         let duration = sound.display_duration_secs();
@@ -4601,6 +4594,49 @@ impl SoundFxApp {
                 ui.label("A / D: pan timeline left or right");
                 ui.label("Ctrl + mouse wheel: zoom around the hover playhead");
             });
+
+            if let Some(repeat) = repeat_enabled {
+                ui.add_space(4.0);
+                let is_repeat = *repeat;
+                let repeat_btn = ui.add_sized(
+                    [24.0, 24.0],
+                    Button::new(Self::icon(
+                        0xe040,
+                        15.0,
+                        if is_repeat {
+                            Color32::from_rgb(214, 51, 132)
+                        } else {
+                            Self::muted_text_color()
+                        },
+                    ))
+                    .fill(if is_repeat {
+                        Color32::from_rgba_premultiplied(214, 51, 132, 40)
+                    } else {
+                        Self::surface_fill()
+                    })
+                    .stroke(Stroke::new(
+                        1.0,
+                        if is_repeat {
+                            Color32::from_rgb(214, 51, 132)
+                        } else {
+                            Self::border_color()
+                        },
+                    ))
+                    .corner_radius(12.0),
+                );
+                if repeat_btn.hovered() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                }
+                let hint = if is_repeat {
+                    "Repeat: ON (Click to turn off continuous looping)"
+                } else {
+                    "Repeat: OFF (Click to loop this sound continuously)"
+                };
+                if repeat_btn.on_hover_text(hint).clicked() {
+                    *repeat = !is_repeat;
+                }
+            }
+
             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                 ui.label(
                     RichText::new(format!("{:.1}x", *zoom))
