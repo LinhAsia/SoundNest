@@ -1,4 +1,5 @@
 use super::*;
+use std::hash::Hash;
 
 impl SoundFxApp {
     pub(super) fn library_search_active(&self) -> bool {
@@ -72,22 +73,26 @@ impl SoundFxApp {
         folder_id: Option<Uuid>,
         include_descendants: bool,
     ) -> Vec<usize> {
-        let normalized_query = self.library_audio_query.trim().to_ascii_lowercase();
-        let active_tag_filters = self
-            .active_audio_tag_filters()
-            .iter()
-            .map(|value| value.to_ascii_lowercase())
-            .collect::<Vec<_>>();
-        let cache_key = format!(
-            "folder:{:?}|desc:{}|import:{:?}|favorites:{}|tag:{:?}|query:{}|len:{}",
+        let mut query_hasher = std::hash::DefaultHasher::new();
+        self.library_audio_query.trim().hash(&mut query_hasher);
+        let query_hash = std::hash::Hasher::finish(&query_hasher);
+
+        let mut tag_hasher = std::hash::DefaultHasher::new();
+        for tag in self.active_audio_tag_filters() {
+            tag.trim().hash(&mut tag_hasher);
+        }
+        let tag_filters_hash = std::hash::Hasher::finish(&tag_hasher);
+
+        let cache_key = LibraryFilterKey {
             folder_id,
             include_descendants,
-            self.folder_import_select_mode,
-            self.library_favorites_only_audio,
-            active_tag_filters,
-            normalized_query,
-            self.sounds.len()
-        );
+            folder_import_select_mode: self.folder_import_select_mode,
+            favorites_only: self.library_favorites_only_audio,
+            query_hash,
+            tag_filters_hash,
+            sounds_len: self.sounds.len(),
+        };
+
         if let Some(cached) = self
             .library_filtered_sound_indices_cache
             .borrow()
@@ -96,6 +101,14 @@ impl SoundFxApp {
         {
             return cached;
         }
+
+        let active_tag_filters = self
+            .active_audio_tag_filters()
+            .iter()
+            .map(|value| value.to_ascii_lowercase())
+            .collect::<Vec<_>>();
+        let normalized_query = self.library_audio_query.trim().to_ascii_lowercase();
+
 
         let active_folder_ids = if include_descendants {
             folder_id.map(|root_id| self.folder_branch_ids(root_id))

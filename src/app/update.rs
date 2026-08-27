@@ -41,6 +41,10 @@ impl eframe::App for SoundFxApp {
             if cache.len() > 150 {
                 cache.clear();
             }
+            let mut filter_cache = self.library_filtered_sound_indices_cache.borrow_mut();
+            if filter_cache.len() > 100 {
+                filter_cache.clear();
+            }
         }
 
         if now - self.last_clipboard_check_at >= 0.4 {

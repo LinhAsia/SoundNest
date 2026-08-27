@@ -340,30 +340,6 @@ fn resample_stereo_linear(samples: &[f32], source_rate: u32, target_rate: u32) -
     out
 }
 
-fn slice_stereo_segment(
-    samples: &[f32],
-    sample_rate: u32,
-    clip_start_secs: f32,
-    clip_end_secs: f32,
-) -> Vec<f32> {
-    if samples.len() < 2 {
-        return samples.to_vec();
-    }
-
-    let total_frames = samples.len() / 2;
-    let start_frame =
-        ((clip_start_secs.max(0.0) * sample_rate as f32).floor() as usize).min(total_frames);
-    let mut end_frame =
-        ((clip_end_secs.max(clip_start_secs + 0.05) * sample_rate as f32).ceil() as usize)
-            .min(total_frames);
-    if end_frame <= start_frame {
-        end_frame = (start_frame + 1).min(total_frames);
-    }
-    let start_sample = start_frame * 2;
-    let end_sample = (end_frame * 2).min(samples.len());
-    samples[start_sample..end_sample].to_vec()
-}
-
 fn soften_sample_edges(samples: &mut [f32], channels: u16, sample_rate: u32, fade_ms: f32) {
     if samples.is_empty() || channels == 0 || sample_rate == 0 {
         return;

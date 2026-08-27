@@ -178,37 +178,6 @@ impl SoundEffect {
         self.display_trim_end_secs = None;
     }
 
-    pub fn timeline_secs_to_output_secs(&self, timeline_secs: f32) -> f32 {
-        let mut played = 0.0;
-        for (start, end) in self.trim_ranges() {
-            let length = (end - start).max(0.0);
-            if timeline_secs <= start {
-                return played;
-            }
-            if timeline_secs < end {
-                return played + (timeline_secs - start);
-            }
-            played += length;
-        }
-        played
-    }
-
-    pub fn output_secs_to_timeline_secs(&self, output_secs: f32) -> f32 {
-        let mut remaining = output_secs.max(0.0);
-        let ranges = self.trim_ranges();
-        for (start, end) in &ranges {
-            let length = (*end - *start).max(0.0);
-            if remaining <= length {
-                return *start + remaining;
-            }
-            remaining -= length;
-        }
-        ranges
-            .last()
-            .map(|(_, end)| *end)
-            .unwrap_or(self.trim_end_secs)
-    }
-
     pub fn asset_path(&self, storage_dir: &Path) -> PathBuf {
         storage_dir.join("sounds").join(&self.asset_file)
     }

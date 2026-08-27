@@ -72,27 +72,37 @@ impl SoundFxApp {
         sound: &SoundEffect,
         buckets: usize,
     ) -> Vec<f32> {
-        let cache_key = format!(
-            "{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
-            sound.id,
-            sound.asset_file,
-            sound.vocal_asset_file.as_deref().unwrap_or(""),
-            sound.music_asset_file.as_deref().unwrap_or(""),
-            sound.music_only,
-            sound.vocal_only,
-            (sound.volume * 1000.0).round() as i32,
-            (sound.trim_start_secs * 1000.0).round() as i32,
-            (sound.trim_end_secs * 1000.0).round() as i32,
-            sound
+        let mut flags = 0u8;
+        if sound.music_only {
+            flags |= 1;
+        }
+        if sound.vocal_only {
+            flags |= 2;
+        }
+        if sound.vocal_asset_file.is_some() {
+            flags |= 4;
+        }
+        if sound.music_asset_file.is_some() {
+            flags |= 8;
+        }
+
+        let cache_key = LibraryWaveformKey {
+            sound_id: sound.id,
+            volume_int: (sound.volume * 1000.0).round() as i32,
+            trim_start_ms: (sound.trim_start_secs * 1000.0).round() as i32,
+            trim_end_ms: (sound.trim_end_secs * 1000.0).round() as i32,
+            cut_start_ms: sound
                 .cut_start_secs
                 .map(|value| (value * 1000.0).round() as i32)
                 .unwrap_or(-1),
-            sound
+            cut_end_ms: sound
                 .cut_end_secs
                 .map(|value| (value * 1000.0).round() as i32)
                 .unwrap_or(-1),
-        );
-        let cache_key = format!("{cache_key}:{buckets}");
+            flags,
+            buckets,
+        };
+
         if let Some(existing) = self
             .library_waveform_preview_cache
             .borrow()
@@ -112,6 +122,7 @@ impl SoundFxApp {
             .insert(cache_key, preview.clone());
         preview
     }
+
 
     pub(super) fn trimmed_waveform_preview_from_samples(
         sound: &SoundEffect,

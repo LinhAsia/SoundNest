@@ -134,6 +134,29 @@ pub(crate) struct TrimSnapshot {
     pub(crate) display_trim_end_secs: Option<f32>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(super) struct LibraryWaveformKey {
+    pub(super) sound_id: Uuid,
+    pub(super) volume_int: i32,
+    pub(super) trim_start_ms: i32,
+    pub(super) trim_end_ms: i32,
+    pub(super) cut_start_ms: i32,
+    pub(super) cut_end_ms: i32,
+    pub(super) flags: u8,
+    pub(super) buckets: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(super) struct LibraryFilterKey {
+    pub(super) folder_id: Option<Uuid>,
+    pub(super) include_descendants: bool,
+    pub(super) folder_import_select_mode: Option<Uuid>,
+    pub(super) favorites_only: bool,
+    pub(super) query_hash: u64,
+    pub(super) tag_filters_hash: u64,
+    pub(super) sounds_len: usize,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct TimelineClipAudioSettings {
     pub(crate) volume: f32,
@@ -351,8 +374,8 @@ pub struct SoundFxApp {
     pub(super) download_site_icon_cache: RefCell<HashMap<DownloadSiteKind, TextureHandle>>,
     pub(super) vocal_waveform_cache: RefCell<HashMap<Uuid, Vec<f32>>>,
     pub(super) music_waveform_cache: RefCell<HashMap<Uuid, Vec<f32>>>,
-    pub(super) library_waveform_preview_cache: RefCell<HashMap<String, Vec<f32>>>,
-    pub(super) library_filtered_sound_indices_cache: RefCell<HashMap<String, Vec<usize>>>,
+    pub(super) library_waveform_preview_cache: RefCell<HashMap<LibraryWaveformKey, Vec<f32>>>,
+    pub(super) library_filtered_sound_indices_cache: RefCell<HashMap<LibraryFilterKey, Vec<usize>>>,
     pub(super) myinstants_preview_audio_url: Option<String>,
     pub(super) show_download_panel: bool,
     pub(super) download_was_running: bool,

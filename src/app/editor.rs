@@ -1179,29 +1179,6 @@ impl SoundFxApp {
         }
     }
 
-    fn prepare_trim_timeline_preview_mix(&mut self, sound_id: Uuid) {
-        let Some(index) = self.sounds.iter().position(|sound| sound.id == sound_id) else {
-            return;
-        };
-        let Some(clips) = self.collect_trim_timeline_render_clips(sound_id) else {
-            return;
-        };
-        let sound = self.sounds[index].clone();
-        if let Ok(preview_path) = Storage::export_timeline_mix_preview_at(
-            self.storage.root_dir(),
-            &sound,
-            &clips,
-            0.0,
-        ) {
-            if let Some(audio) = self.audio.as_mut() {
-                audio.evict_cached_audio(&preview_path);
-            }
-            self.trim_timeline_preview_path = Some(preview_path);
-            self.trim_timeline_preview_start_secs = 0.0;
-            self.trim_timeline_preview_dirty = false;
-        }
-    }
-
     pub(super) fn refresh_trim_timeline_preview_after_edit(&mut self, sound_id: Uuid) {
         let Some(timeline_state) = self
             .trim_timeline_state
