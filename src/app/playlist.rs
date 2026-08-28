@@ -1,4 +1,5 @@
 use super::*;
+use egui::pos2;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 impl SoundFxApp {
@@ -936,11 +937,16 @@ impl SoundFxApp {
         }
     }
 
-    pub(super) fn render_playlist_bottom_bar(&mut self, ui: &mut Ui, _ctx: &Context) {
+    pub(super) fn render_playlist_bottom_bar(&mut self, ctx: &Context) {
         let Some(playing_id) = self.playlist_playing_id else {
+            self.playlist_scrubbing_pos = None;
+            self.playlist_volume_popup_open = false;
             return;
         };
         let Some(playlist) = self.playlists.iter().find(|p| p.id == playing_id).cloned() else {
+            self.playlist_playing_id = None;
+            self.playlist_scrubbing_pos = None;
+            self.playlist_volume_popup_open = false;
             return;
         };
         let sound_id = playlist.sound_ids.get(self.playlist_current_index).copied();
@@ -952,6 +958,7 @@ impl SoundFxApp {
             .and_then(|id| self.audio.as_ref().and_then(|a| a.playback_position_secs(id)))
             .unwrap_or(0.0);
         let duration_secs = sound_opt.as_ref().map(|s| s.display_duration_secs()).unwrap_or(0.0);
+        let max_secs = duration_secs.max(0.1);
 
         let mut prev_action = false;
         let mut toggle_play_action = false;
@@ -962,6 +969,8 @@ impl SoundFxApp {
         let mut volume_changed: Option<f32> = None;
         let mut open_panel_action = false;
         let mut close_bar_action = false;
+        let mut vol_btn_rect: Option<Rect> = None;
+        let mut vol_btn_hovered = false;
 
         let prev_label = self.t("playlist.previous");
         let next_label = self.t("playlist.next");
@@ -973,191 +982,368 @@ impl SoundFxApp {
         let open_panel_label = self.t("playlist.open_panel");
         let close_bar_label = self.t("playlist.close_bar");
 
-        Frame::new()
-            .fill(Self::panel_fill())
-            .stroke(Stroke::new(1.0, Self::border_color()))
-            .corner_radius(16.0)
-            .inner_margin(Margin::symmetric(14, 8))
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    // Controls cluster: Prev, Play/Pause, Next, Shuffle, Loop
-                    let prev_btn = ui.add_sized(
-                        [30.0, 30.0],
-                        Button::new(Self::icon(0xe045, 16.0, Self::strong_text_color()))
-                            .fill(Self::surface_fill())
-                            .stroke(Stroke::new(1.0, Self::border_color()))
-                            .corner_radius(15.0),
-                    ).on_hover_text(&prev_label);
-                    Self::decorate_button_response(ui, &prev_btn);
-                    if prev_btn.clicked() {
-                        prev_action = true;
-                    }
+        let screen_rect = self.app_frame_rect.unwrap_or_else(|| ctx.screen_rect());
+        let bar_height = 54.0;
+        let bar_width = (screen_rect.width() - 32.0).clamp(460.0, 1100.0);
+        let bar_x = screen_rect.center().x - bar_width * 0.5;
+        let bar_y = screen_rect.bottom() - bar_height - 12.0;
+        let bar_pos = pos2(bar_x, bar_y);
 
-                    let play_icon = if is_playing && !is_paused { 0xe034 } else { 0xe037 };
-                    let play_btn = ui.add_sized(
-                        [34.0, 34.0],
-                        Button::new(Self::icon(play_icon, 18.0, Color32::WHITE))
-                            .fill(Color32::from_rgb(214, 51, 132))
-                            .stroke(Stroke::NONE)
-                            .corner_radius(17.0),
-                    ).on_hover_text(if is_playing && !is_paused { &pause_label } else { &play_label });
-                    Self::decorate_button_response(ui, &play_btn);
-                    if play_btn.clicked() {
-                        toggle_play_action = true;
-                    }
+        egui::Area::new(egui::Id::new("playlist-bottom-bar-popup"))
+            .order(egui::Order::Middle)
+            .fixed_pos(bar_pos)
+            .interactable(true)
+            .show(ctx, |ui| {
+                ui.set_width(bar_width);
+                ui.set_height(bar_height);
+                Frame::new()
+                    .fill(Self::panel_fill())
+                    .stroke(Stroke::new(1.2, Self::border_color()))
+                    .shadow(Shadow {
+                        offset: [0, 8],
+                        blur: 24,
+                        spread: 0,
+                        color: Color32::from_rgba_premultiplied(0, 0, 0, 70),
+                    })
+                    .corner_radius(18.0)
+                    .inner_margin(Margin::symmetric(14, 8))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            // Controls cluster: Prev, Play/Pause, Next, Shuffle, Loop
+                            let prev_btn = ui.add_sized(
+                                [30.0, 30.0],
+                                Button::new(Self::icon(0xe045, 16.0, Self::strong_text_color()))
+                                    .fill(Self::surface_fill())
+                                    .stroke(Stroke::new(1.0, Self::border_color()))
+                                    .corner_radius(15.0),
+                            ).on_hover_text(&prev_label);
+                            Self::decorate_button_response(ui, &prev_btn);
+                            if prev_btn.clicked() {
+                                prev_action = true;
+                            }
 
-                    let next_btn = ui.add_sized(
-                        [30.0, 30.0],
-                        Button::new(Self::icon(0xe044, 16.0, Self::strong_text_color()))
-                            .fill(Self::surface_fill())
-                            .stroke(Stroke::new(1.0, Self::border_color()))
-                            .corner_radius(15.0),
-                    ).on_hover_text(&next_label);
-                    Self::decorate_button_response(ui, &next_btn);
-                    if next_btn.clicked() {
-                        next_action = true;
-                    }
+                            let play_icon = if is_playing && !is_paused { 0xe034 } else { 0xe037 };
+                            let play_btn = ui.add_sized(
+                                [34.0, 34.0],
+                                Button::new(Self::icon(play_icon, 18.0, Color32::WHITE))
+                                    .fill(Color32::from_rgb(214, 51, 132))
+                                    .stroke(Stroke::NONE)
+                                    .corner_radius(17.0),
+                            ).on_hover_text(if is_playing && !is_paused { &pause_label } else { &play_label });
+                            Self::decorate_button_response(ui, &play_btn);
+                            if play_btn.clicked() {
+                                toggle_play_action = true;
+                            }
 
-                    ui.add_space(4.0);
+                            let next_btn = ui.add_sized(
+                                [30.0, 30.0],
+                                Button::new(Self::icon(0xe044, 16.0, Self::strong_text_color()))
+                                    .fill(Self::surface_fill())
+                                    .stroke(Stroke::new(1.0, Self::border_color()))
+                                    .corner_radius(15.0),
+                            ).on_hover_text(&next_label);
+                            Self::decorate_button_response(ui, &next_btn);
+                            if next_btn.clicked() {
+                                next_action = true;
+                            }
 
-                    let shuffle_active = self.playlist_shuffle;
-                    let shuffle_btn = ui.add_sized(
-                        [26.0, 26.0],
-                        Button::new(Self::icon(
-                            0xe043,
-                            14.0,
-                            if shuffle_active { Color32::from_rgb(214, 51, 132) } else { Self::muted_text_color() },
-                        ))
-                        .fill(if shuffle_active { Color32::from_rgba_premultiplied(214, 51, 132, 36) } else { Color32::TRANSPARENT })
-                        .stroke(Stroke::NONE)
-                        .corner_radius(6.0),
-                    ).on_hover_text(&shuffle_label);
-                    Self::decorate_button_response(ui, &shuffle_btn);
-                    if shuffle_btn.clicked() {
-                        toggle_shuffle = true;
-                    }
+                            ui.add_space(2.0);
 
-                    let loop_active = self.playlist_loop;
-                    let loop_btn = ui.add_sized(
-                        [26.0, 26.0],
-                        Button::new(Self::icon(
-                            0xe040,
-                            14.0,
-                            if loop_active { Color32::from_rgb(214, 51, 132) } else { Self::muted_text_color() },
-                        ))
-                        .fill(if loop_active { Color32::from_rgba_premultiplied(214, 51, 132, 36) } else { Color32::TRANSPARENT })
-                        .stroke(Stroke::NONE)
-                        .corner_radius(6.0),
-                    ).on_hover_text(&loop_label);
-                    Self::decorate_button_response(ui, &loop_btn);
-                    if loop_btn.clicked() {
-                        toggle_loop = true;
-                    }
-
-                    ui.add_space(8.0);
-
-                    // Progress / Scrubbing slider
-                    ui.label(
-                        RichText::new(format_time(position_secs))
-                            .size(11.5)
-                            .monospace()
-                            .color(Self::muted_text_color()),
-                    );
-
-                    let max_secs = duration_secs.max(0.1);
-                    let mut seek_pos = position_secs.clamp(0.0, max_secs);
-                    let available_for_slider = (ui.available_width() - 340.0).max(80.0);
-                    let slider = egui::Slider::new(&mut seek_pos, 0.0..=max_secs)
-                        .show_value(false)
-                        .trailing_fill(true);
-                    let slider_response = ui.add_sized([available_for_slider, 16.0], slider);
-                    Self::decorate_button_response(ui, &slider_response);
-                    if slider_response.changed() {
-                        seek_action = Some(seek_pos);
-                    }
-
-                    ui.label(
-                        RichText::new(format_time(duration_secs))
-                            .size(11.5)
-                            .monospace()
-                            .color(Self::muted_text_color()),
-                    );
-
-                    ui.add_space(8.0);
-
-                    // Master Volume Slider
-                    let vol_icon = if self.playlist_volume <= 0.01 {
-                        0xe04f
-                    } else if self.playlist_volume < 0.5 {
-                        0xe04d
-                    } else {
-                        0xe050
-                    };
-                    ui.label(Self::icon(vol_icon, 14.0, Self::muted_text_color()));
-
-                    let mut vol_pct = (self.playlist_volume * 100.0).round();
-                    let vol_slider = egui::Slider::new(&mut vol_pct, 0.0..=200.0)
-                        .show_value(false)
-                        .trailing_fill(true);
-                    let vol_response = ui.add_sized([64.0, 16.0], vol_slider)
-                        .on_hover_text(format!("{}: {:.0}%", volume_label, vol_pct));
-                    Self::decorate_button_response(ui, &vol_response);
-                    if vol_response.changed() {
-                        volume_changed = Some((vol_pct / 100.0).clamp(0.0, 2.0));
-                    }
-
-                    ui.add_space(8.0);
-                    ui.separator();
-                    ui.add_space(4.0);
-
-                    // Track info
-                    let track_title = sound_opt.as_ref().map(|s| s.name.as_str()).unwrap_or("(No track)");
-                    ui.allocate_ui_with_layout(
-                        vec2(130.0, 32.0),
-                        egui::Layout::top_down(Align::Min),
-                        |ui| {
-                            ui.label(
-                                RichText::new(track_title)
-                                    .size(11.5)
-                                    .strong()
-                                    .color(Self::strong_text_color()),
-                            );
-                            ui.label(
-                                RichText::new(&playlist.name)
-                                    .size(10.0)
-                                    .color(Self::muted_text_color()),
-                            );
-                        },
-                    );
-
-                    // Right actions: Open panel, Close bar
-                    ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                        let close_bar_btn = ui.add_sized(
-                            [26.0, 26.0],
-                            Button::new(Self::icon(0xe5cd, 13.0, Self::muted_text_color()))
-                                .fill(Color32::TRANSPARENT)
+                            let shuffle_active = self.playlist_shuffle;
+                            let shuffle_btn = ui.add_sized(
+                                [26.0, 26.0],
+                                Button::new(Self::icon(
+                                    0xe043,
+                                    14.0,
+                                    if shuffle_active { Color32::from_rgb(214, 51, 132) } else { Self::muted_text_color() },
+                                ))
+                                .fill(if shuffle_active { Color32::from_rgba_premultiplied(214, 51, 132, 36) } else { Color32::TRANSPARENT })
                                 .stroke(Stroke::NONE)
                                 .corner_radius(6.0),
-                        ).on_hover_text(&close_bar_label);
-                        Self::decorate_button_response(ui, &close_bar_btn);
-                        if close_bar_btn.clicked() {
-                            close_bar_action = true;
-                        }
+                            ).on_hover_text(&shuffle_label);
+                            Self::decorate_button_response(ui, &shuffle_btn);
+                            if shuffle_btn.clicked() {
+                                toggle_shuffle = true;
+                            }
 
-                        let open_panel_btn = ui.add_sized(
-                            [26.0, 26.0],
-                            Button::new(Self::icon(0xe05f, 14.0, Color32::from_rgb(214, 51, 132)))
-                                .fill(Color32::from_rgba_premultiplied(214, 51, 132, 24))
-                                .stroke(Stroke::new(1.0, Color32::from_rgba_premultiplied(214, 51, 132, 60)))
+                            let loop_active = self.playlist_loop;
+                            let loop_btn = ui.add_sized(
+                                [26.0, 26.0],
+                                Button::new(Self::icon(
+                                    0xe040,
+                                    14.0,
+                                    if loop_active { Color32::from_rgb(214, 51, 132) } else { Self::muted_text_color() },
+                                ))
+                                .fill(if loop_active { Color32::from_rgba_premultiplied(214, 51, 132, 36) } else { Color32::TRANSPARENT })
+                                .stroke(Stroke::NONE)
                                 .corner_radius(6.0),
-                        ).on_hover_text(&open_panel_label);
-                        Self::decorate_button_response(ui, &open_panel_btn);
-                        if open_panel_btn.clicked() {
-                            open_panel_action = true;
-                        }
+                            ).on_hover_text(&loop_label);
+                            Self::decorate_button_response(ui, &loop_btn);
+                            if loop_btn.clicked() {
+                                toggle_loop = true;
+                            }
+
+                            ui.add_space(6.0);
+
+                            // Current time display (updates smoothly with drag)
+                            let current_display_secs = self.playlist_scrubbing_pos.unwrap_or(position_secs).clamp(0.0, max_secs);
+                            ui.label(
+                                RichText::new(format_time(current_display_secs))
+                                    .size(11.5)
+                                    .monospace()
+                                    .color(Self::muted_text_color()),
+                            );
+
+                            // Custom Timeline Slider: wide, high contrast, seek only on release!
+                            let reserved_right_width = 240.0;
+                            let slider_width = (ui.available_width() - reserved_right_width).max(80.0);
+                            let (timeline_rect, timeline_resp) = ui.allocate_exact_size(vec2(slider_width, 18.0), Sense::click_and_drag());
+                            Self::decorate_button_response(ui, &timeline_resp);
+
+                            let is_dragged = timeline_resp.dragged();
+                            let is_clicked = timeline_resp.clicked();
+                            if is_dragged || is_clicked {
+                                if let Some(mouse_pos) = timeline_resp.interact_pointer_pos() {
+                                    let frac = ((mouse_pos.x - timeline_rect.left()) / timeline_rect.width()).clamp(0.0, 1.0);
+                                    let target_secs = frac * max_secs;
+                                    self.playlist_scrubbing_pos = Some(target_secs);
+                                }
+                            }
+
+                            if timeline_resp.drag_stopped() || (is_clicked && !is_dragged) {
+                                if let Some(target_secs) = self.playlist_scrubbing_pos.take() {
+                                    seek_action = Some(target_secs);
+                                }
+                            }
+
+                            let display_frac = if max_secs > 0.0 {
+                                (current_display_secs / max_secs).clamp(0.0, 1.0)
+                            } else {
+                                0.0
+                            };
+
+                            let is_timeline_hovered = timeline_resp.hovered() || is_dragged;
+                            let track_h = if is_timeline_hovered { 6.0 } else { 4.5 };
+                            let track_r = track_h * 0.5;
+                            let track_y = timeline_rect.center().y;
+
+                            // Distinct dark slate background track (never blends with panel background)
+                            let bg_track = Rect::from_min_max(
+                                pos2(timeline_rect.left(), track_y - track_r),
+                                pos2(timeline_rect.right(), track_y + track_r),
+                            );
+                            ui.painter().rect_filled(bg_track, track_r, Color32::from_rgb(52, 44, 58));
+                            ui.painter().rect_stroke(bg_track, track_r, Stroke::new(1.0, Color32::from_rgb(76, 64, 84)), StrokeKind::Inside);
+
+                            // Active filled magenta track
+                            let fill_x = (timeline_rect.left() + timeline_rect.width() * display_frac).min(timeline_rect.right());
+                            if fill_x > timeline_rect.left() {
+                                let filled_track = Rect::from_min_max(
+                                    pos2(timeline_rect.left(), track_y - track_r),
+                                    pos2(fill_x, track_y + track_r),
+                                );
+                                ui.painter().rect_filled(filled_track, track_r, Color32::from_rgb(214, 51, 132));
+                            }
+
+                            // Thumb indicator
+                            let thumb_radius = if is_dragged { 7.5 } else if is_timeline_hovered { 6.5 } else { 5.0 };
+                            let thumb_pos = pos2(fill_x, track_y);
+                            ui.painter().circle_filled(thumb_pos, thumb_radius, Color32::WHITE);
+                            ui.painter().circle_stroke(thumb_pos, thumb_radius, Stroke::new(2.0, Color32::from_rgb(214, 51, 132)));
+
+                            // Duration display
+                            ui.label(
+                                RichText::new(format_time(duration_secs))
+                                    .size(11.5)
+                                    .monospace()
+                                    .color(Self::muted_text_color()),
+                            );
+
+                            ui.add_space(6.0);
+
+                            // Volume button (triggers vertical popup slider)
+                            let vol_icon = if self.playlist_volume <= 0.01 {
+                                0xe04f
+                            } else if self.playlist_volume < 0.5 {
+                                0xe04d
+                            } else {
+                                0xe050
+                            };
+                            let vol_btn = ui.add_sized(
+                                [28.0, 28.0],
+                                Button::new(Self::icon(
+                                    vol_icon,
+                                    15.0,
+                                    if self.playlist_volume_popup_open {
+                                        Color32::from_rgb(214, 51, 132)
+                                    } else {
+                                        Self::strong_text_color()
+                                    },
+                                ))
+                                .fill(if self.playlist_volume_popup_open {
+                                    Color32::from_rgba_premultiplied(214, 51, 132, 36)
+                                } else {
+                                    Self::surface_fill()
+                                })
+                                .stroke(Stroke::new(1.0, Self::border_color()))
+                                .corner_radius(8.0),
+                            ).on_hover_text(&volume_label);
+                            Self::decorate_button_response(ui, &vol_btn);
+                            vol_btn_rect = Some(vol_btn.rect);
+                            vol_btn_hovered = vol_btn.hovered();
+
+                            if vol_btn.clicked() {
+                                self.playlist_volume_popup_open = !self.playlist_volume_popup_open;
+                            }
+
+                            ui.add_space(4.0);
+                            ui.separator();
+                            ui.add_space(4.0);
+
+                            // Track info
+                            let track_title = sound_opt.as_ref().map(|s| s.name.as_str()).unwrap_or("(No track)");
+                            ui.allocate_ui_with_layout(
+                                vec2(110.0, 32.0),
+                                egui::Layout::top_down(Align::Min),
+                                |ui| {
+                                    ui.label(
+                                        RichText::new(track_title)
+                                            .size(11.5)
+                                            .strong()
+                                            .color(Self::strong_text_color()),
+                                    );
+                                    ui.label(
+                                        RichText::new(&playlist.name)
+                                            .size(10.0)
+                                            .color(Self::muted_text_color()),
+                                    );
+                                },
+                            );
+
+                            // Right actions: Open panel, Close bar
+                            ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                                let close_bar_btn = ui.add_sized(
+                                    [26.0, 26.0],
+                                    Button::new(Self::icon(0xe5cd, 13.0, Self::muted_text_color()))
+                                        .fill(Color32::TRANSPARENT)
+                                        .stroke(Stroke::NONE)
+                                        .corner_radius(6.0),
+                                ).on_hover_text(&close_bar_label);
+                                Self::decorate_button_response(ui, &close_bar_btn);
+                                if close_bar_btn.clicked() {
+                                    close_bar_action = true;
+                                }
+
+                                let open_panel_btn = ui.add_sized(
+                                    [26.0, 26.0],
+                                    Button::new(Self::icon(0xe05f, 14.0, Color32::from_rgb(214, 51, 132)))
+                                        .fill(Color32::from_rgba_premultiplied(214, 51, 132, 24))
+                                        .stroke(Stroke::new(1.0, Color32::from_rgba_premultiplied(214, 51, 132, 60)))
+                                        .corner_radius(6.0),
+                                ).on_hover_text(&open_panel_label);
+                                Self::decorate_button_response(ui, &open_panel_btn);
+                                if open_panel_btn.clicked() {
+                                    open_panel_action = true;
+                                }
+                            });
+                        });
                     });
-                });
             });
+
+        // Vertical Volume Slider Popup (floating right above volume button)
+        let show_vol_popup = self.playlist_volume_popup_open || vol_btn_hovered;
+        if show_vol_popup {
+            if let Some(btn_r) = vol_btn_rect {
+                let popup_width = 44.0;
+                let popup_height = 136.0;
+                let popup_pos = pos2(btn_r.center().x - popup_width * 0.5, btn_r.top() - popup_height - 6.0);
+
+                let mut popup_hovered = false;
+                egui::Area::new(egui::Id::new("playlist-volume-popup-area"))
+                    .order(egui::Order::Foreground)
+                    .fixed_pos(popup_pos)
+                    .interactable(true)
+                    .show(ctx, |ui| {
+                        ui.set_width(popup_width);
+                        ui.set_height(popup_height);
+                        Frame::new()
+                            .fill(Self::panel_fill())
+                            .stroke(Stroke::new(1.2, Self::border_color()))
+                            .shadow(Shadow {
+                                offset: [0, 8],
+                                blur: 18,
+                                spread: 0,
+                                color: Color32::from_rgba_premultiplied(0, 0, 0, 80),
+                            })
+                            .corner_radius(12.0)
+                            .inner_margin(Margin::symmetric(8, 10))
+                            .show(ui, |ui| {
+                                popup_hovered = ui.rect_contains_pointer(ui.max_rect());
+                                ui.vertical_centered(|ui| {
+                                    let pct = (self.playlist_volume * 100.0).round();
+                                    ui.label(
+                                        RichText::new(format!("{:.0}%", pct))
+                                            .size(11.0)
+                                            .monospace()
+                                            .strong()
+                                            .color(Self::strong_text_color()),
+                                    );
+                                    ui.add_space(6.0);
+
+                                    // Vertical slider track: drag UP increases volume, drag DOWN decreases
+                                    let track_size = vec2(18.0, 86.0);
+                                    let (vol_rect, vol_resp) = ui.allocate_exact_size(track_size, Sense::click_and_drag());
+                                    Self::decorate_button_response(ui, &vol_resp);
+
+                                    if vol_resp.dragged() || vol_resp.clicked() {
+                                        if let Some(pos) = vol_resp.interact_pointer_pos() {
+                                            let frac = ((vol_rect.bottom() - pos.y) / vol_rect.height()).clamp(0.0, 1.0);
+                                            volume_changed = Some((frac * 2.0).clamp(0.0, 2.0));
+                                        }
+                                    }
+
+                                    // Mouse wheel over volume area
+                                    let scroll = ui.input(|i| i.raw_scroll_delta.y);
+                                    if (vol_resp.hovered() || vol_btn_hovered) && scroll.abs() > 0.1 {
+                                        let delta = if scroll > 0.0 { 0.05 } else { -0.05 };
+                                        volume_changed = Some((self.playlist_volume + delta).clamp(0.0, 2.0));
+                                    }
+
+                                    // Render vertical track
+                                    let vol_frac = (self.playlist_volume / 2.0).clamp(0.0, 1.0);
+                                    let track_x = vol_rect.center().x;
+                                    let track_w = 4.5;
+                                    let track_r = track_w * 0.5;
+
+                                    let bg_v_track = Rect::from_min_max(
+                                        pos2(track_x - track_r, vol_rect.top()),
+                                        pos2(track_x + track_r, vol_rect.bottom()),
+                                    );
+                                    ui.painter().rect_filled(bg_v_track, track_r, Color32::from_rgb(52, 44, 58));
+                                    ui.painter().rect_stroke(bg_v_track, track_r, Stroke::new(1.0, Color32::from_rgb(76, 64, 84)), StrokeKind::Inside);
+
+                                    let fill_y = vol_rect.bottom() - vol_rect.height() * vol_frac;
+                                    let filled_v_track = Rect::from_min_max(
+                                        pos2(track_x - track_r, fill_y),
+                                        pos2(track_x + track_r, vol_rect.bottom()),
+                                    );
+                                    ui.painter().rect_filled(filled_v_track, track_r, Color32::from_rgb(214, 51, 132));
+
+                                    // Thumb
+                                    let thumb_y = fill_y;
+                                    let thumb_pt = pos2(track_x, thumb_y);
+                                    let thumb_r = if vol_resp.dragged() { 7.0 } else if vol_resp.hovered() { 6.0 } else { 5.0 };
+                                    ui.painter().circle_filled(thumb_pt, thumb_r, Color32::WHITE);
+                                    ui.painter().circle_stroke(thumb_pt, thumb_r, Stroke::new(2.0, Color32::from_rgb(214, 51, 132)));
+                                });
+                            });
+                    });
+
+                if !popup_hovered && !vol_btn_hovered && ctx.input(|i| i.pointer.any_click()) {
+                    self.playlist_volume_popup_open = false;
+                }
+            }
+        }
 
         if prev_action {
             self.previous_playlist_sound();

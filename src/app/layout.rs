@@ -66,15 +66,9 @@ impl SoundFxApp {
                         self.draw_titlebar(ui, ctx);
                         ui.add_space(14.0);
 
-                        let show_bottom_player = self.playlist_playing_id.is_some();
-                        let bottom_player_height = if show_bottom_player { 60.0 } else { 0.0 };
-                        let content_height = (ui.available_height() - bottom_player_height).max(100.0);
+                        let content_height = ui.available_height();
                         if self.app_view == AppView::Library {
-                            ui.allocate_ui_with_layout(
-                                vec2(ui.available_width(), content_height),
-                                egui::Layout::top_down(Align::Min),
-                                |ui| self.draw_library_grid(ui),
-                            );
+                            self.draw_library_grid(ui);
                         } else if self.editing_from_folder.is_some() {
                             ui.allocate_ui_with_layout(
                                 vec2(ui.available_width(), content_height),
@@ -82,32 +76,21 @@ impl SoundFxApp {
                                 |ui| self.draw_editor(ui, ctx),
                             );
                         } else {
-                            ui.allocate_ui_with_layout(
-                                vec2(ui.available_width(), content_height),
-                                egui::Layout::top_down(Align::Min),
-                                |ui| {
-                                    ui.horizontal_top(|ui| {
-                                        let library_width =
-                                            (ui.available_width() * 0.31).clamp(280.0, 360.0);
-                                        ui.allocate_ui_with_layout(
-                                            vec2(library_width, content_height),
-                                            egui::Layout::top_down(Align::Min),
-                                            |ui| self.draw_library(ui),
-                                        );
-                                        ui.add_space(12.0);
-                                        ui.allocate_ui_with_layout(
-                                            vec2(ui.available_width(), content_height),
-                                            egui::Layout::top_down(Align::Min),
-                                            |ui| self.draw_editor(ui, ctx),
-                                        );
-                                    });
-                                },
-                            );
-                        }
-
-                        if show_bottom_player {
-                            ui.add_space(6.0);
-                            self.render_playlist_bottom_bar(ui, ctx);
+                            ui.horizontal_top(|ui| {
+                                let library_width =
+                                    (ui.available_width() * 0.31).clamp(280.0, 360.0);
+                                ui.allocate_ui_with_layout(
+                                    vec2(library_width, content_height),
+                                    egui::Layout::top_down(Align::Min),
+                                    |ui| self.draw_library(ui),
+                                );
+                                ui.add_space(12.0);
+                                ui.allocate_ui_with_layout(
+                                    vec2(ui.available_width(), content_height),
+                                    egui::Layout::top_down(Align::Min),
+                                    |ui| self.draw_editor(ui, ctx),
+                                );
+                            });
                         }
                     });
                 self.app_frame_rect = Some(frame_rect);
@@ -136,6 +119,7 @@ impl SoundFxApp {
                 }
             });
 
+        self.render_playlist_bottom_bar(ctx);
         self.render_modal_backdrop(ctx);
         self.render_download_panel(ctx);
         self.render_myinstants_panel(ctx);
