@@ -485,6 +485,12 @@ impl AudioEngine {
         self.sink.as_ref().is_some_and(|sink| sink.is_paused())
     }
 
+    pub fn set_volume(&mut self, volume: f32) {
+        if let Some(sink) = self.sink.as_ref() {
+            sink.set_volume(volume.clamp(0.0, 5.0));
+        }
+    }
+
     pub fn tick(&mut self) {
         let finished = self.sink.as_ref().is_some_and(|sink| sink.empty());
         if finished {

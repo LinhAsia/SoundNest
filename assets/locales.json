@@ -221,6 +221,18 @@
       "playlist.move_up": "Move up",
       "playlist.move_down": "Move down",
       "playlist.remove": "Remove from playlist",
+      "playlist.choose": "Add",
+      "playlist.added": "Added",
+      "playlist.previous": "Previous",
+      "playlist.next": "Next",
+      "playlist.volume": "Playlist volume",
+      "playlist.close_bar": "Close player",
+      "playlist.play_track": "Play this sound",
+      "playlist.play_all": "Play all",
+      "playlist.stop_all": "Stop playback",
+      "playlist.open_panel": "Open playlist panel",
+      "editor.trim_play_hint": "Preview (Space)",
+      "editor.trim_stop_hint": "Stop preview (Space)",
       "editor.keep_old_file": "Keep old file?"
     },
     "vi": {
@@ -444,6 +456,18 @@
       "playlist.move_up": "Đẩy lên",
       "playlist.move_down": "Đẩy xuống",
       "playlist.remove": "Xóa khỏi playlist",
+      "playlist.choose": "Chọn",
+      "playlist.added": "Đã thêm",
+      "playlist.previous": "Bài trước",
+      "playlist.next": "Bài tiếp",
+      "playlist.volume": "Âm lượng playlist",
+      "playlist.close_bar": "Đóng thanh phát",
+      "playlist.play_track": "Phát bài này",
+      "playlist.play_all": "Phát tất cả",
+      "playlist.stop_all": "Dừng phát",
+      "playlist.open_panel": "Mở danh sách phát",
+      "editor.trim_play_hint": "Nghe thử (Space)",
+      "editor.trim_stop_hint": "Dừng nghe thử (Space)",
       "editor.keep_old_file": "Giữ file cũ?"
     }
   }

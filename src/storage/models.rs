@@ -420,4 +420,39 @@ mod tests {
         assert_eq!(parsed.playlists[0].name, "BGM Test");
         assert_eq!(parsed.playlists[0].sound_ids.len(), 2);
     }
+
+    #[test]
+    fn playlist_navigation_bounds_and_loop() {
+        let total = 3;
+        // Sequential advance
+        let next = |curr: usize, loop_enabled: bool| -> Option<usize> {
+            if curr + 1 < total {
+                Some(curr + 1)
+            } else if loop_enabled {
+                Some(0)
+            } else {
+                None
+            }
+        };
+        // Sequential previous
+        let prev = |curr: usize, loop_enabled: bool| -> usize {
+            if curr > 0 {
+                curr - 1
+            } else if loop_enabled {
+                total - 1
+            } else {
+                0
+            }
+        };
+
+        assert_eq!(next(0, true), Some(1));
+        assert_eq!(next(1, true), Some(2));
+        assert_eq!(next(2, true), Some(0)); // loops to 0
+        assert_eq!(next(2, false), None);   // stops
+
+        assert_eq!(prev(2, true), 1);
+        assert_eq!(prev(1, true), 0);
+        assert_eq!(prev(0, true), 2);       // wraps to 2
+        assert_eq!(prev(0, false), 0);
+    }
 }

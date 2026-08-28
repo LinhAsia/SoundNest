@@ -2988,6 +2988,7 @@ impl SoundFxApp {
                             true,
                             false,
                             None,
+                            self.localization.current_code() == "vi",
                         );
                         changed |= timeline_changed;
                         seek_request |= timeline_seek_request;
@@ -3934,6 +3935,7 @@ impl SoundFxApp {
                                 editor_timeline_interactive,
                                 editor_audio_loading,
                                 Some(&mut self.trim_sound_repeat),
+                                self.localization.current_code() == "vi",
                             );
                             changed |= timeline_changed;
                             seek_request |= timeline_seek_request;
@@ -4606,6 +4608,7 @@ impl SoundFxApp {
         interactive: bool,
         show_loading_indicator: bool,
         repeat_enabled: Option<&mut bool>,
+        is_vietnamese: bool,
     ) -> (bool, bool, bool, bool, Option<TrimSnapshot>) {
         let mut toggle_play = false;
         sound.clamp_trim();
@@ -4660,9 +4663,15 @@ impl SoundFxApp {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             }
             let play_hint = if is_currently_playing {
-                "Dừng nghe thử (Space) / Stop preview"
+                if is_vietnamese {
+                    "Dừng nghe thử (Space)"
+                } else {
+                    "Stop preview (Space)"
+                }
+            } else if is_vietnamese {
+                "Nghe thử (Space)"
             } else {
-                "Nghe thử (Space) / Play preview"
+                "Preview (Space)"
             };
             if play_btn.on_hover_text(play_hint).clicked() {
                 toggle_play = true;
@@ -4680,23 +4689,42 @@ impl SoundFxApp {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::Help);
             }
             help.on_hover_ui_at_pointer(|ui| {
-                ui.set_max_width(250.0);
-                ui.label(
-                    RichText::new("Trim shortcuts")
-                        .size(13.0)
-                        .color(Self::strong_text_color())
-                        .strong(),
-                );
-                ui.add_space(4.0);
-                ui.label("Space: preview or stop");
-                ui.label("S: preview from the left trim");
-                ui.label("Q: move the left trim to the mouse");
-                ui.label("W: move the right trim to the mouse");
-                ui.label("Right click: delete left / middle / right region");
-                ui.label("Ctrl + Z: undo trim");
-                ui.label("Ctrl + Shift + Z: redo trim");
-                ui.label("A / D: pan timeline left or right");
-                ui.label("Ctrl + mouse wheel: zoom around the hover playhead");
+                ui.set_max_width(260.0);
+                if is_vietnamese {
+                    ui.label(
+                        RichText::new("Phím tắt cắt âm thanh")
+                            .size(13.0)
+                            .color(Self::strong_text_color())
+                            .strong(),
+                    );
+                    ui.add_space(4.0);
+                    ui.label("Space: nghe thử hoặc dừng");
+                    ui.label("S: nghe thử từ mép cắt trái");
+                    ui.label("Q: đặt mép cắt trái tại chuột");
+                    ui.label("W: đặt mép cắt phải tại chuột");
+                    ui.label("Chuột phải: xóa vùng trái / giữa / phải");
+                    ui.label("Ctrl + Z: hoàn tác cắt");
+                    ui.label("Ctrl + Shift + Z: làm lại cắt");
+                    ui.label("A / D: cuộn timeline sang trái hoặc phải");
+                    ui.label("Ctrl + lăn chuột: phóng to/thu nhỏ tại con trỏ");
+                } else {
+                    ui.label(
+                        RichText::new("Trim shortcuts")
+                            .size(13.0)
+                            .color(Self::strong_text_color())
+                            .strong(),
+                    );
+                    ui.add_space(4.0);
+                    ui.label("Space: preview or stop");
+                    ui.label("S: preview from the left trim");
+                    ui.label("Q: move the left trim to the mouse");
+                    ui.label("W: move the right trim to the mouse");
+                    ui.label("Right click: delete left / middle / right region");
+                    ui.label("Ctrl + Z: undo trim");
+                    ui.label("Ctrl + Shift + Z: redo trim");
+                    ui.label("A / D: pan timeline left or right");
+                    ui.label("Ctrl + mouse wheel: zoom around the hover playhead");
+                }
             });
 
             if let Some(repeat) = repeat_enabled {
@@ -4732,7 +4760,13 @@ impl SoundFxApp {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                 }
                 let hint = if is_repeat {
-                    "Repeat: ON (Click to turn off continuous looping)"
+                    if is_vietnamese {
+                        "Lặp lại: BẬT (Bấm để tắt phát lặp lại)"
+                    } else {
+                        "Repeat: ON (Click to turn off continuous looping)"
+                    }
+                } else if is_vietnamese {
+                    "Lặp lại: TẮT (Bấm để phát lặp lại âm thanh này)"
                 } else {
                     "Repeat: OFF (Click to loop this sound continuously)"
                 };
