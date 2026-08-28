@@ -1098,7 +1098,6 @@ impl SoundFxApp {
         let pause_label = self.t("playlist.pause");
         let shuffle_label = self.t("playlist.shuffle");
         let loop_label = self.t("playlist.loop");
-        let volume_label = self.t("playlist.volume");
         let open_panel_label = self.t("playlist.open_panel");
         let close_bar_label = self.t("playlist.close_bar");
 
@@ -1307,13 +1306,20 @@ impl SoundFxApp {
                                 })
                                 .stroke(Stroke::new(1.0, Self::border_color()))
                                 .corner_radius(8.0),
-                            ).on_hover_text(&volume_label);
+                            );
                             Self::decorate_button_response(ui, &vol_btn);
                             vol_btn_rect = Some(vol_btn.rect);
                             vol_btn_hovered = vol_btn.hovered();
 
-                            if vol_btn.clicked() {
-                                self.playlist_volume_popup_open = !self.playlist_volume_popup_open;
+                            if vol_btn.hovered() || vol_btn.clicked() {
+                                self.playlist_volume_popup_open = true;
+                            }
+
+                            // Mouse wheel directly on volume button
+                            let btn_scroll = ui.input(|i| i.raw_scroll_delta.y);
+                            if vol_btn.hovered() && btn_scroll.abs() > 0.1 {
+                                let delta = if btn_scroll > 0.0 { 0.05 } else { -0.05 };
+                                volume_changed = Some((self.playlist_volume + delta).clamp(0.0, 2.0));
                             }
 
                             ui.add_space(4.0);
@@ -1379,14 +1385,21 @@ impl SoundFxApp {
             });
 
         // Vertical Volume Slider Popup (floating right above volume button)
-        let show_vol_popup = self.playlist_volume_popup_open || vol_btn_hovered;
-        if show_vol_popup {
+        if self.playlist_volume_popup_open {
             if let Some(btn_r) = vol_btn_rect {
-                let popup_width = 44.0;
-                let popup_height = 136.0;
-                let popup_pos = pos2(btn_r.center().x - popup_width * 0.5, btn_r.top() - popup_height - 6.0);
+                let popup_width = 46.0;
+                let popup_height = 142.0;
+                let popup_pos = pos2(btn_r.center().x - popup_width * 0.5, btn_r.top() - popup_height - 2.0);
+                let popup_rect = Rect::from_min_size(popup_pos, vec2(popup_width, popup_height));
 
-                let mut popup_hovered = false;
+                // Continuous interaction bridge covering popup, volume button, and transition path
+                let bridge_zone = Rect::from_min_max(
+                    pos2(popup_rect.left().min(btn_r.left()), popup_rect.top()),
+                    pos2(popup_rect.right().max(btn_r.right()), btn_r.bottom()),
+                ).expand(10.0);
+
+                let mut vol_is_dragging = false;
+
                 egui::Area::new(egui::Id::new("playlist-volume-popup-area"))
                     .order(egui::Order::Foreground)
                     .fixed_pos(popup_pos)
@@ -1404,9 +1417,8 @@ impl SoundFxApp {
                                 color: Color32::from_rgba_premultiplied(0, 0, 0, 80),
                             })
                             .corner_radius(12.0)
-                            .inner_margin(Margin::symmetric(8, 10))
+                            .inner_margin(Margin::symmetric(5, 10))
                             .show(ui, |ui| {
-                                popup_hovered = ui.rect_contains_pointer(ui.max_rect());
                                 ui.vertical_centered(|ui| {
                                     let pct = (self.playlist_volume * 100.0).round();
                                     ui.label(
@@ -1418,21 +1430,26 @@ impl SoundFxApp {
                                     );
                                     ui.add_space(6.0);
 
-                                    // Vertical slider track: drag UP increases volume, drag DOWN decreases
-                                    let track_size = vec2(18.0, 86.0);
+                                    // Generous vertical slider track target: drag UP increases volume, drag DOWN decreases
+                                    let track_size = vec2(36.0, 90.0);
                                     let (vol_rect, vol_resp) = ui.allocate_exact_size(track_size, Sense::click_and_drag());
                                     Self::decorate_button_response(ui, &vol_resp);
 
+                                    vol_is_dragging = vol_resp.dragged();
+
                                     if vol_resp.dragged() || vol_resp.clicked() {
-                                        if let Some(pos) = vol_resp.interact_pointer_pos() {
-                                            let frac = ((vol_rect.bottom() - pos.y) / vol_rect.height()).clamp(0.0, 1.0);
+                                        let mouse_y = vol_resp.interact_pointer_pos()
+                                            .map(|p| p.y)
+                                            .or_else(|| ui.ctx().input(|i| i.pointer.hover_pos().map(|p| p.y)));
+                                        if let Some(y) = mouse_y {
+                                            let frac = ((vol_rect.bottom() - y) / vol_rect.height()).clamp(0.0, 1.0);
                                             volume_changed = Some((frac * 2.0).clamp(0.0, 2.0));
                                         }
                                     }
 
-                                    // Mouse wheel over volume area
+                                    // Mouse wheel over volume popup
                                     let scroll = ui.input(|i| i.raw_scroll_delta.y);
-                                    if (vol_resp.hovered() || vol_btn_hovered) && scroll.abs() > 0.1 {
+                                    if scroll.abs() > 0.1 {
                                         let delta = if scroll > 0.0 { 0.05 } else { -0.05 };
                                         volume_changed = Some((self.playlist_volume + delta).clamp(0.0, 2.0));
                                     }
@@ -1440,7 +1457,7 @@ impl SoundFxApp {
                                     // Render vertical track
                                     let vol_frac = (self.playlist_volume / 2.0).clamp(0.0, 1.0);
                                     let track_x = vol_rect.center().x;
-                                    let track_w = 4.5;
+                                    let track_w = 5.0;
                                     let track_r = track_w * 0.5;
 
                                     let bg_v_track = Rect::from_min_max(
@@ -1460,14 +1477,20 @@ impl SoundFxApp {
                                     // Thumb
                                     let thumb_y = fill_y;
                                     let thumb_pt = pos2(track_x, thumb_y);
-                                    let thumb_r = if vol_resp.dragged() { 7.0 } else if vol_resp.hovered() { 6.0 } else { 5.0 };
+                                    let thumb_r = if vol_resp.dragged() { 7.5 } else if vol_resp.hovered() { 6.5 } else { 5.5 };
                                     ui.painter().circle_filled(thumb_pt, thumb_r, Color32::WHITE);
                                     ui.painter().circle_stroke(thumb_pt, thumb_r, Stroke::new(2.0, Color32::from_rgb(214, 51, 132)));
                                 });
                             });
                     });
 
-                if !popup_hovered && !vol_btn_hovered && ctx.input(|i| i.pointer.any_click()) {
+                let pointer_pos = ctx.input(|i| i.pointer.hover_pos());
+                let pointer_in_zone = pointer_pos.map_or(false, |p| bridge_zone.contains(p));
+
+                if !pointer_in_zone && !vol_is_dragging && !vol_btn_hovered {
+                    self.playlist_volume_popup_open = false;
+                }
+                if !pointer_in_zone && ctx.input(|i| i.pointer.any_click()) {
                     self.playlist_volume_popup_open = false;
                 }
             }
