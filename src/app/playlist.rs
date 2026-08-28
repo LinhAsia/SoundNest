@@ -1095,7 +1095,7 @@ impl SoundFxApp {
                             );
 
                             // Custom Timeline Slider: wide, high contrast, seek only on release!
-                            let reserved_right_width = 240.0;
+                            let reserved_right_width = 310.0;
                             let slider_width = (ui.available_width() - reserved_right_width).max(80.0);
                             let (timeline_rect, timeline_resp) = ui.allocate_exact_size(vec2(slider_width, 18.0), Sense::click_and_drag());
                             Self::decorate_button_response(ui, &timeline_resp);
@@ -1200,52 +1200,60 @@ impl SoundFxApp {
                             ui.separator();
                             ui.add_space(4.0);
 
-                            // Track info
+                            // Track info (strictly single-line truncated to prevent overlap)
                             let track_title = sound_opt.as_ref().map(|s| s.name.as_str()).unwrap_or("(No track)");
                             ui.allocate_ui_with_layout(
-                                vec2(110.0, 32.0),
+                                vec2(130.0, 32.0),
                                 egui::Layout::top_down(Align::Min),
                                 |ui| {
-                                    ui.label(
+                                    ui.set_max_width(130.0);
+                                    let title_label = egui::Label::new(
                                         RichText::new(track_title)
-                                            .size(11.5)
+                                            .size(11.0)
                                             .strong()
                                             .color(Self::strong_text_color()),
-                                    );
-                                    ui.label(
+                                    )
+                                    .truncate();
+                                    ui.add(title_label).on_hover_text(track_title);
+
+                                    let pl_label = egui::Label::new(
                                         RichText::new(&playlist.name)
-                                            .size(10.0)
+                                            .size(9.5)
                                             .color(Self::muted_text_color()),
-                                    );
+                                    )
+                                    .truncate();
+                                    ui.add(pl_label).on_hover_text(&playlist.name);
                                 },
                             );
 
-                            // Right actions: Open panel, Close bar
-                            ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                                let close_bar_btn = ui.add_sized(
-                                    [26.0, 26.0],
-                                    Button::new(Self::icon(0xe5cd, 13.0, Self::muted_text_color()))
-                                        .fill(Color32::TRANSPARENT)
-                                        .stroke(Stroke::NONE)
-                                        .corner_radius(6.0),
-                                ).on_hover_text(&close_bar_label);
-                                Self::decorate_button_response(ui, &close_bar_btn);
-                                if close_bar_btn.clicked() {
-                                    close_bar_action = true;
-                                }
+                            ui.add_space(4.0);
 
-                                let open_panel_btn = ui.add_sized(
-                                    [26.0, 26.0],
-                                    Button::new(Self::icon(0xe05f, 14.0, Color32::from_rgb(214, 51, 132)))
-                                        .fill(Color32::from_rgba_premultiplied(214, 51, 132, 24))
-                                        .stroke(Stroke::new(1.0, Color32::from_rgba_premultiplied(214, 51, 132, 60)))
-                                        .corner_radius(6.0),
-                                ).on_hover_text(&open_panel_label);
-                                Self::decorate_button_response(ui, &open_panel_btn);
-                                if open_panel_btn.clicked() {
-                                    open_panel_action = true;
-                                }
-                            });
+                            // Right actions: Open panel, Close bar (arranged linearly next to track info)
+                            let open_panel_btn = ui.add_sized(
+                                [26.0, 26.0],
+                                Button::new(Self::icon(0xe05f, 14.0, Color32::from_rgb(214, 51, 132)))
+                                    .fill(Color32::from_rgba_premultiplied(214, 51, 132, 24))
+                                    .stroke(Stroke::new(1.0, Color32::from_rgba_premultiplied(214, 51, 132, 60)))
+                                    .corner_radius(6.0),
+                            ).on_hover_text(&open_panel_label);
+                            Self::decorate_button_response(ui, &open_panel_btn);
+                            if open_panel_btn.clicked() {
+                                open_panel_action = true;
+                            }
+
+                            ui.add_space(2.0);
+
+                            let close_bar_btn = ui.add_sized(
+                                [26.0, 26.0],
+                                Button::new(Self::icon(0xe5cd, 13.0, Self::muted_text_color()))
+                                    .fill(Color32::TRANSPARENT)
+                                    .stroke(Stroke::NONE)
+                                    .corner_radius(6.0),
+                            ).on_hover_text(&close_bar_label);
+                            Self::decorate_button_response(ui, &close_bar_btn);
+                            if close_bar_btn.clicked() {
+                                close_bar_action = true;
+                            }
                         });
                     });
             });

@@ -47,6 +47,22 @@ impl SoundFxApp {
             return;
         };
 
+        let is_playlist_track = if let Some(p_id) = self.playlist_playing_id {
+            if let Some(playlist) = self.playlists.iter().find(|p| p.id == p_id) {
+                playlist.sound_ids.get(self.playlist_current_index).copied() == Some(sound_id)
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        if !is_playlist_track {
+            self.playlist_playing_id = None;
+            self.playlist_scrubbing_pos = None;
+            self.playlist_volume_popup_open = false;
+        }
+
         let asset_path = self.preview_asset_path_for_sound(&sound);
         if !asset_path.exists() {
             self.set_error_status(format!("Audio file not found: {}", sound.asset_file));

@@ -91,7 +91,17 @@ impl eframe::App for SoundFxApp {
                 self.myinstants_preview_audio_url = None;
             }
             if was_playing && !audio.has_active_playback() {
-                if self.playlist_playing_id.is_some() {
+                let is_playlist_track_finished = if let Some(p_id) = self.playlist_playing_id {
+                    self.playlists
+                        .iter()
+                        .find(|p| p.id == p_id)
+                        .and_then(|p| p.sound_ids.get(self.playlist_current_index))
+                        .copied() == was_playing_id
+                } else {
+                    false
+                };
+
+                if is_playlist_track_finished {
                     playlist_advance_needed = true;
                 } else if self.trim_sound_repeat {
                     if let Some(sound_id) = was_playing_id {
