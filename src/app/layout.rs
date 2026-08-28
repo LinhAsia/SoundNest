@@ -122,6 +122,7 @@ impl SoundFxApp {
         self.render_modal_backdrop(ctx);
         self.render_download_panel(ctx);
         self.render_myinstants_panel(ctx);
+        self.render_playlist_panel(ctx);
         self.render_import_panel(ctx);
         self.render_record_panel(ctx);
         self.render_record_review_panel(ctx);
@@ -345,6 +346,35 @@ impl SoundFxApp {
                     .clicked()
                 {
                     self.show_myinstants_panel = true;
+                }
+
+                let playlist_response = Self::icon_titlebar(
+                    ui,
+                    [42.0, 30.0],
+                    0xe05f,
+                    self.show_playlist_panel,
+                    false,
+                );
+                if self.playlist_playing_id.is_some() {
+                    let pulse = ((ctx.input(|input| input.time) as f32 * 4.2).sin() * 0.5 + 0.5)
+                        .clamp(0.0, 1.0);
+                    ui.painter().rect_stroke(
+                        playlist_response.rect.expand(1.0),
+                        14.0,
+                        Stroke::new(
+                            1.5,
+                            Color32::from_rgba_premultiplied(
+                                214,
+                                51,
+                                132,
+                                (72.0 + pulse * 90.0) as u8,
+                            ),
+                        ),
+                        StrokeKind::Outside,
+                    );
+                }
+                if playlist_response.on_hover_text(self.t("playlist.title")).clicked() {
+                    self.show_playlist_panel = !self.show_playlist_panel;
                 }
 
                 if let Some(clip_url) = self.clipboard_download_url.clone()

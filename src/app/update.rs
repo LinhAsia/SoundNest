@@ -82,6 +82,7 @@ impl eframe::App for SoundFxApp {
         self.handle_record_hotkey(ctx);
 
         let mut repeat_sound_id = None;
+        let mut playlist_advance_needed = false;
         if let Some(audio) = self.audio.as_mut() {
             let was_playing_id = audio.current_sound_id();
             let was_playing = audio.has_active_playback();
@@ -89,15 +90,21 @@ impl eframe::App for SoundFxApp {
             if self.myinstants_preview_audio_url.is_some() && !audio.has_active_playback() {
                 self.myinstants_preview_audio_url = None;
             }
-            if was_playing && !audio.has_active_playback() && self.trim_sound_repeat {
-                if let Some(sound_id) = was_playing_id {
-                    if self.selected == Some(sound_id) {
-                        repeat_sound_id = Some(sound_id);
+            if was_playing && !audio.has_active_playback() {
+                if self.playlist_playing_id.is_some() {
+                    playlist_advance_needed = true;
+                } else if self.trim_sound_repeat {
+                    if let Some(sound_id) = was_playing_id {
+                        if self.selected == Some(sound_id) {
+                            repeat_sound_id = Some(sound_id);
+                        }
                     }
                 }
             }
         }
-        if let Some(sound_id) = repeat_sound_id {
+        if playlist_advance_needed {
+            self.advance_playlist_sound();
+        } else if let Some(sound_id) = repeat_sound_id {
             self.preview_sound(sound_id);
         }
 

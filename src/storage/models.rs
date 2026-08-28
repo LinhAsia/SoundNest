@@ -70,6 +70,14 @@ pub struct Folder {
     pub parent_id: Option<Uuid>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct Playlist {
+    pub id: Uuid,
+    pub name: String,
+    #[serde(default)]
+    pub sound_ids: Vec<Uuid>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct VideoAsset {
     pub id: Uuid,
@@ -303,6 +311,8 @@ pub(super) struct LibraryFile {
     pub(super) sounds: Vec<SoundEffect>,
     #[serde(default)]
     pub(super) folders: Vec<Folder>,
+    #[serde(default)]
+    pub(super) playlists: Vec<Playlist>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default)]
@@ -386,5 +396,28 @@ mod tests {
         sound.cut_start_secs = Some(44.0);
         sound.cut_end_secs = Some(46.0);
         assert!(sound.needs_preprocessed_preview());
+    }
+
+    #[test]
+    fn playlist_serialization_backwards_compatible() {
+        let raw_json_without_playlists = r#"{"sounds":[],"folders":[]}"#;
+        let file: super::LibraryFile = serde_json::from_str(raw_json_without_playlists).unwrap();
+        assert!(file.playlists.is_empty());
+
+        let playlist = super::Playlist {
+            id: uuid::Uuid::new_v4(),
+            name: "BGM Test".to_owned(),
+            sound_ids: vec![uuid::Uuid::new_v4(), uuid::Uuid::new_v4()],
+        };
+        let file_with_playlist = super::LibraryFile {
+            sounds: Vec::new(),
+            folders: Vec::new(),
+            playlists: vec![playlist.clone()],
+        };
+        let serialized = serde_json::to_string(&file_with_playlist).unwrap();
+        let parsed: super::LibraryFile = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(parsed.playlists.len(), 1);
+        assert_eq!(parsed.playlists[0].name, "BGM Test");
+        assert_eq!(parsed.playlists[0].sound_ids.len(), 2);
     }
 }

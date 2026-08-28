@@ -6,7 +6,7 @@ mod paths;
 
 pub use self::cache::apply_sound_effects;
 pub use self::models::{
-    Folder, GeminiTtsDraftPreferences, GeminiTtsPromptPreset, SoundEffect, VideoAsset,
+    Folder, GeminiTtsDraftPreferences, GeminiTtsPromptPreset, Playlist, SoundEffect, VideoAsset,
 };
 pub use self::paths::format_time;
 

@@ -526,6 +526,18 @@ pub struct SoundFxApp {
     pub(super) last_downloaded_clipboard_url: Option<String>,
     pub(super) quick_download_active: bool,
     pub(super) trim_sound_repeat: bool,
+    pub(super) playlists: Vec<Playlist>,
+    pub(super) selected_playlist_id: Option<Uuid>,
+    pub(super) show_playlist_panel: bool,
+    pub(super) playlist_playing_id: Option<Uuid>,
+    pub(super) playlist_current_index: usize,
+    pub(super) playlist_shuffle: bool,
+    pub(super) playlist_loop: bool,
+    pub(super) playlist_new_name: String,
+    pub(super) playlist_add_sound_search: String,
+    pub(super) show_playlist_add_picker: bool,
+    pub(super) playlist_renaming_id: Option<Uuid>,
+    pub(super) playlist_rename_name: String,
     pub(super) pending_processed_export_sound: Option<Uuid>,
     pub(super) pending_preview_after_preload: Option<(Uuid, Option<f32>)>,
     pub(super) normalize_inflight: HashSet<Uuid>,
@@ -697,6 +709,8 @@ impl SoundFxApp {
         let tts_prompt_presets = storage.load_tts_prompt_presets().unwrap_or_default();
         let tts_draft = storage.load_tts_draft().unwrap_or_default();
         let resolved_startup_sound = storage.resolved_startup_sound_path().ok().flatten();
+        let playlists = storage.load_playlists().unwrap_or_default();
+        let selected_playlist_id = playlists.first().map(|p| p.id);
 
         let mut app = Self {
             storage,
@@ -894,6 +908,18 @@ impl SoundFxApp {
             last_downloaded_clipboard_url: None,
             quick_download_active: false,
             trim_sound_repeat: false,
+            playlists,
+            selected_playlist_id,
+            show_playlist_panel: false,
+            playlist_playing_id: None,
+            playlist_current_index: 0,
+            playlist_shuffle: false,
+            playlist_loop: true,
+            playlist_new_name: String::new(),
+            playlist_add_sound_search: String::new(),
+            show_playlist_add_picker: false,
+            playlist_renaming_id: None,
+            playlist_rename_name: String::new(),
             pending_processed_export_sound: None,
             pending_preview_after_preload: None,
             normalize_inflight: HashSet::new(),

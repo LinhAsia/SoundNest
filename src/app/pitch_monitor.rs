@@ -81,27 +81,7 @@ impl SoundFxApp {
             if !ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Space)) {
                 return;
             }
-            let Some(sound) = self
-                .recording_draft
-                .as_ref()
-                .map(|draft| draft.sound.clone())
-            else {
-                return;
-            };
-            if self
-                .audio
-                .as_ref()
-                .is_some_and(|audio| audio.is_playing(sound.id))
-            {
-                self.stop_preview();
-                return;
-            }
-            let mut cursor_secs = self.preview_cursor_secs_for(&sound);
-            if cursor_secs >= sound.trim_end_secs - 0.02 {
-                cursor_secs = sound.trim_start_secs;
-                self.set_preview_cursor_secs(sound.id, cursor_secs, sound.safe_duration());
-            }
-            self.preview_recording_draft_from_position(Some(cursor_secs));
+            self.toggle_selected_sound_preview();
             return;
         }
 
@@ -144,24 +124,7 @@ impl SoundFxApp {
             return;
         }
 
-        let Some(index) = self.selected_sound_index() else {
-            return;
-        };
-        let sound = self.sounds[index].clone();
-        if self
-            .audio
-            .as_ref()
-            .is_some_and(|audio| audio.is_playing(sound.id))
-        {
-            self.stop_preview();
-            return;
-        }
-        let mut cursor_secs = self.preview_cursor_secs_for(&sound);
-        if cursor_secs >= sound.trim_end_secs - 0.02 {
-            cursor_secs = sound.trim_start_secs;
-            self.set_preview_cursor_secs(sound.id, cursor_secs, sound.safe_duration());
-        }
-        self.preview_sound_from_position(sound.id, Some(cursor_secs));
+        self.toggle_selected_sound_preview();
     }
 
     pub(super) fn handle_record_hotkey(&mut self, ctx: &Context) {

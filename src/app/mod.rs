@@ -12,7 +12,7 @@ use crate::platform;
 use crate::record_video;
 use crate::recorder::{Recorder, RecorderConfig};
 use crate::storage::{
-    Folder, GeminiTtsPromptPreset, SoundEffect, Storage, VideoAsset, format_time,
+    Folder, GeminiTtsPromptPreset, Playlist, SoundEffect, Storage, VideoAsset, format_time,
 };
 use crate::stream_input::{StreamInputConfig, StreamInputRouter};
 use anyhow::{Context as _, Result};
@@ -128,6 +128,7 @@ mod media_panels;
 mod message;
 mod pitch_monitor;
 mod pitch_overlay_view;
+mod playlist;
 mod recording;
 mod settings;
 mod state;

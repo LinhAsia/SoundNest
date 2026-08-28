@@ -6,7 +6,8 @@ use super::analyze_audio_file;
 use super::models::{LibraryFile, PreferencesFile, VideoLibraryFile};
 use super::paths::{DEFAULT_STARTUP_SOUND_BYTES, DEFAULT_STARTUP_SOUND_NAME};
 use super::{
-    Folder, GeminiTtsDraftPreferences, GeminiTtsPromptPreset, SoundEffect, Storage, VideoAsset,
+    Folder, GeminiTtsDraftPreferences, GeminiTtsPromptPreset, Playlist, SoundEffect, Storage,
+    VideoAsset,
 };
 
 impl Storage {
@@ -41,18 +42,29 @@ impl Storage {
         self.save_library_with_folders(sounds, &folders)
     }
 
+    pub fn save_library_all(
+        &self,
+        sounds: &[SoundEffect],
+        folders: &[Folder],
+        playlists: &[Playlist],
+    ) -> Result<()> {
+        let payload = LibraryFile {
+            sounds: sounds.to_vec(),
+            folders: folders.to_vec(),
+            playlists: playlists.to_vec(),
+        };
+        let json = serde_json::to_string_pretty(&payload).context("unable to serialize library")?;
+        fs::write(&self.library_path, json).context("unable to write library file")?;
+        Ok(())
+    }
+
     pub fn save_library_with_folders(
         &self,
         sounds: &[SoundEffect],
         folders: &[Folder],
     ) -> Result<()> {
-        let payload = LibraryFile {
-            sounds: sounds.to_vec(),
-            folders: folders.to_vec(),
-        };
-        let json = serde_json::to_string_pretty(&payload).context("unable to serialize library")?;
-        fs::write(&self.library_path, json).context("unable to write library file")?;
-        Ok(())
+        let playlists = self.load_playlists().unwrap_or_default();
+        self.save_library_all(sounds, folders, &playlists)
     }
 
     pub fn load_folders(&self) -> Result<Vec<Folder>> {
@@ -67,7 +79,24 @@ impl Storage {
 
     pub fn save_folders(&self, folders: &[Folder]) -> Result<()> {
         let sounds = self.load_library().unwrap_or_default();
-        self.save_library_with_folders(&sounds, folders)
+        let playlists = self.load_playlists().unwrap_or_default();
+        self.save_library_all(&sounds, folders, &playlists)
+    }
+
+    pub fn load_playlists(&self) -> Result<Vec<Playlist>> {
+        if !self.library_path.exists() {
+            return Ok(Vec::new());
+        }
+        let raw = fs::read_to_string(&self.library_path).context("unable to read library file")?;
+        let library: LibraryFile =
+            serde_json::from_str(&raw).context("invalid library file format")?;
+        Ok(library.playlists)
+    }
+
+    pub fn save_playlists(&self, playlists: &[Playlist]) -> Result<()> {
+        let sounds = self.load_library().unwrap_or_default();
+        let folders = self.load_folders().unwrap_or_default();
+        self.save_library_all(&sounds, &folders, playlists)
     }
 
     pub fn load_video_library(&self) -> Result<Vec<VideoAsset>> {

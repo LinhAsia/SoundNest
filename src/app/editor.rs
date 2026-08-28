@@ -2103,6 +2103,9 @@ impl SoundFxApp {
         {
             return true;
         }
+        if self.playlist_playing_id.is_some() && audio.has_active_playback() {
+            return true;
+        }
         false
     }
 
@@ -2632,6 +2635,52 @@ impl SoundFxApp {
         self.trim_timeline_scrub_resume_pending = false;
     }
 
+    pub(super) fn toggle_selected_sound_preview(&mut self) {
+        if self.show_record_review_panel {
+            let Some(sound) = self
+                .recording_draft
+                .as_ref()
+                .map(|draft| draft.sound.clone())
+            else {
+                return;
+            };
+            if self
+                .audio
+                .as_ref()
+                .is_some_and(|audio| audio.is_playing(sound.id))
+            {
+                self.stop_preview();
+                return;
+            }
+            let mut cursor_secs = self.preview_cursor_secs_for(&sound);
+            if cursor_secs >= sound.trim_end_secs - 0.02 {
+                cursor_secs = sound.trim_start_secs;
+                self.set_preview_cursor_secs(sound.id, cursor_secs, sound.safe_duration());
+            }
+            self.preview_recording_draft_from_position(Some(cursor_secs));
+            return;
+        }
+
+        let Some(index) = self.selected_sound_index() else {
+            return;
+        };
+        let sound = self.sounds[index].clone();
+        if self
+            .audio
+            .as_ref()
+            .is_some_and(|audio| audio.is_playing(sound.id))
+        {
+            self.stop_preview();
+            return;
+        }
+        let mut cursor_secs = self.preview_cursor_secs_for(&sound);
+        if cursor_secs >= sound.trim_end_secs - 0.02 {
+            cursor_secs = sound.trim_start_secs;
+            self.set_preview_cursor_secs(sound.id, cursor_secs, sound.safe_duration());
+        }
+        self.preview_sound_from_position(sound.id, Some(cursor_secs));
+    }
+
     pub(super) fn maybe_start_pending_processed_export(&mut self) {
         let Some(sound_id) = self.pending_processed_export_sound else {
             return;
@@ -2927,6 +2976,7 @@ impl SoundFxApp {
                             timeline_changed,
                             timeline_seek_request,
                             timeline_preview_commit,
+                            timeline_toggle_play,
                             _timeline_trim_history_commit,
                         ) = Self::draw_trim_timeline(
                             ui,
@@ -2943,6 +2993,9 @@ impl SoundFxApp {
                         seek_request |= timeline_seek_request;
                         if timeline_preview_commit {
                             seek_request = true;
+                        }
+                        if timeline_toggle_play {
+                            preview_toggle = true;
                         }
                     });
 
@@ -3615,6 +3668,7 @@ impl SoundFxApp {
         let mut commit_trim_request = false;
         let mut open_spn_export_request = false;
         let mut seek_request = false;
+        let mut toggle_play_request = false;
         let mut playback_reapply_request = false;
         let mut normalize_request = false;
         let mut start_vocal_job = false;
@@ -3868,6 +3922,7 @@ impl SoundFxApp {
                                 timeline_changed,
                                 timeline_seek_request,
                                 timeline_preview_commit,
+                                timeline_toggle_play,
                                 timeline_trim_history_commit,
                             ) = Self::draw_trim_timeline(
                                 ui,
@@ -3885,6 +3940,9 @@ impl SoundFxApp {
                             if timeline_preview_commit {
                                 seek_request = true;
                                 processed_export_dirty = true;
+                            }
+                            if timeline_toggle_play {
+                                toggle_play_request = true;
                             }
                             trim_history_commit = timeline_trim_history_commit;
                         });
@@ -4454,6 +4512,9 @@ impl SoundFxApp {
         if open_spn_export_request {
             self.open_selected_sound_for_record_export();
         }
+        if toggle_play_request {
+            self.toggle_selected_sound_preview();
+        }
     }
 
     pub(super) fn draw_empty_editor(&mut self, ui: &mut Ui) {
@@ -4545,7 +4606,8 @@ impl SoundFxApp {
         interactive: bool,
         show_loading_indicator: bool,
         repeat_enabled: Option<&mut bool>,
-    ) -> (bool, bool, bool, Option<TrimSnapshot>) {
+    ) -> (bool, bool, bool, bool, Option<TrimSnapshot>) {
+        let mut toggle_play = false;
         sound.clamp_trim();
         let duration = sound.display_duration_secs();
         *preview_cursor_secs = if clamp_cursor_to_trim {
@@ -4566,6 +4628,47 @@ impl SoundFxApp {
                     .strong(),
             );
             ui.add_space(6.0);
+
+            let is_currently_playing = !clamp_cursor_to_trim;
+            let play_btn = ui.add_sized(
+                [24.0, 24.0],
+                Button::new(Self::icon(
+                    if is_currently_playing { 0xe034 } else { 0xe037 },
+                    15.0,
+                    if is_currently_playing {
+                        Color32::from_rgb(214, 51, 132)
+                    } else {
+                        Self::strong_text_color()
+                    },
+                ))
+                .fill(if is_currently_playing {
+                    Color32::from_rgba_premultiplied(214, 51, 132, 40)
+                } else {
+                    Self::surface_fill()
+                })
+                .stroke(Stroke::new(
+                    1.0,
+                    if is_currently_playing {
+                        Color32::from_rgb(214, 51, 132)
+                    } else {
+                        Self::border_color()
+                    },
+                ))
+                .corner_radius(12.0),
+            );
+            if play_btn.hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+            let play_hint = if is_currently_playing {
+                "Dừng nghe thử (Space) / Stop preview"
+            } else {
+                "Nghe thử (Space) / Play preview"
+            };
+            if play_btn.on_hover_text(play_hint).clicked() {
+                toggle_play = true;
+            }
+
+            ui.add_space(4.0);
             let help = ui.add_sized(
                 [24.0, 24.0],
                 Button::new(Self::icon(0xe887, 16.0, Color32::from_rgb(214, 51, 132)))
@@ -5342,6 +5445,7 @@ impl SoundFxApp {
             changed,
             seek_requested,
             preview_commit_requested,
+            toggle_play,
             trim_history_commit,
         )
     }
