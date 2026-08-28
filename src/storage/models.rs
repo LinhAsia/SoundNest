@@ -455,4 +455,44 @@ mod tests {
         assert_eq!(prev(0, true), 2);       // wraps to 2
         assert_eq!(prev(0, false), 0);
     }
+
+    #[test]
+    fn playlist_drag_and_drop_reorder_logic() {
+        let mut sound_ids = vec![
+            Uuid::new_v4(), // 0
+            Uuid::new_v4(), // 1
+            Uuid::new_v4(), // 2
+            Uuid::new_v4(), // 3
+        ];
+        let original = sound_ids.clone();
+
+        let calc_dest = |src: usize, target: usize, is_top: bool, total: usize| -> usize {
+            let mut dest = if is_top { target } else { target + 1 };
+            if src < dest {
+                dest = dest.saturating_sub(1);
+            }
+            dest.min(total.saturating_sub(1))
+        };
+
+        // Drag item 0 to bottom half of item 2 -> [1, 2, 0, 3]
+        let dest = calc_dest(0, 2, false, sound_ids.len());
+        assert_eq!(dest, 2);
+        let item = sound_ids.remove(0);
+        sound_ids.insert(dest, item);
+        assert_eq!(sound_ids, vec![original[1], original[2], original[0], original[3]]);
+
+        // Reset
+        sound_ids = original.clone();
+
+        // Drag item 3 to top half of item 1 -> [0, 3, 1, 2]
+        let dest = calc_dest(3, 1, true, sound_ids.len());
+        assert_eq!(dest, 1);
+        let item = sound_ids.remove(3);
+        sound_ids.insert(dest, item);
+        assert_eq!(sound_ids, vec![original[0], original[3], original[1], original[2]]);
+
+        // Self drops are no-ops
+        assert_eq!(calc_dest(1, 1, true, 4), 1);
+        assert_eq!(calc_dest(1, 1, false, 4), 1);
+    }
 }

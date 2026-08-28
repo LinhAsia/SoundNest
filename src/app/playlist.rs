@@ -134,6 +134,7 @@ impl SoundFxApp {
         let mut delete_playlist_id: Option<Uuid> = None;
         let mut move_up_action: Option<(Uuid, usize)> = None;
         let mut move_down_action: Option<(Uuid, usize)> = None;
+        let mut move_track_action: Option<(Uuid, usize, usize)> = None;
         let mut remove_sound_action: Option<(Uuid, usize)> = None;
         let mut add_sound_action: Option<(Uuid, Uuid)> = None;
         let mut play_track_action: Option<(Uuid, usize)> = None;
@@ -693,19 +694,26 @@ impl SoundFxApp {
                                     let move_down_label = self.t("playlist.move_down");
                                     let move_up_label = self.t("playlist.move_up");
                                     let play_track_label = self.t("playlist.play_track");
+                                    let pointer_pos = ui.ctx().input(|i| i.pointer.hover_pos());
+                                    let is_mouse_down = ui.ctx().input(|i| i.pointer.primary_down());
+                                    let mut hovered_drop_target: Option<(usize, bool)> = None;
+
                                     for (idx, &sound_id) in playlist.sound_ids.iter().enumerate() {
                                         let sound_opt = self.sounds.iter().find(|s| s.id == sound_id);
                                         let is_current_track = is_this_playing && self.playlist_current_index == idx;
+                                        let is_being_dragged = self.playlist_drag_source_idx == Some(idx);
 
-                                        Frame::new()
-                                            .fill(if is_current_track {
+                                        let row_response = Frame::new()
+                                            .fill(if is_being_dragged {
+                                                Color32::from_rgba_premultiplied(214, 51, 132, 45)
+                                            } else if is_current_track {
                                                 Color32::from_rgba_premultiplied(214, 51, 132, 30)
                                             } else {
                                                 Self::surface_fill()
                                             })
                                             .stroke(Stroke::new(
-                                                1.0,
-                                                if is_current_track {
+                                                if is_being_dragged { 1.5 } else { 1.0 },
+                                                if is_being_dragged || is_current_track {
                                                     Color32::from_rgb(214, 51, 132)
                                                 } else {
                                                     Self::border_color()
@@ -715,6 +723,23 @@ impl SoundFxApp {
                                             .inner_margin(Margin::symmetric(10, 6))
                                             .show(ui, |ui| {
                                                 ui.horizontal(|ui| {
+                                                    // Drag handle icon (press and drag to reorder)
+                                                    let handle_btn = ui.add_sized(
+                                                        [18.0, 24.0],
+                                                        Button::new(Self::icon(0xe25d, 14.0, Self::muted_text_color()))
+                                                            .fill(Color32::TRANSPARENT)
+                                                            .stroke(Stroke::NONE),
+                                                    );
+                                                    Self::decorate_button_response(ui, &handle_btn);
+                                                    if handle_btn.hovered() {
+                                                        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+                                                    }
+                                                    if handle_btn.drag_started() {
+                                                        self.playlist_drag_source_idx = Some(idx);
+                                                    }
+
+                                                    ui.add_space(2.0);
+
                                                     // Index or playing icon
                                                     if is_current_track {
                                                         ui.label(
@@ -730,20 +755,29 @@ impl SoundFxApp {
                                                     }
                                                     ui.add_space(4.0);
 
-                                                    // Sound Name
+                                                    // Sound Name (also draggable)
                                                     let sound_name = sound_opt
                                                         .map(|s| s.name.as_str())
                                                         .unwrap_or("(Sound removed)");
-                                                    ui.label(
-                                                        RichText::new(sound_name)
-                                                            .size(12.5)
-                                                            .color(if is_current_track {
-                                                                Color32::WHITE
-                                                            } else {
-                                                                Self::strong_text_color()
-                                                            })
-                                                            .strong(),
+                                                    let name_label = ui.add(
+                                                        egui::Label::new(
+                                                            RichText::new(sound_name)
+                                                                .size(12.5)
+                                                                .color(if is_current_track {
+                                                                    Color32::WHITE
+                                                                } else {
+                                                                    Self::strong_text_color()
+                                                                })
+                                                                .strong(),
+                                                        )
+                                                        .sense(Sense::click_and_drag()),
                                                     );
+                                                    if name_label.hovered() {
+                                                        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+                                                    }
+                                                    if name_label.drag_started() {
+                                                        self.playlist_drag_source_idx = Some(idx);
+                                                    }
 
                                                     ui.with_layout(
                                                         egui::Layout::right_to_left(Align::Center),
@@ -828,7 +862,74 @@ impl SoundFxApp {
                                                     );
                                                 });
                                             });
+
+                                        // Drop target indicator when dragging another track over this one
+                                        let row_rect = row_response.response.rect;
+                                        if let Some(src_idx) = self.playlist_drag_source_idx {
+                                            if src_idx != idx {
+                                                if let Some(ptr) = pointer_pos {
+                                                    if row_rect.y_range().contains(ptr.y) {
+                                                        let is_top_half = ptr.y < row_rect.center().y;
+                                                        hovered_drop_target = Some((idx, is_top_half));
+
+                                                        let line_y = if is_top_half { row_rect.top() - 1.0 } else { row_rect.bottom() + 1.0 };
+                                                        let painter = ui.painter();
+                                                        painter.hline(
+                                                            (row_rect.left() + 4.0)..=(row_rect.right() - 4.0),
+                                                            line_y,
+                                                            Stroke::new(2.5, Color32::from_rgb(214, 51, 132)),
+                                                        );
+                                                        painter.circle_filled(pos2(row_rect.left() + 4.0, line_y), 3.5, Color32::from_rgb(214, 51, 132));
+                                                        painter.circle_filled(pos2(row_rect.right() - 4.0, line_y), 3.5, Color32::from_rgb(214, 51, 132));
+                                                    }
+                                                }
+                                            }
+                                        }
+
                                         ui.add_space(4.0);
+                                    }
+
+                                    // Finish drag-and-drop interaction
+                                    if let Some(src_idx) = self.playlist_drag_source_idx {
+                                        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+
+                                        if let Some(dragged_id) = playlist.sound_ids.get(src_idx) {
+                                            if let Some(dragged_sound) = self.sounds.iter().find(|s| s.id == *dragged_id) {
+                                                if let Some(ptr) = pointer_pos {
+                                                    egui::show_tooltip_at(
+                                                        ui.ctx(),
+                                                        ui.layer_id(),
+                                                        egui::Id::new("playlist-drag-tooltip"),
+                                                        ptr + vec2(14.0, 16.0),
+                                                        |ui| {
+                                                            ui.horizontal(|ui| {
+                                                                ui.label(Self::icon(0xe25d, 15.0, Color32::from_rgb(214, 51, 132)));
+                                                                ui.label(
+                                                                    RichText::new(&dragged_sound.name)
+                                                                        .size(12.0)
+                                                                        .color(Self::strong_text_color())
+                                                                        .strong(),
+                                                                );
+                                                            });
+                                                        },
+                                                    );
+                                                }
+                                            }
+                                        }
+
+                                        if !is_mouse_down {
+                                            self.playlist_drag_source_idx = None;
+                                            if let Some((target_idx, is_top_half)) = hovered_drop_target {
+                                                let mut dest_idx = if is_top_half { target_idx } else { target_idx + 1 };
+                                                if src_idx < dest_idx {
+                                                    dest_idx = dest_idx.saturating_sub(1);
+                                                }
+                                                dest_idx = dest_idx.min(total_tracks.saturating_sub(1));
+                                                if src_idx != dest_idx {
+                                                    move_track_action = Some((playlist.id, src_idx, dest_idx));
+                                                }
+                                            }
+                                        }
                                     }
                                 });
                         },
@@ -891,6 +992,25 @@ impl SoundFxApp {
                             self.playlist_current_index = idx + 1;
                         } else if self.playlist_current_index == idx + 1 {
                             self.playlist_current_index = idx;
+                        }
+                    }
+                }
+            }
+            self.save_current_playlists();
+        }
+
+        if let Some((p_id, from_idx, to_idx)) = move_track_action {
+            if let Some(playlist) = self.playlists.iter_mut().find(|p| p.id == p_id) {
+                if from_idx < playlist.sound_ids.len() && to_idx < playlist.sound_ids.len() && from_idx != to_idx {
+                    let sound_id = playlist.sound_ids.remove(from_idx);
+                    playlist.sound_ids.insert(to_idx, sound_id);
+                    if self.playlist_playing_id == Some(p_id) {
+                        if self.playlist_current_index == from_idx {
+                            self.playlist_current_index = to_idx;
+                        } else if from_idx < self.playlist_current_index && to_idx >= self.playlist_current_index {
+                            self.playlist_current_index = self.playlist_current_index.saturating_sub(1);
+                        } else if from_idx > self.playlist_current_index && to_idx <= self.playlist_current_index {
+                            self.playlist_current_index = self.playlist_current_index.saturating_add(1);
                         }
                     }
                 }
