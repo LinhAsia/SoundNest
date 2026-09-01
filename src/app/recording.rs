@@ -63,8 +63,9 @@ impl SoundFxApp {
         if self.record_input_source == PitchInputSource::Microphone
             && self.selected_record_input_device.is_none()
         {
-            self.set_error_status(self.t("pitch.no_microphone_input"));
-            return;
+            if self.record_capture_devices.is_empty() {
+                self.refresh_record_capture_devices();
+            }
         }
 
         self.close_recording_review(true);

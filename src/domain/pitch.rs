@@ -226,9 +226,14 @@ fn run_loop(
 
     audio_client.start_stream()?;
     while !stop_flag.load(Ordering::Relaxed) {
-        let new_frames = capture_client.get_next_packet_size()?.unwrap_or(0);
-        if new_frames > 0 {
-            let additional = (new_frames as usize * blockalign)
+        let _ = event_handle.wait_for_event(20);
+
+        loop {
+            let nbr_frames = match capture_client.get_next_packet_size()? {
+                Some(frames) if frames > 0 => frames,
+                _ => break,
+            };
+            let additional = (nbr_frames as usize * blockalign)
                 .saturating_sub(sample_queue.capacity().saturating_sub(sample_queue.len()));
             sample_queue.reserve(additional);
             capture_client.read_from_device_to_deque(&mut sample_queue)?;
@@ -275,13 +280,6 @@ fn run_loop(
                     last_confidence = 0.0;
                 }
 
-                let mut snapshot = state.lock().unwrap();
-                snapshot.running = true;
-                snapshot.note = last_note.clone();
-                snapshot.confidence = last_confidence;
-                snapshot.level = smoothed_level;
-                snapshot.waveform = level_history.iter().copied().collect();
-                snapshot.error = None;
                 last_publish = Instant::now();
             }
 
@@ -293,8 +291,6 @@ fn run_loop(
             snapshot.waveform = level_history.iter().copied().collect();
             snapshot.error = None;
         }
-
-        let _ = event_handle.wait_for_event(200);
     }
 
     let _ = audio_client.stop_stream();

@@ -124,7 +124,12 @@ impl eframe::App for SoundFxApp {
             ctx.request_repaint_after(Duration::from_millis(500));
             return;
         }
-        if !is_focused {
+
+        let recorder_snapshot = self.recorder.snapshot();
+        let pitch_snapshot = self.pitch_monitor.snapshot();
+        let is_active_monitoring = recorder_snapshot.running || pitch_snapshot.running;
+
+        if !is_focused && !is_active_monitoring {
             ctx.request_repaint_after(Duration::from_millis(300));
         } else {
             if !self.normalize_inflight.is_empty() {
@@ -133,7 +138,7 @@ impl eframe::App for SoundFxApp {
             if !self.trim_commit_inflight.is_empty() {
                 ctx.request_repaint_after(Duration::from_millis(JOB_POLL_REPAINT_MS));
             }
-            if self.playback_needs_live_repaint() {
+            if self.playback_needs_live_repaint() || is_active_monitoring {
                 ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
             }
         }
@@ -162,11 +167,16 @@ impl eframe::App for SoundFxApp {
             ctx.request_repaint_after(Duration::from_millis(JOB_POLL_REPAINT_MS));
         }
 
-        let recorder_snapshot = self.recorder.snapshot();
         if recorder_snapshot.running {
             ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
         }
         if let Some(error) = recorder_snapshot.error.clone() {
+            self.set_error_status(error);
+        }
+        if pitch_snapshot.running {
+            ctx.request_repaint_after(Duration::from_millis(ACTIVE_UI_REPAINT_MS));
+        }
+        if let Some(error) = pitch_snapshot.error.clone() {
             self.set_error_status(error);
         }
         if let Some(path) = self.recorder.take_completed_path() {
