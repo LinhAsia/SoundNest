@@ -141,45 +141,66 @@ impl SoundFxApp {
 
                         if self.capture_record_hotkey {
                             ui.add_space(4.0);
-                            if let Some(preview_key) = self.preview_record_hotkey {
-                                Frame::new()
-                                    .fill(Color32::from_rgba_premultiplied(80, 70, 30, 255))
-                                    .stroke(Stroke::new(1.0, Color32::from_rgb(255, 220, 80)))
-                                    .corner_radius(12.0)
-                                    .inner_margin(Margin::symmetric(10, 5))
-                                    .show(ui, |ui| {
-                                        ui.label(
-                                            RichText::new(format!(
-                                                "{}",
-                                                preview_key.to_string()
-                                            ))
-                                            .size(11.5)
-                                            .color(Color32::from_rgb(255, 232, 96))
-                                            .strong(),
-                                        );
-                                    });
+                            let capture_text = if let Some(preview_key) = self.preview_record_hotkey {
+                                format!("Pressing: {}", preview_key.to_string())
                             } else {
-                                ui.label(
-                                    RichText::new("Press key…")
-                                        .size(12.0)
-                                        .color(Self::muted_text_color()),
-                                );
-                            }
+                                "Press key…".to_owned()
+                            };
+                            let text_w = ui.fonts(|f| {
+                                f.layout_no_wrap(
+                                    capture_text.clone(),
+                                    egui::FontId::proportional(12.0),
+                                    Color32::WHITE,
+                                )
+                                .size()
+                                .x
+                            });
+                            let (cap_rect, _) = ui.allocate_exact_size(
+                                vec2((text_w + 24.0).max(48.0), 34.0),
+                                Sense::hover(),
+                            );
+                            let painter = ui.painter_at(cap_rect);
+                            painter.rect_filled(
+                                cap_rect,
+                                18.0,
+                                Color32::from_rgba_premultiplied(80, 70, 30, 255),
+                            );
+                            painter.rect_stroke(
+                                cap_rect,
+                                18.0,
+                                Stroke::new(1.0, Color32::from_rgb(255, 220, 80)),
+                                StrokeKind::Inside,
+                            );
+                            painter.text(
+                                cap_rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                capture_text,
+                                egui::FontId::proportional(12.0),
+                                Color32::from_rgb(255, 232, 96),
+                            );
                         }
 
                         let mut key_to_remove = None;
                         for &key in &self.record_hotkeys {
                             ui.add_space(4.0);
-                            let chip = Button::new(
-                                RichText::new(key.to_string())
-                                    .size(11.5)
-                                    .color(Self::strong_text_color())
-                                    .strong(),
-                            )
-                            .fill(Self::surface_fill())
-                            .stroke(Stroke::new(1.0, Self::subtle_border_color()))
-                            .corner_radius(12.0);
-                            let r = ui.add(chip);
+                            let key_str = key.to_string();
+                            let text_w = ui.fonts(|f| {
+                                f.layout_no_wrap(
+                                    key_str.clone(),
+                                    egui::FontId::proportional(12.0),
+                                    Color32::WHITE,
+                                )
+                                .size()
+                                .x
+                            });
+                            let chip_w = (text_w + 24.0).max(48.0);
+                            let chip = Self::action_button_with_radius(
+                                RichText::new(key_str).size(12.0).strong(),
+                                false,
+                                false,
+                                18,
+                            );
+                            let r = ui.add_sized([chip_w, 34.0], chip);
                             Self::decorate_button_response(ui, &r);
                             if r.clicked() {
                                 key_to_remove = Some(key);

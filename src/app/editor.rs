@@ -4836,13 +4836,14 @@ impl SoundFxApp {
                         StrokeKind::Outside,
                     );
 
+                    let wave_rect = rect.shrink2(vec2(12.0, 14.0));
                     let has_cutout = sound.has_cutout();
                     let display_trim_start = sound.display_trim_start();
                     let display_trim_end = sound.display_trim_end();
                     let start_t = display_trim_start / duration;
                     let end_t = display_trim_end / duration;
-                    let start_x = rect.left() + rect.width() * start_t.clamp(0.0, 1.0);
-                    let end_x = rect.left() + rect.width() * end_t.clamp(0.0, 1.0);
+                    let start_x = wave_rect.left() + wave_rect.width() * start_t.clamp(0.0, 1.0);
+                    let end_x = wave_rect.left() + wave_rect.width() * end_t.clamp(0.0, 1.0);
                     let display_waveform = if has_cutout {
                         Self::trimmed_waveform_preview_from_samples(sound, waveform_samples)
                     } else {
@@ -4851,7 +4852,7 @@ impl SoundFxApp {
 
                     Self::paint_waveform_bars(
                         &painter,
-                        rect.shrink2(vec2(12.0, 14.0)),
+                        wave_rect,
                         &display_waveform,
                         start_x,
                         end_x,
@@ -4982,7 +4983,7 @@ impl SoundFxApp {
                         Sense::hover(),
                     );
                     let pointer_time = pointer_pos.map(|pointer| {
-                        let ratio = ((pointer.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
+                        let ratio = ((pointer.x - wave_rect.left()) / wave_rect.width()).clamp(0.0, 1.0);
                         ratio * duration
                     });
                     let hovered_delete_region =
@@ -5086,7 +5087,7 @@ impl SoundFxApp {
                     }
 
                     let cursor_ratio = (*preview_cursor_secs / duration).clamp(0.0, 1.0);
-                    let cursor_x = rect.left() + rect.width() * cursor_ratio;
+                    let cursor_x = wave_rect.left() + wave_rect.width() * cursor_ratio;
                     painter.line_segment(
                         [
                             Pos2::new(cursor_x, rect.top() + 8.0),
@@ -5293,7 +5294,7 @@ impl SoundFxApp {
                     {
                         begin_trim_history(ui.ctx(), sound);
                         sound.clear_cutout();
-                        let ratio = ((pointer.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
+                        let ratio = ((pointer.x - wave_rect.left()) / wave_rect.width()).clamp(0.0, 1.0);
                         let next = ratio * duration;
                         sound.trim_start_secs = next.min(sound.trim_end_secs - 0.05);
                         sound.display_trim_start_secs = None;
@@ -5319,7 +5320,7 @@ impl SoundFxApp {
                     {
                         begin_trim_history(ui.ctx(), sound);
                         sound.clear_cutout();
-                        let ratio = ((pointer.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
+                        let ratio = ((pointer.x - wave_rect.left()) / wave_rect.width()).clamp(0.0, 1.0);
                         let next = ratio * duration;
                         sound.trim_end_secs = next.max(sound.trim_start_secs + 0.05);
                         sound.display_trim_start_secs = None;
@@ -5345,7 +5346,7 @@ impl SoundFxApp {
                             || response.dragged()
                             || response.is_pointer_button_down_on())
                     {
-                        let ratio = ((pointer.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
+                        let ratio = ((pointer.x - wave_rect.left()) / wave_rect.width()).clamp(0.0, 1.0);
                         *preview_cursor_secs = (ratio * duration)
                             .clamp(sound.display_trim_start(), sound.display_trim_end());
                         if response.clicked() {
