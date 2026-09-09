@@ -301,6 +301,16 @@ impl SoundFxApp {
                     self.show_stream_panel = !self.show_stream_panel;
                 }
 
+                let dup_response =
+                    Self::icon_titlebar(ui, [42.0, 30.0], 0xe028, self.show_duplicate_panel, false)
+                        .on_hover_text(self.t("duplicates.title"));
+                if dup_response.clicked() {
+                    self.show_duplicate_panel = !self.show_duplicate_panel;
+                    if self.show_duplicate_panel && !self.duplicate_scanned {
+                        self.scan_library_duplicates();
+                    }
+                }
+
                 if matches!(
                     self.update_status,
                     crate::services::updater_service::UpdateStatus::Available { .. }
