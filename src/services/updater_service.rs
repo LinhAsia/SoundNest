@@ -10,9 +10,9 @@ use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
 pub const UPDATE_MANIFEST_URL: &str =
-    "https://github.com/LinhAsia/soundnest/raw/master/update.json";
+    "https://github.com/LinhAsia/SoundNest/raw/master/update.json";
 pub const UPDATE_MANIFEST_FALLBACK_URL: &str =
-    "https://raw.githubusercontent.com/LinhAsia/soundnest/master/update.json";
+    "https://raw.githubusercontent.com/LinhAsia/SoundNest/master/update.json";
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct UpdateManifest {
