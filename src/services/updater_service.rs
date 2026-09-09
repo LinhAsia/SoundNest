@@ -104,12 +104,23 @@ fn fetch_manifest_internal() -> Result<UpdateManifest> {
 
     let res = match res {
         Ok(resp) => resp,
-        Err(_) => {
+        Err(e) => {
+            let err_text = e.to_string();
             let fallback_url = format!("{UPDATE_MANIFEST_FALLBACK_URL}?ts={cache_buster}");
-            ureq::get(&fallback_url)
+            match ureq::get(&fallback_url)
                 .header("User-Agent", "SoundFxManager-Updater")
                 .call()
-                .map_err(|e| anyhow::anyhow!("Unable to fetch update manifest: {e}"))?
+            {
+                Ok(resp) => resp,
+                Err(e2) => {
+                    let err2_text = e2.to_string();
+                    if err_text.contains("404") || err2_text.contains("404") {
+                        bail!("Chưa tìm thấy update.json trên GitHub (HTTP 404). Hãy push repository lên GitHub để kích hoạt.");
+                    } else {
+                        bail!("Không thể kết nối máy chủ cập nhật: {err2_text}");
+                    }
+                }
+            }
         }
     };
 
