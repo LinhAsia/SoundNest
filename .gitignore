@@ -1,1 +1,9 @@
 /target
+*.part
+*.old
+*.ready
+*.tmp
+repomix-output.xml
+src.rar
+.agents/
+.codex/

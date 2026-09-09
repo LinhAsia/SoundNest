@@ -129,6 +129,7 @@ impl SoundFxApp {
         self.render_record_review_panel(ctx);
         self.render_stream_panel(ctx);
         self.render_settings_panel(ctx);
+        self.render_update_notice(ctx);
         self.render_video_viewer_panel(ctx);
         self.render_pitch_monitor(ctx);
         self.render_trim_commit_panel(ctx);
@@ -297,6 +298,31 @@ impl SoundFxApp {
                 if stream_response.clicked() {
                     self.refresh_stream_input_capture_devices();
                     self.show_stream_panel = !self.show_stream_panel;
+                }
+
+                if matches!(
+                    self.update_status,
+                    crate::services::updater_service::UpdateStatus::Available { .. }
+                        | crate::services::updater_service::UpdateStatus::Downloading { .. }
+                        | crate::services::updater_service::UpdateStatus::ReadyToRestart { .. }
+                ) {
+                    let update_tooltip = match &self.update_status {
+                        crate::services::updater_service::UpdateStatus::Available { version, .. } => {
+                            format!("Cập nhật mới: v{version}")
+                        }
+                        crate::services::updater_service::UpdateStatus::Downloading { progress, .. } => {
+                            format!("Đang tải: {:.0}%", progress * 100.0)
+                        }
+                        crate::services::updater_service::UpdateStatus::ReadyToRestart { .. } => {
+                            "Đã tải xong, khởi động lại để cập nhật".to_string()
+                        }
+                        _ => String::new(),
+                    };
+                    let update_btn = Self::icon_titlebar(ui, [42.0, 30.0], 0xe8d7, false, true)
+                        .on_hover_text(update_tooltip);
+                    if update_btn.clicked() {
+                        self.show_settings_panel = true;
+                    }
                 }
 
                 if Self::icon_titlebar(ui, [42.0, 30.0], 0xe8b8, self.show_settings_panel, false)

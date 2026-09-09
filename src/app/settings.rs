@@ -575,6 +575,167 @@ impl SoundFxApp {
                             );
                         }
                     });
+
+                ui.add_space(12.0);
+                Frame::new()
+                    .fill(Self::surface_fill())
+                    .stroke(Stroke::new(1.0, Self::border_color()))
+                    .corner_radius(22.0)
+                    .inner_margin(Margin::same(16))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(Self::icon(0xe8d7, 18.0, Color32::from_rgb(0, 180, 216)).strong());
+                            ui.add_space(4.0);
+                            ui.label(
+                                RichText::new(self.t("settings.update"))
+                                    .size(13.0)
+                                    .color(Self::strong_text_color())
+                                    .strong(),
+                            );
+                            ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                                ui.label(
+                                    RichText::new(format!("v{}", env!("CARGO_PKG_VERSION")))
+                                        .size(12.0)
+                                        .color(Self::muted_text_color()),
+                                );
+                            });
+                        });
+                        ui.add_space(8.0);
+
+                        match &self.update_status {
+                            crate::services::updater_service::UpdateStatus::Idle => {
+                                let check_btn = ui.add(Self::action_button(
+                                    RichText::new(self.t("settings.check_update")).size(12.0),
+                                    false,
+                                    false,
+                                ));
+                                Self::decorate_button_response(ui, &check_btn);
+                                if check_btn.clicked() {
+                                    self.check_for_update(ctx, false);
+                                }
+                            }
+                            crate::services::updater_service::UpdateStatus::Checking => {
+                                ui.horizontal(|ui| {
+                                    ui.spinner();
+                                    ui.label(
+                                        RichText::new(self.t("settings.checking_update"))
+                                            .size(12.0)
+                                            .color(Self::muted_text_color()),
+                                    );
+                                });
+                            }
+                            crate::services::updater_service::UpdateStatus::UpToDate => {
+                                ui.label(
+                                    RichText::new(self.t("settings.up_to_date"))
+                                        .size(12.0)
+                                        .color(Color32::from_rgb(72, 199, 142)),
+                                );
+                                ui.add_space(6.0);
+                                let check_btn = ui.add(Self::action_button(
+                                    RichText::new(self.t("settings.check_update")).size(12.0),
+                                    false,
+                                    false,
+                                ));
+                                Self::decorate_button_response(ui, &check_btn);
+                                if check_btn.clicked() {
+                                    self.check_for_update(ctx, false);
+                                }
+                            }
+                            crate::services::updater_service::UpdateStatus::Available {
+                                version,
+                                notes,
+                                url,
+                            } => {
+                                let ver = version.clone();
+                                let download_url = url.clone();
+                                ui.label(
+                                    RichText::new(format!("{} v{}", self.t("settings.new_version_available").replace("{version}", ""), ver))
+                                        .size(12.5)
+                                        .color(Color32::from_rgb(0, 180, 216))
+                                        .strong(),
+                                );
+                                if !notes.trim().is_empty() {
+                                    ui.add_space(4.0);
+                                    ui.label(
+                                        RichText::new(notes.trim())
+                                            .size(11.5)
+                                            .color(Self::muted_text_color()),
+                                    );
+                                }
+                                ui.add_space(8.0);
+                                let update_btn = ui.add(Self::action_button(
+                                    RichText::new(format!("🚀 {}", self.t("settings.update_now"))).size(12.5),
+                                    false,
+                                    true,
+                                ));
+                                Self::decorate_button_response(ui, &update_btn);
+                                if update_btn.clicked() {
+                                    self.start_download_update(ctx, ver, download_url);
+                                }
+                            }
+                            crate::services::updater_service::UpdateStatus::Downloading {
+                                progress,
+                                ..
+                            } => {
+                                ui.horizontal(|ui| {
+                                    ui.spinner();
+                                    ui.label(
+                                        RichText::new(format!(
+                                            "{} ({:.0}%)",
+                                            self.t("settings.downloading_update"),
+                                            progress * 100.0
+                                        ))
+                                        .size(12.0)
+                                        .color(Color32::from_rgb(0, 180, 216)),
+                                    );
+                                });
+                                ui.add_space(4.0);
+                                ui.add(
+                                    ProgressBar::new(*progress)
+                                        .desired_width(ui.available_width().max(180.0))
+                                        .show_percentage(),
+                                );
+                            }
+                            crate::services::updater_service::UpdateStatus::ReadyToRestart {
+                                new_exe_path,
+                                ..
+                            } => {
+                                ui.label(
+                                    RichText::new(self.t("settings.ready_to_restart"))
+                                        .size(12.0)
+                                        .color(Color32::from_rgb(72, 199, 142)),
+                                );
+                                ui.add_space(6.0);
+                                let path = new_exe_path.clone();
+                                let restart_btn = ui.add(Self::action_button(
+                                    RichText::new(self.t("settings.restart_to_update")).size(12.5),
+                                    false,
+                                    true,
+                                ));
+                                Self::decorate_button_response(ui, &restart_btn);
+                                if restart_btn.clicked() {
+                                    self.restart_and_apply_update(&path);
+                                }
+                            }
+                            crate::services::updater_service::UpdateStatus::Error(e) => {
+                                ui.label(
+                                    RichText::new(format!("Lỗi: {e}"))
+                                        .size(11.5)
+                                        .color(Color32::from_rgb(230, 80, 80)),
+                                );
+                                ui.add_space(6.0);
+                                let check_btn = ui.add(Self::action_button(
+                                    RichText::new(self.t("settings.check_update")).size(12.0),
+                                    false,
+                                    false,
+                                ));
+                                Self::decorate_button_response(ui, &check_btn);
+                                if check_btn.clicked() {
+                                    self.check_for_update(ctx, false);
+                                }
+                            }
+                        }
+                    });
             });
 
         self.show_settings_panel = open_panel;

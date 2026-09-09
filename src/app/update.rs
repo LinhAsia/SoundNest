@@ -26,6 +26,11 @@ impl eframe::App for SoundFxApp {
         self.poll_vocal_separation_jobs(ctx);
         self.poll_tts_jobs(ctx);
         self.poll_video_viewer_jobs(ctx);
+        self.poll_updater_messages(ctx);
+        if self.startup_update_check_pending {
+            self.startup_update_check_pending = false;
+            self.check_for_update(ctx, true);
+        }
         self.prune_copy_feedback(ctx);
         let now = ctx.input(|input| input.time);
         if now - self.last_working_set_trim_at >= 2.0 {

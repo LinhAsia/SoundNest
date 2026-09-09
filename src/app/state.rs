@@ -588,6 +588,13 @@ pub struct SoundFxApp {
     pub(super) folder_import_animating: HashMap<Uuid, Instant>,
     pub(super) library_folder_visible_sound_counts: HashMap<Option<Uuid>, usize>,
     pub(super) editing_from_folder: Option<Uuid>,
+    pub(super) update_status: crate::services::updater_service::UpdateStatus,
+    pub(super) update_download_progress: Arc<AtomicU32>,
+    pub(super) update_download_cancel: Arc<AtomicBool>,
+    pub(super) update_notice: Option<UpdateNotice>,
+    pub(super) startup_update_check_pending: bool,
+    pub(super) update_tx: Sender<UpdateActionMessage>,
+    pub(super) update_rx: Receiver<UpdateActionMessage>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -643,6 +650,7 @@ impl SoundFxApp {
         let (recording_review_tx, recording_review_rx) = mpsc::channel();
         let (library_import_tx, library_import_rx) = mpsc::channel();
         let (normalize_tx, normalize_rx) = mpsc::channel();
+        let (update_tx, update_rx) = mpsc::channel();
         let video_assets = storage.load_video_library().unwrap_or_else(|error| {
             status = Some(error.to_string());
             Vec::new()
@@ -974,6 +982,13 @@ impl SoundFxApp {
             folder_import_animating: HashMap::new(),
             library_folder_visible_sound_counts: HashMap::new(),
             editing_from_folder: None,
+            update_status: crate::services::updater_service::UpdateStatus::Idle,
+            update_download_progress: Arc::new(AtomicU32::new(0)),
+            update_download_cancel: Arc::new(AtomicBool::new(false)),
+            update_notice: None,
+            startup_update_check_pending: true,
+            update_tx,
+            update_rx,
         };
 
         app.reset_library_tree_state();

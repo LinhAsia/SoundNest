@@ -184,3 +184,25 @@ pub(crate) enum TimelineMixMessage {
     },
     Failed,
 }
+
+#[derive(Clone, Debug)]
+pub(crate) struct UpdateNotice {
+    pub(crate) version: String,
+    pub(crate) notes: String,
+    pub(crate) download_url: String,
+    pub(crate) expires_at: std::time::Instant,
+}
+
+pub(crate) enum UpdateActionMessage {
+    Available {
+        version: String,
+        notes: String,
+        url: String,
+    },
+    UpToDate,
+    Downloaded {
+        version: String,
+        path: PathBuf,
+    },
+    Error(String),
+}
