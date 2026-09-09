@@ -10,9 +10,9 @@ use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
 pub const UPDATE_MANIFEST_URL: &str =
-    "https://github.com/LinhAsia/soundfx_manager/raw/master/update.json";
+    "https://github.com/LinhAsia/soundnest/raw/master/update.json";
 pub const UPDATE_MANIFEST_FALLBACK_URL: &str =
-    "https://raw.githubusercontent.com/LinhAsia/soundfx_manager/master/update.json";
+    "https://raw.githubusercontent.com/LinhAsia/soundnest/master/update.json";
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct UpdateManifest {
@@ -51,7 +51,7 @@ pub fn update_download_file_stem(version: &str) -> String {
             _ => '_',
         })
         .collect();
-    format!("soundfx_update_{}", sanitized.trim_matches('_'))
+    format!("soundnest_update_{}", sanitized.trim_matches('_'))
 }
 
 pub fn update_download_final_path(version: &str) -> PathBuf {
@@ -99,7 +99,7 @@ fn fetch_manifest_internal() -> Result<UpdateManifest> {
     let url = format!("{UPDATE_MANIFEST_URL}?ts={cache_buster}");
 
     let res = ureq::get(&url)
-        .header("User-Agent", "SoundFxManager-Updater")
+        .header("User-Agent", "SoundNest-Updater")
         .call();
 
     let res = match res {
@@ -108,7 +108,7 @@ fn fetch_manifest_internal() -> Result<UpdateManifest> {
             let err_text = e.to_string();
             let fallback_url = format!("{UPDATE_MANIFEST_FALLBACK_URL}?ts={cache_buster}");
             match ureq::get(&fallback_url)
-                .header("User-Agent", "SoundFxManager-Updater")
+                .header("User-Agent", "SoundNest-Updater")
                 .call()
             {
                 Ok(resp) => resp,
@@ -176,7 +176,7 @@ pub fn start_download_update(
             let _ = fs::remove_file(&ready_path);
 
             let resp = ureq::get(&download_url)
-                .header("User-Agent", "SoundFxManager-Updater")
+                .header("User-Agent", "SoundNest-Updater")
                 .call()
                 .map_err(|e| anyhow::anyhow!("Failed to download update: {e}"))?;
 
@@ -242,7 +242,7 @@ pub fn restart_and_apply_update(new_exe_path: &Path) -> Result<()> {
     let old_exe = current_exe.with_extension("exe.old");
     let ready_stamp = new_exe_path.with_extension("ready");
     let current_pid = std::process::id();
-    let update_error_log = std::env::temp_dir().join("soundfx_update_error.txt");
+    let update_error_log = std::env::temp_dir().join("soundnest_update_error.txt");
 
     let current_exe_ps = current_exe.display().to_string().replace('\'', "''");
     let new_exe_ps = new_exe_path.display().to_string().replace('\'', "''");

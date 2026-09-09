@@ -3,6 +3,34 @@
 version = 4
 
 [[package]]
+name = "SoundNest"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "clipboard-win",
+ "directories",
+ "dirs",
+ "eframe",
+ "embed-resource",
+ "hound",
+ "open",
+ "raw-window-handle",
+ "regex",
+ "rfd",
+ "rodio",
+ "serde",
+ "serde_json",
+ "ureq",
+ "urlencoding",
+ "uuid",
+ "wasapi",
+ "windows 0.62.2",
+ "windows-core 0.62.2",
+ "zip",
+]
+
+[[package]]
 name = "ab_glyph"
 version = "0.2.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3249,34 +3277,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dd538fb6910ac1099850255cf94a94df6551fbdd602454387d0adb2d1ca6dead"
 dependencies = [
  "serde",
-]
-
-[[package]]
-name = "soundfx_manager"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64",
- "clipboard-win",
- "directories",
- "dirs",
- "eframe",
- "embed-resource",
- "hound",
- "open",
- "raw-window-handle",
- "regex",
- "rfd",
- "rodio",
- "serde",
- "serde_json",
- "ureq",
- "urlencoding",
- "uuid",
- "wasapi",
- "windows 0.62.2",
- "windows-core 0.62.2",
- "zip",
 ]
 
 [[package]]

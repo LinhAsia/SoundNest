@@ -39,7 +39,7 @@ use windows::core::PCWSTR;
 const MATERIAL_ICONS_FONT: &str = "material_icons";
 const UI_FONT: &str = "ui_font";
 #[cfg(windows)]
-const SINGLE_INSTANCE_MUTEX: &str = "Local\\SoundFxManagerSingleton";
+const SINGLE_INSTANCE_MUTEX: &str = "Local\\SoundNestSingleton";
 const APP_ICON_PNG: &[u8] = include_bytes!("../assets/app-icon.png");
 
 #[cfg(windows)]
@@ -77,7 +77,7 @@ fn main() -> eframe::Result<()> {
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_icon(Arc::new(app_icon))
-            .with_title("Sound FX")
+            .with_title("SoundNest")
             .with_inner_size([1500.0, 920.0])
             .with_min_inner_size([1320.0, 840.0])
             .with_resizable(true)
@@ -88,7 +88,7 @@ fn main() -> eframe::Result<()> {
     };
 
     eframe::run_native(
-        "Sound FX",
+        "SoundNest",
         native_options,
         Box::new(|cc| {
             configure_fonts(&cc.egui_ctx);
@@ -123,7 +123,7 @@ fn try_acquire_single_instance() -> windows_core::Result<Option<SingleInstanceGu
 fn run_already_running_notice() -> eframe::Result<()> {
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("Sound FX")
+            .with_title("SoundNest")
             .with_inner_size([420.0, 320.0])
             .with_min_inner_size([420.0, 320.0])
             .with_max_inner_size([420.0, 320.0])
@@ -136,7 +136,7 @@ fn run_already_running_notice() -> eframe::Result<()> {
     };
 
     eframe::run_native(
-        "Sound FX",
+        "SoundNest",
         native_options,
         Box::new(|cc| {
             configure_fonts(&cc.egui_ctx);
