@@ -62,6 +62,13 @@ pub(crate) enum DownloadPanelTab {
     Tts,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum DuplicateTab {
+    #[default]
+    LibraryScan,
+    CompareTwo,
+}
+
 pub(super) struct GeminiVoiceOption {
     pub(super) name: &'static str,
     pub(super) label: &'static str,
@@ -386,6 +393,13 @@ pub struct SoundFxApp {
     pub(super) show_pitch_panel: bool,
     pub(super) show_stream_panel: bool,
     pub(super) show_settings_panel: bool,
+    pub(super) show_duplicate_panel: bool,
+    pub(super) duplicate_pairs: Vec<crate::services::audio_similarity::DuplicatePair>,
+    pub(super) duplicate_threshold: f32,
+    pub(super) duplicate_scanned: bool,
+    pub(super) duplicate_tab: DuplicateTab,
+    pub(super) compare_sound_a: Option<Uuid>,
+    pub(super) compare_sound_b: Option<Uuid>,
     pub(super) show_trim_commit_panel: bool,
     pub(super) trim_commit_output_name: String,
     pub(super) show_delete_folder_confirm: Option<Uuid>,
@@ -757,6 +771,13 @@ impl SoundFxApp {
             show_pitch_panel: false,
             show_stream_panel: false,
             show_settings_panel: false,
+            show_duplicate_panel: false,
+            duplicate_pairs: Vec::new(),
+            duplicate_threshold: 0.88,
+            duplicate_scanned: false,
+            duplicate_tab: DuplicateTab::default(),
+            compare_sound_a: None,
+            compare_sound_b: None,
             show_trim_commit_panel: false,
             trim_commit_output_name: String::new(),
             show_delete_folder_confirm: None,

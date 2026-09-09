@@ -120,6 +120,7 @@ mod layout;
 mod library;
 mod library_filtering;
 mod library_folder_views;
+mod library_duplicates;
 mod library_helpers;
 mod library_import_panel;
 mod library_jobs;

@@ -30,9 +30,9 @@ impl SoundFxApp {
         }
     }
 
-    pub(super) fn delete_selected(&mut self) {
-        let Some(index) = self.selected_sound_index() else {
-            return;
+    pub(crate) fn delete_sound_by_id(&mut self, sound_id: Uuid) -> bool {
+        let Some(index) = self.sounds.iter().position(|s| s.id == sound_id) else {
+            return false;
         };
 
         let sound = self.sounds.remove(index);
@@ -45,15 +45,24 @@ impl SoundFxApp {
 
         if let Err(error) = self.storage.remove_sound(&sound) {
             self.set_error_status(error);
-            return;
+            return false;
         }
 
-        self.selected = self
-            .sounds
-            .get(index)
-            .or_else(|| self.sounds.get(index.saturating_sub(1)))
-            .map(|next| next.id);
+        if self.selected == Some(sound_id) {
+            self.selected = self
+                .sounds
+                .get(index)
+                .or_else(|| self.sounds.get(index.saturating_sub(1)))
+                .map(|next| next.id);
+        }
         self.save_now();
+        true
+    }
+
+    pub(super) fn delete_selected(&mut self) {
+        if let Some(sound_id) = self.selected {
+            self.delete_sound_by_id(sound_id);
+        }
     }
 
     pub(super) fn copy_selected_processed_sound(&mut self, ctx: &Context) {

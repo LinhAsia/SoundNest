@@ -10,6 +10,7 @@ impl SoundFxApp {
             || self.show_record_panel
             || self.show_record_review_panel
             || self.show_settings_panel
+            || self.show_duplicate_panel
             || self.show_playlist_panel
             || self.video_viewer.is_some()
             || self.show_trim_commit_panel

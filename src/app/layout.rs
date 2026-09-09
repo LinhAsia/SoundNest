@@ -129,6 +129,7 @@ impl SoundFxApp {
         self.render_record_review_panel(ctx);
         self.render_stream_panel(ctx);
         self.render_settings_panel(ctx);
+        self.render_duplicate_panel(ctx);
         self.render_update_notice(ctx);
         self.render_video_viewer_panel(ctx);
         self.render_pitch_monitor(ctx);

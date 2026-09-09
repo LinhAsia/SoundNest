@@ -245,7 +245,28 @@
       "playlist.open_panel": "Open playlist panel",
       "editor.trim_play_hint": "Preview (Space)",
       "editor.trim_stop_hint": "Stop preview (Space)",
-      "editor.keep_old_file": "Keep old file?"
+      "editor.keep_old_file": "Keep old file?",
+      "duplicates.btn_label": "Duplicates",
+      "duplicates.title": "Duplicate Finder & Audio Compare",
+      "duplicates.tab_scan": "Library Duplicates",
+      "duplicates.tab_compare": "Compare 2 Sounds",
+      "duplicates.scan_now": "Scan Library",
+      "duplicates.threshold_label": "Similarity Threshold:",
+      "duplicates.no_duplicates_found": "Clean! No duplicates found",
+      "duplicates.pairs_found": "duplicate pair(s) found",
+      "duplicates.hint_scan": "Click 'Scan Library' to analyze audio waveforms and find duplicates across your sounds.",
+      "duplicates.clean_library": "No duplicate sounds detected with the current threshold.",
+      "duplicates.match_label": "SIMILARITY",
+      "duplicates.delete_a": "Delete A",
+      "duplicates.delete_b": "Delete B",
+      "duplicates.ignore": "Ignore",
+      "duplicates.pick_sound_a": "Sound A:",
+      "duplicates.pick_sound_b": "Sound B:",
+      "duplicates.select_sound": "Select sound...",
+      "duplicates.total_similarity": "Total Similarity",
+      "duplicates.wave_similarity": "Waveform Match",
+      "duplicates.duration_diff": "Duration Diff",
+      "duplicates.select_both_hint": "Select two sounds above to compare their waveforms side-by-side."
     },
     "vi": {
       "name": "Tiếng Việt",
@@ -492,8 +513,30 @@
       "playlist.open_panel": "Mở danh sách phát",
       "editor.trim_play_hint": "Nghe thử (Space)",
       "editor.trim_stop_hint": "Dừng nghe thử (Space)",
-      "editor.keep_old_file": "Giữ file cũ?"
+      "editor.keep_old_file": "Giữ file cũ?",
+      "duplicates.btn_label": "Quét trùng",
+      "duplicates.title": "Quét trùng lặp & So sánh âm thanh",
+      "duplicates.tab_scan": "Quét thư viện",
+      "duplicates.tab_compare": "So sánh 2 âm thanh",
+      "duplicates.scan_now": "Quét ngay",
+      "duplicates.threshold_label": "Ngưỡng tương đồng:",
+      "duplicates.no_duplicates_found": "Thư viện sạch! Không có âm thanh trùng",
+      "duplicates.pairs_found": "cặp âm thanh trùng lặp",
+      "duplicates.hint_scan": "Bấm 'Quét ngay' để phân tích sóng âm và tìm âm thanh trùng lặp trong thư viện.",
+      "duplicates.clean_library": "Không phát hiện âm thanh nào trùng lặp với ngưỡng hiện tại.",
+      "duplicates.match_label": "TRÙNG KHỚP",
+      "duplicates.delete_a": "Xóa A",
+      "duplicates.delete_b": "Xóa B",
+      "duplicates.ignore": "Bỏ qua",
+      "duplicates.pick_sound_a": "Âm thanh A:",
+      "duplicates.pick_sound_b": "Âm thanh B:",
+      "duplicates.select_sound": "Chọn âm thanh...",
+      "duplicates.total_similarity": "Tổng tương đồng",
+      "duplicates.wave_similarity": "Khớp sóng âm",
+      "duplicates.duration_diff": "Lệch thời lượng",
+      "duplicates.select_both_hint": "Chọn 2 âm thanh ở trên để so sánh sóng âm trực quan."
     }
   }
 }
+
 

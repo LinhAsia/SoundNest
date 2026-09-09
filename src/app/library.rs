@@ -1526,6 +1526,24 @@ impl SoundFxApp {
                     }
                     ui.add_space(8.0);
                     if self.library_tab == LibraryTab::Sounds {
+                        // "Duplicates" / "Quét trùng" — open duplicate finder modal
+                        let dup_btn = ui.add_sized(
+                            [96.0, 30.0],
+                            Self::action_button(
+                                RichText::new(self.t("duplicates.btn_label")).size(11.5),
+                                self.show_duplicate_panel,
+                                false,
+                            ),
+                        );
+                        Self::decorate_button_response(ui, &dup_btn);
+                        if dup_btn.clicked() {
+                            self.show_duplicate_panel = !self.show_duplicate_panel;
+                            if self.show_duplicate_panel && !self.duplicate_scanned {
+                                self.scan_library_duplicates();
+                            }
+                        }
+                        ui.add_space(6.0);
+
                         // "Open Folder" — reveal library root in Explorer
                         let open_folder_btn = ui.add_sized(
                             [86.0, 30.0],
