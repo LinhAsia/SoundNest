@@ -210,183 +210,210 @@ impl SoundFxApp {
                                                 .corner_radius(14.0)
                                                 .inner_margin(Margin::symmetric(14, 10))
                                                 .show(ui, |ui| {
+                                                    let avail_w = ui.available_width();
+                                                    let actions_w = 172.0f32;
+                                                    let badge_w = 76.0f32;
+                                                    let col_w = ((avail_w - actions_w - badge_w - 24.0) * 0.5).max(180.0);
+
                                                     ui.horizontal(|ui| {
                                                         // Sound A Column
-                                                        ui.vertical(|ui| {
-                                                            ui.set_width(240.0);
-                                                            ui.horizontal(|ui| {
-                                                                let is_playing_a = self.audio.as_ref().is_some_and(|aud| aud.is_playing(a.id));
-                                                                let play_btn = ui.add_sized(
-                                                                    [26.0, 26.0],
-                                                                    Button::new(Self::icon(
-                                                                        if is_playing_a { 0xe034 } else { 0xe037 },
-                                                                        14.0,
-                                                                        Color32::WHITE,
-                                                                    ))
-                                                                    .fill(if is_playing_a {
-                                                                        Color32::from_rgb(227, 82, 149)
-                                                                    } else {
-                                                                        Color32::from_rgb(70, 60, 75)
-                                                                    })
-                                                                    .corner_radius(7.0),
-                                                                );
-                                                                if play_btn.clicked() {
-                                                                    if is_playing_a {
-                                                                        stop_audio_action = true;
-                                                                    } else {
-                                                                        play_sound_action = Some(a.id);
-                                                                    }
-                                                                }
-
-                                                                ui.vertical(|ui| {
-                                                                    ui.label(
-                                                                        RichText::new(&a.name)
-                                                                            .size(12.0)
-                                                                            .color(Self::strong_text_color())
-                                                                            .strong(),
-                                                                    );
-                                                                    ui.label(
-                                                                        RichText::new(format!(
-                                                                            "{} • {}",
-                                                                            format_time(a.duration_secs),
-                                                                            a.asset_file.split('.').last().unwrap_or("")
+                                                        ui.allocate_ui_with_layout(
+                                                            vec2(col_w, 48.0),
+                                                            egui::Layout::top_down(Align::Min),
+                                                            |ui| {
+                                                                ui.horizontal(|ui| {
+                                                                    let is_playing_a = self.audio.as_ref().is_some_and(|aud| aud.is_playing(a.id));
+                                                                    let play_btn = ui.add_sized(
+                                                                        [24.0, 24.0],
+                                                                        Button::new(Self::icon(
+                                                                            if is_playing_a { 0xe034 } else { 0xe037 },
+                                                                            13.0,
+                                                                            Color32::WHITE,
                                                                         ))
-                                                                        .size(10.5)
-                                                                        .color(Self::muted_text_color()),
+                                                                        .fill(if is_playing_a {
+                                                                            Color32::from_rgb(227, 82, 149)
+                                                                        } else {
+                                                                            Color32::from_rgb(70, 60, 75)
+                                                                        })
+                                                                        .corner_radius(6.0),
                                                                     );
-                                                                });
-                                                            });
+                                                                    if play_btn.clicked() {
+                                                                        if is_playing_a {
+                                                                            stop_audio_action = true;
+                                                                        } else {
+                                                                            play_sound_action = Some(a.id);
+                                                                        }
+                                                                    }
 
-                                                            // Mini waveform A
-                                                            let (wave_rect, _) = ui.allocate_exact_size(vec2(230.0, 22.0), Sense::hover());
-                                                            Self::paint_mini_waveform_bars(ui.painter(), wave_rect, &a.waveform, Color32::from_rgb(100, 180, 240));
-                                                        });
+                                                                    ui.vertical(|ui| {
+                                                                        ui.set_width(col_w - 32.0);
+                                                                        ui.add(
+                                                                            egui::Label::new(
+                                                                                RichText::new(&a.name)
+                                                                                    .size(11.5)
+                                                                                    .color(Self::strong_text_color())
+                                                                                    .strong(),
+                                                                            )
+                                                                            .truncate(),
+                                                                        );
+                                                                        ui.label(
+                                                                            RichText::new(format!(
+                                                                                "{} • {}",
+                                                                                format_time(a.duration_secs),
+                                                                                a.asset_file.split('.').last().unwrap_or("")
+                                                                            ))
+                                                                            .size(10.0)
+                                                                            .color(Self::muted_text_color()),
+                                                                        );
+                                                                    });
+                                                                });
+
+                                                                let (wave_rect, _) = ui.allocate_exact_size(vec2(col_w, 18.0), Sense::hover());
+                                                                Self::paint_mini_waveform_bars(ui.painter(), wave_rect, &a.waveform, Color32::from_rgb(100, 180, 240));
+                                                            },
+                                                        );
 
                                                         ui.add_space(8.0);
 
                                                         // Match badge pill
-                                                        ui.vertical_centered(|ui| {
-                                                            ui.set_width(110.0);
-                                                            ui.add_space(8.0);
-                                                            let match_pct = (pair.similarity * 100.0).clamp(0.0, 100.0);
-                                                            let pill_bg = if match_pct >= 95.0 {
-                                                                Color32::from_rgb(190, 45, 65)
-                                                            } else {
-                                                                Color32::from_rgb(200, 110, 30)
-                                                            };
-                                                            ui.label(
-                                                                RichText::new(format!("{match_pct:.1}%"))
-                                                                    .size(14.0)
-                                                                    .color(Color32::WHITE)
-                                                                    .strong(),
-                                                            );
-                                                            ui.label(
-                                                                RichText::new(self.t("duplicates.match_label"))
-                                                                    .size(10.0)
-                                                                    .color(pill_bg),
-                                                            );
-                                                        });
+                                                        ui.allocate_ui_with_layout(
+                                                            vec2(badge_w, 48.0),
+                                                            egui::Layout::top_down(Align::Center),
+                                                            |ui| {
+                                                                ui.add_space(6.0);
+                                                                let match_pct = (pair.similarity * 100.0).clamp(0.0, 100.0);
+                                                                let pill_bg = if match_pct >= 95.0 {
+                                                                    Color32::from_rgb(190, 45, 65)
+                                                                } else {
+                                                                    Color32::from_rgb(200, 110, 30)
+                                                                };
+                                                                ui.label(
+                                                                    RichText::new(format!("{match_pct:.1}%"))
+                                                                        .size(13.0)
+                                                                        .color(Color32::WHITE)
+                                                                        .strong(),
+                                                                );
+                                                                ui.label(
+                                                                    RichText::new(self.t("duplicates.match_label"))
+                                                                        .size(9.0)
+                                                                        .color(pill_bg),
+                                                                );
+                                                            },
+                                                        );
 
                                                         ui.add_space(8.0);
 
                                                         // Sound B Column
-                                                        ui.vertical(|ui| {
-                                                            ui.set_width(240.0);
-                                                            ui.horizontal(|ui| {
-                                                                let is_playing_b = self.audio.as_ref().is_some_and(|aud| aud.is_playing(b.id));
-                                                                let play_btn = ui.add_sized(
-                                                                    [26.0, 26.0],
-                                                                    Button::new(Self::icon(
-                                                                        if is_playing_b { 0xe034 } else { 0xe037 },
-                                                                        14.0,
-                                                                        Color32::WHITE,
-                                                                    ))
-                                                                    .fill(if is_playing_b {
-                                                                        Color32::from_rgb(227, 82, 149)
-                                                                    } else {
-                                                                        Color32::from_rgb(70, 60, 75)
-                                                                    })
-                                                                    .corner_radius(7.0),
-                                                                );
-                                                                if play_btn.clicked() {
-                                                                    if is_playing_b {
-                                                                        stop_audio_action = true;
-                                                                    } else {
-                                                                        play_sound_action = Some(b.id);
+                                                        ui.allocate_ui_with_layout(
+                                                            vec2(col_w, 48.0),
+                                                            egui::Layout::top_down(Align::Min),
+                                                            |ui| {
+                                                                ui.horizontal(|ui| {
+                                                                    let is_playing_b = self.audio.as_ref().is_some_and(|aud| aud.is_playing(b.id));
+                                                                    let play_btn = ui.add_sized(
+                                                                        [24.0, 24.0],
+                                                                        Button::new(Self::icon(
+                                                                            if is_playing_b { 0xe034 } else { 0xe037 },
+                                                                            13.0,
+                                                                            Color32::WHITE,
+                                                                        ))
+                                                                        .fill(if is_playing_b {
+                                                                            Color32::from_rgb(227, 82, 149)
+                                                                        } else {
+                                                                            Color32::from_rgb(70, 60, 75)
+                                                                        })
+                                                                        .corner_radius(6.0),
+                                                                    );
+                                                                    if play_btn.clicked() {
+                                                                        if is_playing_b {
+                                                                            stop_audio_action = true;
+                                                                        } else {
+                                                                            play_sound_action = Some(b.id);
+                                                                        }
                                                                     }
+
+                                                                    ui.vertical(|ui| {
+                                                                        ui.set_width(col_w - 32.0);
+                                                                        ui.add(
+                                                                            egui::Label::new(
+                                                                                RichText::new(&b.name)
+                                                                                    .size(11.5)
+                                                                                    .color(Self::strong_text_color())
+                                                                                    .strong(),
+                                                                            )
+                                                                            .truncate(),
+                                                                        );
+                                                                        ui.label(
+                                                                            RichText::new(format!(
+                                                                                "{} • {}",
+                                                                                format_time(b.duration_secs),
+                                                                                b.asset_file.split('.').last().unwrap_or("")
+                                                                            ))
+                                                                            .size(10.0)
+                                                                            .color(Self::muted_text_color()),
+                                                                        );
+                                                                    });
+                                                                });
+
+                                                                let (wave_rect, _) = ui.allocate_exact_size(vec2(col_w, 18.0), Sense::hover());
+                                                                Self::paint_mini_waveform_bars(ui.painter(), wave_rect, &b.waveform, Color32::from_rgb(240, 140, 180));
+                                                            },
+                                                        );
+
+                                                        ui.add_space(8.0);
+
+                                                        // Action buttons Column (fixed 172px, right aligned, perfect vertical column)
+                                                        ui.allocate_ui_with_layout(
+                                                            vec2(actions_w, 48.0),
+                                                            egui::Layout::right_to_left(Align::Center),
+                                                            |ui| {
+                                                                let ignore_btn = ui.add_sized(
+                                                                    [50.0, 26.0],
+                                                                    Button::new(RichText::new(self.t("duplicates.ignore")).size(11.0))
+                                                                        .corner_radius(6.0),
+                                                                );
+                                                                if ignore_btn.clicked() {
+                                                                    remove_pair_index = Some(pair_idx);
                                                                 }
 
-                                                                ui.vertical(|ui| {
-                                                                    ui.label(
-                                                                        RichText::new(&b.name)
-                                                                            .size(12.0)
-                                                                            .color(Self::strong_text_color())
-                                                                            .strong(),
-                                                                    );
-                                                                    ui.label(
-                                                                        RichText::new(format!(
-                                                                            "{} • {}",
-                                                                            format_time(b.duration_secs),
-                                                                            b.asset_file.split('.').last().unwrap_or("")
-                                                                        ))
-                                                                        .size(10.5)
-                                                                        .color(Self::muted_text_color()),
-                                                                    );
-                                                                });
-                                                            });
+                                                                ui.add_space(4.0);
 
-                                                            // Mini waveform B
-                                                            let (wave_rect, _) = ui.allocate_exact_size(vec2(230.0, 22.0), Sense::hover());
-                                                            Self::paint_mini_waveform_bars(ui.painter(), wave_rect, &b.waveform, Color32::from_rgb(240, 140, 180));
-                                                        });
-
-                                                        // Action buttons
-                                                        ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                                                            let ignore_btn = ui.add_sized(
-                                                                [56.0, 26.0],
-                                                                Button::new(RichText::new(self.t("duplicates.ignore")).size(11.0))
+                                                                let del_b_btn = ui.add_sized(
+                                                                    [52.0, 26.0],
+                                                                    Button::new(
+                                                                        RichText::new(self.t("duplicates.delete_b"))
+                                                                            .size(11.0)
+                                                                            .color(Color32::WHITE),
+                                                                    )
+                                                                    .fill(Color32::from_rgb(180, 50, 60))
                                                                     .corner_radius(6.0),
-                                                            );
-                                                            if ignore_btn.clicked() {
-                                                                remove_pair_index = Some(pair_idx);
-                                                            }
+                                                                );
+                                                                if del_b_btn.clicked() {
+                                                                    delete_sound_action = Some(b.id);
+                                                                    remove_pair_index = Some(pair_idx);
+                                                                }
 
-                                                            ui.add_space(4.0);
+                                                                ui.add_space(4.0);
 
-                                                            let del_b_btn = ui.add_sized(
-                                                                [64.0, 26.0],
-                                                                Button::new(
-                                                                    RichText::new(self.t("duplicates.delete_b"))
-                                                                        .size(11.0)
-                                                                        .color(Color32::WHITE),
-                                                                )
-                                                                .fill(Color32::from_rgb(180, 50, 60))
-                                                                .corner_radius(6.0),
-                                                            );
-                                                            if del_b_btn.clicked() {
-                                                                delete_sound_action = Some(b.id);
-                                                                remove_pair_index = Some(pair_idx);
-                                                            }
-
-                                                            ui.add_space(4.0);
-
-                                                            let del_a_btn = ui.add_sized(
-                                                                [64.0, 26.0],
-                                                                Button::new(
-                                                                    RichText::new(self.t("duplicates.delete_a"))
-                                                                        .size(11.0)
-                                                                        .color(Color32::WHITE),
-                                                                )
-                                                                .fill(Color32::from_rgb(180, 50, 60))
-                                                                .corner_radius(6.0),
-                                                            );
-                                                            if del_a_btn.clicked() {
-                                                                delete_sound_action = Some(a.id);
-                                                                remove_pair_index = Some(pair_idx);
-                                                            }
-                                                        });
+                                                                let del_a_btn = ui.add_sized(
+                                                                    [52.0, 26.0],
+                                                                    Button::new(
+                                                                        RichText::new(self.t("duplicates.delete_a"))
+                                                                            .size(11.0)
+                                                                            .color(Color32::WHITE),
+                                                                    )
+                                                                    .fill(Color32::from_rgb(180, 50, 60))
+                                                                    .corner_radius(6.0),
+                                                                );
+                                                                if del_a_btn.clicked() {
+                                                                    delete_sound_action = Some(a.id);
+                                                                    remove_pair_index = Some(pair_idx);
+                                                                }
+                                                            },
+                                                        );
                                                     });
                                                 });
+
                                             ui.add_space(6.0);
                                         }
                                     }

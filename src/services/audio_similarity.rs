@@ -29,9 +29,9 @@ pub fn resample_waveform(waveform: &[f32], target_len: usize) -> Vec<f32> {
     res
 }
 
-/// Compute waveform similarity using normalized cross-correlation with max lag (shift window).
-/// This allows detecting identical or near-identical audio clips even if MP3 encoding or
-/// trimming added slight leading/trailing silence (up to ~5% time shift).
+/// Compute waveform similarity using Pearson Correlation with mean subtraction and lag/shift.
+/// Mean subtraction ensures that baseline/silence DC offsets do not cause false positives.
+/// Returns a value in [0.0, 1.0].
 pub fn compute_waveform_similarity(w1: &[f32], w2: &[f32]) -> f32 {
     if w1.is_empty() || w2.is_empty() {
         return 0.0;
@@ -41,15 +41,25 @@ pub fn compute_waveform_similarity(w1: &[f32], w2: &[f32]) -> f32 {
     let a = resample_waveform(w1, TARGET_LEN);
     let b = resample_waveform(w2, TARGET_LEN);
 
-    // Max lag: 16 buckets out of 320 (~5% shift tolerance)
-    let max_shift = 16isize;
-    let mut best_sim = 0.0f32;
+    let mean_a = a.iter().sum::<f32>() / TARGET_LEN as f32;
+    let mean_b = b.iter().sum::<f32>() / TARGET_LEN as f32;
+
+    let var_a: f32 = a.iter().map(|&x| (x - mean_a) * (x - mean_a)).sum();
+    let var_b: f32 = b.iter().map(|&x| (x - mean_b) * (x - mean_b)).sum();
+
+    // If either waveform is flat / silent (variance near 0), they cannot be meaningful duplicates
+    if var_a < 1e-4 || var_b < 1e-4 {
+        return 0.0;
+    }
+
+    let std_a = var_a.sqrt();
+    let std_b = var_b.sqrt();
+
+    // Max lag: 12 buckets out of 320 (~3.7% shift tolerance for encoder padding)
+    let max_shift = 12isize;
+    let mut best_r = 0.0f32;
 
     for shift in -max_shift..=max_shift {
-        let mut dot = 0.0f32;
-        let mut norm_a = 0.0f32;
-        let mut norm_b = 0.0f32;
-
         let start_i = (0isize).max(-shift) as usize;
         let end_i = (TARGET_LEN as isize).min(TARGET_LEN as isize - shift) as usize;
 
@@ -57,60 +67,73 @@ pub fn compute_waveform_similarity(w1: &[f32], w2: &[f32]) -> f32 {
             continue;
         }
 
+        let mut cov = 0.0f32;
+        let mut count = 0usize;
+
         for i in start_i..end_i {
             let j = (i as isize + shift) as usize;
-            let val_a = a[i];
-            let val_b = b[j];
-            dot += val_a * val_b;
-            norm_a += val_a * val_a;
-            norm_b += val_b * val_b;
+            cov += (a[i] - mean_a) * (b[j] - mean_b);
+            count += 1;
         }
 
-        if norm_a > 1e-6 && norm_b > 1e-6 {
-            let sim = (dot / (norm_a.sqrt() * norm_b.sqrt())).clamp(0.0, 1.0);
-            if sim > best_sim {
-                best_sim = sim;
+        if count >= TARGET_LEN - (max_shift as usize * 2) {
+            let r = cov / (std_a * std_b);
+            if r > best_r {
+                best_r = r;
             }
         }
     }
 
-    best_sim
+    if best_r <= 0.0 {
+        return 0.0;
+    }
+
+    // Mean absolute error between normalized envelope shapes
+    let mut mae = 0.0f32;
+    for i in 0..TARGET_LEN {
+        mae += (a[i] - b[i]).abs();
+    }
+    mae /= TARGET_LEN as f32;
+    let shape_sim = (1.0 - mae / 0.35).clamp(0.0, 1.0);
+
+    // 70% Pearson correlation (phase/peaks align) + 30% envelope shape closeness
+    (best_r * 0.70 + shape_sim * 0.30).clamp(0.0, 1.0)
 }
 
-/// Compute combined sound similarity taking into account both waveform cross-correlation
+/// Compute combined sound similarity taking into account both waveform correlation
 /// and duration match. Returns a value in [0.0, 1.0].
 pub fn compute_sound_similarity(d1: f32, w1: &[f32], d2: f32, w2: &[f32]) -> f32 {
     let max_dur = d1.max(d2);
     let min_dur = d1.min(d2);
-    if max_dur <= 0.001 {
+    if max_dur <= 0.01 {
         return 0.0;
     }
 
     let dur_ratio = min_dur / max_dur;
     let dur_diff = (d1 - d2).abs();
 
-    // If duration difference is more than 30% AND more than 0.8s, sounds are distinct
-    if dur_ratio < 0.70 && dur_diff > 0.8 {
+    // Stricter duration constraint:
+    // Duplicate audio clips must have very close durations (within 12% and within 0.40s)
+    if dur_ratio < 0.88 || dur_diff > 0.40 {
         return 0.0;
     }
 
     let wave_sim = compute_waveform_similarity(w1, w2);
-    if wave_sim < 0.50 {
-        return wave_sim * 0.5;
+    if wave_sim < 0.70 {
+        return 0.0;
     }
 
-    // Weighted blend: 85% waveform cross-correlation + 15% duration ratio
+    // Weighted blend: 85% waveform match + 15% duration ratio
     (wave_sim * 0.85 + dur_ratio * 0.15).clamp(0.0, 1.0)
 }
 
 /// Fast scan of the entire sound library for duplicates using duration pre-sorting.
-/// Runs in O(N * k) time (milliseconds for 1,000+ sounds).
+/// Runs in O(N * k) time (a few milliseconds for 1,000+ sounds).
 pub fn find_library_duplicates(sounds: &[SoundEffect], threshold: f32) -> Vec<DuplicatePair> {
     if sounds.len() < 2 {
         return Vec::new();
     }
 
-    // Sort index by duration to enable early-exit in inner loop
     let mut indexed: Vec<(usize, &SoundEffect)> = sounds.iter().enumerate().collect();
     indexed.sort_by(|a, b| a.1.duration_secs.total_cmp(&b.1.duration_secs));
 
@@ -128,12 +151,15 @@ pub fn find_library_duplicates(sounds: &[SoundEffect], threshold: f32) -> Vec<Du
                 continue;
             }
 
-            let dur_ratio = sound_a.duration_secs / sound_b.duration_secs;
             let dur_diff = sound_b.duration_secs - sound_a.duration_secs;
-            if dur_ratio < 0.70 && dur_diff > 0.8 {
-                // Since indexed is sorted ascending by duration, all remaining elements
-                // will be even longer, so we can break early.
+            // Since sorted ascending by duration, once difference exceeds 0.40s, all remaining will be larger
+            if dur_diff > 0.40 {
                 break;
+            }
+
+            let dur_ratio = sound_a.duration_secs / sound_b.duration_secs;
+            if dur_ratio < 0.88 {
+                continue;
             }
 
             let sim = compute_sound_similarity(
@@ -157,6 +183,7 @@ pub fn find_library_duplicates(sounds: &[SoundEffect], threshold: f32) -> Vec<Du
     pairs.sort_by(|a, b| b.similarity.total_cmp(&a.similarity));
     pairs
 }
+
 
 /// Check a candidate audio clip (e.g. downloaded or imported) against the existing sound library.
 /// Returns the best match sound and similarity score if similarity >= threshold.
@@ -259,6 +286,7 @@ mod tests {
             "Completely different waveforms should have low similarity, got {sim}"
         );
     }
+
 
     #[test]
     fn test_resample_waveform() {
